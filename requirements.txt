@@ -1,0 +1,13 @@
+# UofT Transcript Analyzer - Requirements
+# Python 3.7+ required
+
+# Core dependencies (included with Python)
+# tkinter - GUI framework (built into Python)
+# csv - CSV file handling (built into Python)
+# json - JSON file handling (built into Python)
+# datetime - Date/time operations (built into Python)
+# collections - Data structures (built into Python)
+# os - Operating system interface (built into Python)
+
+# No external dependencies required!
+# This application uses only Python standard library modules.
