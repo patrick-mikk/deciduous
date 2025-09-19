@@ -1,0 +1,29 @@
+# UofT Transcript Analyzer v3.0 - Enhanced Edition
+# Python 3.7+ required
+
+# Core dependencies (included with Python)
+# tkinter - GUI framework (built into Python)
+# csv - CSV file handling (built into Python)
+# json - JSON file handling (built into Python)
+# datetime - Date/time operations (built into Python)
+# collections - Data structures (built into Python)
+# os - Operating system interface (built into Python)
+# sqlite3 - Database operations (built into Python)
+# threading - Multi-threading support (built into Python)
+# pathlib - Path handling (built into Python)
+
+# Optional dependencies for enhanced features:
+# Install with: pip install -r requirements.txt
+
+# For charts and data visualization:
+matplotlib>=3.5.0
+numpy>=1.20.0
+
+# For Excel export functionality:
+openpyxl>=3.0.9
+
+# For PDF export functionality:
+reportlab>=3.6.0
+
+# Note: All optional dependencies are gracefully handled
+# The application will work without them but with reduced functionality

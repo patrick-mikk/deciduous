@@ -1,8 +1,18 @@
-# UofT Academic Transcript Analyzer v2.0
-## Windows Desktop Application
+# UofT Academic Transcript Analyzer v3.0
+## Enhanced Edition - Windows Desktop Application
 
 ### 📋 Overview
 A comprehensive desktop application for University of Toronto students to analyze academic transcripts, calculate GPAs, and simulate future academic scenarios with full support for UofT's special notations system.
+
+**NEW in v3.0 Enhanced Edition:**
+- 🔍 Advanced search and filtering capabilities
+- 📊 Interactive charts and data visualization
+- 📋 Course prerequisite tracking and validation
+- 🎯 Degree progress monitoring
+- 💾 Auto-save and automatic backups
+- 📤 Export to Excel and PDF formats
+- ⚙️ Customizable settings and themes
+- 📚 Built-in help system and user guide
 
 ---
 
@@ -20,10 +30,16 @@ A comprehensive desktop application for University of Toronto students to analyz
    - **IMPORTANT**: Check "Add Python to PATH" during installation
 
 2. **Download Application Files**:
-   - Save `uoft_transcript_analyzer.py` to a folder (e.g., `C:\UofT_Analyzer\`)
-   - Save `run_analyzer.bat` to the same folder
+   - Save all files to a folder (e.g., `C:\UofT_Analyzer\`)
+   - Essential files: `uoft_transcript_analyzer.py`, `run_analyzer.bat`
+   - Optional: `install_deps.bat`, `requirements.txt`
 
-3. **Launch the Application**:
+3. **Install Enhanced Features (Optional)**:
+   - Double-click `install_deps.bat` to install optional dependencies
+   - This enables charts, Excel export, and PDF export features
+   - Application works without these but with reduced functionality
+
+4. **Launch the Application**:
    - Double-click `run_analyzer.bat` to start the application
    - OR open Command Prompt, navigate to the folder, and run: `python uoft_transcript_analyzer.py`
 
@@ -37,23 +53,54 @@ A comprehensive desktop application for University of Toronto students to analyz
 - **Sessional & Cumulative GPAs** with detailed breakdowns
 - **Academic Standing** determination (Dean's List, Good Standing, Probation)
 
+### 🔍 Enhanced Search & Filtering (NEW!)
+- **Real-time Search** across course codes and titles
+- **Advanced Filters** by term, year, department, and grade
+- **Dynamic Filter Updates** based on current data
+- **Quick Clear** and reset functionality
+
 ### 🎯 Advanced Simulation
 - **Future Course Planning** with grade projections
 - **Special Notation Simulation** (simulate taking courses CR/NCR)
 - **Goal Calculator** - determine grades needed for target GPA
 - **"What-If" Scenarios** for academic planning
+- **Course Duplication** for easy data entry
+
+### 📊 Data Visualization (NEW!)
+- **Interactive Charts** and graphs with matplotlib
+- **GPA Trend Analysis** over time
+- **Grade Distribution** pie charts and bar graphs
+- **Subject Performance** comparison charts
+- **Credit Analysis** by year and term
+- **Export Charts** as high-resolution images
+
+### 📋 Prerequisites & Planning (NEW!)
+- **Course Prerequisites** lookup and validation
+- **Database Integration** for course information
+- **Prerequisite Violation** detection
+- **Course Information** management system
+
+### 🎯 Degree Progress Tracking (NEW!)
+- **Program Requirements** tracking
+- **Completion Status** monitoring
+- **Credit Requirements** analysis
+- **Progress Visualization** with percentage completion
+- **Multiple Program Support** (CS, Economics, etc.)
 
 ### 📈 Analytics & Insights
 - **Subject Performance Analysis** by department (ECO, CSC, MUN, etc.)
 - **Grade Distribution** statistics
 - **Sessional Trends** tracking
 - **Personalized Recommendations** for improvement
+- **Comprehensive Reports** generation
 
-### 💾 Data Management
-- **CSV Import/Export** for transcript data
+### 💾 Enhanced Data Management
+- **Multiple Export Formats**: CSV, Excel (.xlsx), PDF
+- **Auto-save Functionality** with configurable intervals
+- **Automatic Backups** with retention policies
 - **Session Save/Load** to preserve work
 - **Data Validation** ensures accuracy
-- **Sample Data** included for testing
+- **Settings Import/Export** for easy setup transfer
 
 ---
 
@@ -86,10 +133,14 @@ A-     = 3.7    |    B  = 3.0    |    C  = 2.0    |    D  = 1.0
 
 ### Tab Navigation
 1. **Overview**: Dashboard with key statistics and sessional GPAs
-2. **Transcript**: View, edit, add, and manage all courses
+2. **Transcript**: View, edit, add, and manage all courses with advanced search
 3. **GPA Simulator**: Plan future courses and see projected results
 4. **Analytics**: Detailed performance analysis and recommendations
-5. **Data Management**: Import/export data and manage sessions
+5. **Prerequisites**: Course prerequisite lookup and validation
+6. **Degree Progress**: Track completion toward degree requirements
+7. **Reports & Charts**: Generate visual reports and export charts
+8. **Data Management**: Import/export data and manage sessions
+9. **Settings**: Customize appearance, auto-save, and application behavior
 
 ### Key Operations
 
@@ -104,12 +155,54 @@ A-     = 3.7    |    B  = 3.0    |    C  = 2.0    |    D  = 1.0
    - Mark (if available)
    - Grade OR Special Notation (not both)
 
+#### Advanced Search & Filtering
+1. Use the **Search** box to find courses by code or title
+2. Apply **Filters** by Term, Year, Department, or Grade
+3. Filters update dynamically based on your data
+4. Click **"Clear"** to reset search and filters
+
+#### Prerequisites & Planning
+1. Go to **Prerequisites** tab
+2. Enter a course code and click **"Look Up"**
+3. View prerequisites, exclusions, and course information
+4. Use **"Check All Prerequisites"** to validate your transcript
+5. Add new course information to the database
+
+#### Degree Progress Tracking
+1. Go to **Degree Progress** tab
+2. Select your program from the dropdown
+3. Click **"Load Requirements"** to see program requirements
+4. View your completion status and remaining requirements
+
+#### Data Visualization
+1. Go to **Reports & Charts** tab
+2. Generate different types of charts:
+   - **Transcript Report**: Overall academic summary with charts
+   - **GPA Trend**: Track GPA changes over time
+   - **Course Distribution**: Analyze course patterns
+3. Export charts as high-resolution images
+
 #### Simulation Planning
 1. Go to **GPA Simulator** tab
 2. Click **"Add Course"** to add future courses
 3. Set expected grades or special notations
 4. View projected GPA and changes in real-time
 5. Use **Goal Calculator** to determine required grades
+
+#### Enhanced Export Options
+1. **Excel Export**: Complete transcript with summary sheet
+2. **PDF Export**: Professional transcript report
+3. **CSV Export**: Traditional format for compatibility
+4. All exports include calculated GPA and academic standing
+
+#### Settings & Customization
+1. Go to **Settings** tab
+2. Customize:
+   - Theme (Light/Dark)
+   - Font size
+   - Auto-save interval
+   - Backup retention
+3. Export/import settings for easy setup transfer
 
 #### Importing Transcript Data
 1. Go to **Data Management** tab
@@ -211,7 +304,18 @@ Fall,2024,MUN101H1,Global Innovation,0.5,,IPR
 
 ## 🆕 Version History
 
-### v2.0 (Current)
+### v3.0 - Enhanced Edition (Current)
+- **Advanced Search & Filtering**: Real-time search with multiple filter options
+- **Data Visualization**: Interactive charts with matplotlib integration
+- **Prerequisites System**: Course prerequisite lookup and validation
+- **Degree Progress**: Track completion toward degree requirements
+- **Enhanced Export**: Excel (.xlsx) and PDF export capabilities
+- **Auto-save & Backups**: Automatic data protection with configurable intervals
+- **Settings Management**: Customizable themes, fonts, and application behavior
+- **Help System**: Built-in user guide and keyboard shortcuts
+- **Improved UI**: Enhanced interface with better organization and usability
+
+### v2.0 (Previous)
 - Full special notations support
 - Advanced simulation capabilities
 - Subject performance analysis
@@ -219,12 +323,11 @@ Fall,2024,MUN101H1,Global Innovation,0.5,,IPR
 - Session save/load
 - Improved data validation
 
-### Features Added
-- CR/NCR simulation
-- LWD/IPR handling
-- Multi-notation support
-- Enhanced analytics
-- Professional Windows interface
+### v1.0 (Original)
+- Basic GPA calculations
+- Simple course management
+- CSV import/export
+- Sessional GPA tracking
 
 ---
 
