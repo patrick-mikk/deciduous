@@ -1,0 +1,210 @@
+    # === Requirements Tab Supporting Methods ===
+
+    def populate_programs_combobox(self):
+        """Populate the programs combobox with available programs"""
+        try:
+            programs = self.database.get_programs()
+            program_options = [f"{prog[1]} - {prog[2]} ({prog[3]})" for prog in programs]
+            self.program_combobox['values'] = program_options
+
+            # Store program mapping for easy access
+            self.program_mapping = {f"{prog[1]} - {prog[2]} ({prog[3]})": prog[1] for prog in programs}
+
+        except Exception as e:
+            print(f"Error populating programs: {e}")
+
+    def enroll_in_program(self):
+        """Enroll student in selected program"""
+        selection = self.program_var.get()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a program")
+            return
+
+        try:
+            program_code = self.program_mapping[selection]
+            success = self.database.enroll_in_program(program_code)
+
+            if success:
+                messagebox.showinfo("Success", f"Enrolled in {selection}")
+                self.update_requirements_display()
+            else:
+                messagebox.showerror("Error", "Failed to enroll in program")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Enrollment failed: {e}")
+
+    def update_requirements_display(self):
+        """Update the requirements and progress displays"""
+        try:
+            # Update enrolled programs
+            enrolled = self.database.get_enrolled_programs()
+            if enrolled:
+                program_names = [f"{prog[2]} ({prog[3]})" for prog in enrolled]
+                self.enrolled_programs_var.set(", ".join(program_names))
+            else:
+                self.enrolled_programs_var.set("No programs enrolled")
+
+            # Update degree progress
+            progress = self.requirements_calculator.calculate_complete_progress()
+            if progress:
+                self._display_degree_progress(progress)
+                self._display_breadth_progress(progress['breadth_progress'])
+            else:
+                self._clear_progress_displays()
+
+        except Exception as e:
+            print(f"Error updating requirements display: {e}")
+
+    def _display_degree_progress(self, progress):
+        """Display degree progress in the progress text widget"""
+        self.progress_text.config(state='normal')
+        self.progress_text.delete(1.0, tk.END)
+
+        # Header
+        self.progress_text.insert(tk.END, "DEGREE PROGRESS SUMMARY\n", 'header')
+        self.progress_text.insert(tk.END, "=" * 40 + "\n\n")
+
+        # Overall status
+        graduation_status = progress['graduation_eligible']
+        status_text = "✓ ELIGIBLE FOR GRADUATION" if graduation_status['eligible'] else "✗ NOT YET ELIGIBLE"
+        self.progress_text.insert(tk.END, f"Status: {status_text}\n\n")
+
+        # Requirements summary
+        summary = progress['requirements_summary']
+
+        # Credits
+        total_credits = summary['total_credits']
+        self.progress_text.insert(tk.END, f"Total Credits: {total_credits['completed']:.1f} / {total_credits['required']:.1f}")
+        if total_credits['remaining'] > 0:
+            self.progress_text.insert(tk.END, f" ({total_credits['remaining']:.1f} remaining)")
+        self.progress_text.insert(tk.END, "\n")
+
+        # 200+ level credits
+        credits_200 = summary['credits_200_plus']
+        self.progress_text.insert(tk.END, f"200+ Level Credits: {credits_200['completed']:.1f} / {credits_200['required']:.1f}")
+        if credits_200['remaining'] > 0:
+            self.progress_text.insert(tk.END, f" ({credits_200['remaining']:.1f} remaining)")
+        self.progress_text.insert(tk.END, "\n")
+
+        # 300+ level credits
+        credits_300 = summary['credits_300_plus']
+        self.progress_text.insert(tk.END, f"300+ Level Credits: {credits_300['completed']:.1f} / {credits_300['required']:.1f}")
+        if credits_300['remaining'] > 0:
+            self.progress_text.insert(tk.END, f" ({credits_300['remaining']:.1f} remaining)")
+        self.progress_text.insert(tk.END, "\n")
+
+        # GPA
+        gpa_info = summary['gpa']
+        self.progress_text.insert(tk.END, f"GPA: {gpa_info['current']:.2f} (required: {gpa_info['required']:.2f})")
+        gpa_status = "✓" if gpa_info['meets_requirement'] else "✗"
+        self.progress_text.insert(tk.END, f" {gpa_status}\n")
+
+        # Academic standing
+        standing = self.requirements_calculator.get_academic_standing(gpa_info['current'])
+        self.progress_text.insert(tk.END, f"Academic Standing: {standing}\n\n")
+
+        # Breadth summary
+        breadth_info = summary['breadth']
+        self.progress_text.insert(tk.END, f"Breadth Requirements: {breadth_info['completed']:.1f} / {breadth_info['required']:.1f} credits\n")
+        self.progress_text.insert(tk.END, f"Categories Completed: {breadth_info['categories_completed']} / 5\n\n")
+
+        # Next steps
+        self.progress_text.insert(tk.END, "NEXT STEPS:\n")
+        self.progress_text.insert(tk.END, "-" * 20 + "\n")
+        for i, step in enumerate(progress['next_steps'][:8], 1):  # Limit to 8 suggestions
+            self.progress_text.insert(tk.END, f"{i}. {step}\n")
+
+        self.progress_text.config(state='disabled')
+
+    def _display_breadth_progress(self, breadth_progress):
+        """Display breadth requirements progress"""
+        self.breadth_text.config(state='normal')
+        self.breadth_text.delete(1.0, tk.END)
+
+        self.breadth_text.insert(tk.END, "BREADTH REQUIREMENTS\n")
+        self.breadth_text.insert(tk.END, "=" * 30 + "\n\n")
+
+        categories = self.database.get_breadth_categories()
+        for category in categories:
+            cat_num = category[1]
+            cat_name = category[2]
+            cat_progress = breadth_progress.get(cat_num, {'credits': 0.0, 'courses': []})
+
+            credits = cat_progress['credits']
+            status = "✓" if credits >= 1.0 else "✗"
+
+            self.breadth_text.insert(tk.END, f"{status} Category {cat_num}: {cat_name}\n")
+            self.breadth_text.insert(tk.END, f"   Credits: {credits:.1f} / 1.0\n")
+
+            if cat_progress['courses']:
+                self.breadth_text.insert(tk.END, f"   Courses: {', '.join(cat_progress['courses'])}\n")
+            else:
+                self.breadth_text.insert(tk.END, "   No courses completed\n")
+
+            self.breadth_text.insert(tk.END, "\n")
+
+        self.breadth_text.config(state='disabled')
+
+    def _clear_progress_displays(self):
+        """Clear progress displays when no data available"""
+        self.progress_text.config(state='normal')
+        self.progress_text.delete(1.0, tk.END)
+        self.progress_text.insert(tk.END, "No transcript data available.\nAdd courses to your transcript to see degree progress.")
+        self.progress_text.config(state='disabled')
+
+        self.breadth_text.config(state='normal')
+        self.breadth_text.delete(1.0, tk.END)
+        self.breadth_text.insert(tk.END, "No course data available for breadth analysis.")
+        self.breadth_text.config(state='disabled')
+
+    def show_graduation_timeline(self):
+        """Show estimated graduation timeline"""
+        try:
+            timeline = self.requirements_calculator.calculate_graduation_timeline()
+            if timeline:
+                message = f"""Graduation Timeline Estimate:
+
+Credits Remaining: {timeline['credits_remaining']:.1f}
+Semesters Remaining: {timeline['semesters_remaining']}
+Estimated Graduation: {timeline['estimated_graduation']}
+
+Based on taking {timeline['courses_per_semester']:.1f} credits per semester."""
+
+                messagebox.showinfo("Graduation Timeline", message)
+            else:
+                messagebox.showwarning("Warning", "Unable to calculate timeline - no degree requirements data")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Timeline calculation failed: {e}")
+
+    def suggest_breadth_courses(self):
+        """Show suggested courses for breadth requirements"""
+        try:
+            suggestions = self.requirements_calculator.suggest_breadth_courses()
+            if suggestions:
+                message = "BREADTH COURSE SUGGESTIONS:\n\n"
+                for cat_num, info in suggestions.items():
+                    message += f"Category {cat_num}: {info['name']}\n"
+                    message += f"Credits needed: {info['credits_needed']:.1f}\n"
+                    message += f"Sample courses: {', '.join(info['sample_courses'])}\n\n"
+
+                # Show in a new window for better readability
+                window = tk.Toplevel(self.root)
+                window.title("Breadth Course Suggestions")
+                window.geometry("600x400")
+
+                text_widget = tk.Text(window, wrap=tk.WORD, padx=10, pady=10)
+                scrollbar = ttk.Scrollbar(window, orient='vertical', command=text_widget.yview)
+                text_widget.configure(yscrollcommand=scrollbar.set)
+
+                text_widget.pack(side=tk.LEFT, fill='both', expand=True)
+                scrollbar.pack(side=tk.RIGHT, fill='y')
+
+                text_widget.insert(1.0, message)
+                text_widget.config(state='disabled')
+
+            else:
+                messagebox.showinfo("Breadth Requirements", "All breadth requirements completed!")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate suggestions: {e}")

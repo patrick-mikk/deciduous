@@ -1,0 +1,32 @@
+Term,Year,College,Course_Code,Course_Title,Weight,Mark,Grade,Course_Average
+Fall,2023,St. Michael's College,AMS199H1,Razing the Roof and Tearing Down Monuments: Controversies in Public Memory,0.5,80,A-,B
+Fall,2023,St. Michael's College,MUN101H1,Global Innovation I,0.5,81,A-,A-
+Fall,2023,St. Michael's College,MUN105Y1,Global Problem Solving,1,,IPR,
+Fall,2023,St. Michael's College,MUN195H1,The Economics of Birth Death and Everything in Between,0.5,86,A,A-
+Fall,2023,St. Michael's College,MUN198H1,Digital Technologies and Human Rights,0.5,82,A-,B+
+Winter,2024,St. Michael's College,MUN102H1,"Global Innovation II: Innovation, Politics & Energy",0.5,55,D,B+
+Winter,2024,St. Michael's College,MUN105Y1,Global Problem Solving,1,85,A,A
+Winter,2024,St. Michael's College,MUN196H1,Somebody's Watching Me: The Global Politics of Surveillance,0.5,52,D-,B
+Winter,2024,St. Michael's College,RLG107H1,It's the End of the World,0.5,77,B+,B
+Winter,2024,St. Michael's College,SOC100H1,Intro to Soc-Soc Perspectives,0.5,,LWD,B
+Summer,2024,Woodsworth College,ECO101H1,Principles of Microeconomics,0.5,20,F,C
+Summer,2024,Woodsworth College,HIS103Y1,Strategy and Statecraft,1,74,B,B
+Fall,2024,Woodsworth College,AMS310H1,Appr American Studies US Democracy at a Crossroads: The 2024 Election in Historical Perspective,0.5,76,B,B
+Fall,2024,Woodsworth College,ECO101H1,Principles of Microeconomics,0.5,53,D,C+
+Fall,2024,Woodsworth College,POL218H1,State Society and Power,0.5,,CR,B
+Fall,2024,Woodsworth College,STA220H1,Prac of Statistics I,0.5,50,D-,C+
+Winter,2025,Woodsworth College,CSC108H1,Intro to Comp Prog,0.5,19,F,C+
+Winter,2025,Woodsworth College,GGR274H1,Comp & Data Sci - Soc Sciences,0.5,70,B-,B
+Winter,2025,Woodsworth College,MUN200H1,Understanding Global Controversies,0.5,75,B,B
+Winter,2025,Woodsworth College,POL214H1,Canadian Government,0.5,66,C,B
+Summer,2025,Woodsworth College,ECO102H1,Principles of Macroeconomics,0.5,51,D-,C+
+Fall,2025,Woodsworth College,GGR375H1,Introduction to Programming in GIS,0.5,,IPR,
+Fall,2025,Woodsworth College,POL208H1,Introduction to I.R.,0.5,,IPR,
+Fall,2025,Woodsworth College,PPG301H1,Intro Public Policy,0.5,,IPR,
+Fall,2025,Woodsworth College,PPG310H1,Special Topics in Public Policy Economic Lives of the Poor,0.5,,IPR,
+Fall,2025,Woodsworth College,URB335H1,"City Challenges, City Opportunities in a 21st Century Toronto",0.5,,IPR,
+Winter,2026,Woodsworth College,POL219H1,Unpacking Political Systems,0.5,,IPR,
+Winter,2026,Woodsworth College,PPG200H1,Microeco for Pol Analysis,0.5,,IPR,
+Winter,2026,Woodsworth College,PPG310H1,"Special Topics in Public Policy Surveillance, Technology, and Society",0.5,,IPR,
+Winter,2026,Woodsworth College,PPG410H1,Advanced Topics in Public Policy Causes and Consequences of Civil Conflicts and Violence,0.5,,IPR,
+Winter,2026,Woodsworth College,STA221H1,Prac of Statistics II,0.5,,IPR,
