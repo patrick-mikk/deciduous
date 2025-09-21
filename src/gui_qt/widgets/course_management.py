@@ -574,10 +574,38 @@ class CourseManagementWidget(QWidget):
 
     def on_add_to_transcript(self, course_data):
         """Handle adding course to transcript"""
-        # This would open a dialog to add the course
-        QMessageBox.information(self, "Add to Transcript",
-                              f"Add course {course_data.get('course_code', 'Unknown')} to transcript?\n"
-                              "This functionality will be implemented in Phase 2D.")
+        try:
+            from gui_qt.dialogs.course_dialog import QuickAddCourseDialog
+
+            # Pre-populate dialog with course data from academic calendar
+            dialog_data = {
+                'course_code': course_data.get('course_code', ''),
+                'title': course_data.get('title', ''),
+                'credits': course_data.get('credits', 0.5),  # Default to 0.5 credits
+            }
+
+            dialog = QuickAddCourseDialog(self, dialog_data)
+            dialog.course_saved.connect(self.on_course_saved)
+            dialog.exec()
+
+        except ImportError as e:
+            QMessageBox.warning(self, "Error", f"Course dialog not available: {e}")
+
+    def on_course_saved(self, course_data):
+        """Handle course saved from dialog"""
+        if self.data_manager:
+            success = self.data_manager.add_course(course_data)
+            if success:
+                self.courses_modified.emit()  # Signal that courses were modified
+                QMessageBox.information(self, "Success",
+                                      f"Course {course_data['course_code']} added to transcript!")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to add course to transcript.")
+        else:
+            # Emit signal for parent to handle
+            self.courses_modified.emit()
+            QMessageBox.information(self, "Course Added",
+                                  f"Course {course_data['course_code']} will be added to transcript.")
 
     def on_add_to_planning(self, course_data):
         """Handle adding course to planning"""
@@ -589,3 +617,25 @@ class CourseManagementWidget(QWidget):
     def refresh_data(self):
         """Refresh all panel data"""
         self.transcript_panel.refresh_data()
+
+    def focus_search(self):
+        """Focus the search input for keyboard shortcut"""
+        if hasattr(self.search_panel, 'search_input'):
+            self.search_panel.search_input.setFocus()
+            self.search_panel.search_input.selectAll()
+
+    def search_course(self, course_code):
+        """Search for a specific course"""
+        if hasattr(self.search_panel, 'search_input'):
+            self.search_panel.search_input.setText(course_code)
+            self.search_panel.perform_search()
+
+    def add_new_course(self):
+        """Add a new course through dialog"""
+        try:
+            from gui_qt.dialogs.course_dialog import QuickAddCourseDialog
+            dialog = QuickAddCourseDialog(self)
+            dialog.course_saved.connect(self.on_course_saved)
+            dialog.exec()
+        except ImportError as e:
+            QMessageBox.warning(self, "Error", f"Course dialog not available: {e}")

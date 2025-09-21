@@ -469,11 +469,15 @@ class MainWindow(QMainWindow):
 
     def import_transcript(self):
         """Import transcript data"""
-        self.status_message("Import transcript functionality coming soon...")
+        QMessageBox.information(self, "Import Transcript",
+                               "Import functionality will be available in a future update.\n"
+                               "For now, you can add courses individually using Ctrl+N or the Add Course button.")
 
     def export_transcript(self):
         """Export transcript data"""
-        self.status_message("Export transcript functionality coming soon...")
+        QMessageBox.information(self, "Export Transcript",
+                               "Export functionality will be available in a future update.\n"
+                               "You can currently view and manage your courses in the Course Management tab.")
 
     def show_settings(self):
         """Show application settings"""
@@ -529,11 +533,40 @@ class MainWindow(QMainWindow):
 
     def add_new_course(self):
         """Handle add new course request"""
-        # Switch to course management tab and trigger add course
-        self.tab_widget.setCurrentIndex(1)  # Course Management tab
-        if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'add_new_course'):
-            self.course_tab.add_new_course()
-        self.status_message("Add new course dialog")
+        try:
+            from gui_qt.dialogs.course_dialog import QuickAddCourseDialog
+            dialog = QuickAddCourseDialog(self)
+            dialog.course_saved.connect(self.on_course_added)
+            dialog.exec()
+        except ImportError as e:
+            self.status_message(f"Course dialog not available: {e}")
+            QMessageBox.information(self, "Add Course", "Course addition functionality is being loaded...")
+
+    def on_course_added(self, course_data):
+        """Handle new course addition"""
+        if self.data_manager:
+            # Data manager will handle the addition and emit signals
+            success = self.data_manager.add_course(course_data)
+            if success:
+                self.status_message(f"Course {course_data['course_code']} added successfully")
+                # Switch to course management tab to show the new course
+                self.tab_widget.setCurrentIndex(1)
+            else:
+                self.status_message("Failed to add course")
+        else:
+            # Fallback to direct database addition
+            try:
+                success = self.database.add_course_to_transcript(**course_data)
+                if success:
+                    self.status_message(f"Course {course_data['course_code']} added successfully")
+                    self.refresh_all_data()
+                    self.tab_widget.setCurrentIndex(1)
+                else:
+                    self.status_message("Failed to add course to database")
+                    QMessageBox.warning(self, "Error", "Failed to add course. Please check your data and try again.")
+            except Exception as e:
+                self.status_message(f"Error adding course: {e}")
+                QMessageBox.critical(self, "Error", f"An error occurred while adding the course: {str(e)}")
 
     def focus_search(self):
         """Focus the search input in current tab or course management"""
@@ -555,7 +588,9 @@ class MainWindow(QMainWindow):
 
     def show_global_search(self):
         """Show global search dialog"""
-        self.status_message("Global search dialog coming soon...")
+        QMessageBox.information(self, "Global Search",
+                               "Global search functionality will be available in a future update.\n"
+                               "You can search for courses in the Course Management tab using Ctrl+F.")
 
     def keyPressEvent(self, event):
         """Handle application-wide keyboard shortcuts"""

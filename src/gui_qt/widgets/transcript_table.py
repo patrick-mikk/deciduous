@@ -452,14 +452,54 @@ class TranscriptTableWidget(QWidget):
         """Handle double-click on table cell"""
         self.edit_selected_course()
 
-    # Placeholder methods for course operations
+    # Course operations
     def add_course(self):
         """Add a new course to transcript"""
-        QMessageBox.information(self, "Add Course", "Add course dialog will be implemented in Phase 2C")
+        try:
+            from gui_qt.dialogs.course_dialog import QuickAddCourseDialog
+            dialog = QuickAddCourseDialog(self)
+            dialog.course_saved.connect(self.on_course_saved)
+            dialog.exec()
+        except ImportError as e:
+            QMessageBox.warning(self, "Error", f"Course dialog not available: {e}")
+
+    def on_course_saved(self, course_data):
+        """Handle course saved from dialog"""
+        # Emit signal to notify parent that courses were modified
+        self.courses_modified.emit()
+        self.load_transcript_data()  # Refresh the table
 
     def edit_selected_course(self):
         """Edit the selected course"""
-        QMessageBox.information(self, "Edit Course", "Edit course dialog will be implemented in Phase 2C")
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(self, "No Selection", "Please select a course to edit.")
+            return
+
+        row = selected_rows[0].row()
+        if row >= len(self.filtered_data):
+            return
+
+        course_data = self.filtered_data[row]
+        course_dict = {
+            'id': course_data[0] if len(course_data) > 0 else None,
+            'course_code': course_data[1] if len(course_data) > 1 else '',
+            'title': course_data[2] if len(course_data) > 2 else '',
+            'credits': course_data[3] if len(course_data) > 3 else 0,
+            'grade': course_data[4] if len(course_data) > 4 else '',
+            'mark': course_data[5] if len(course_data) > 5 else None,
+            'session': course_data[6] if len(course_data) > 6 else '',
+            'year': course_data[7] if len(course_data) > 7 else None,
+            'status': course_data[8] if len(course_data) > 8 else ''
+        }
+
+        try:
+            from gui_qt.dialogs.course_dialog import CourseDialog
+            dialog = CourseDialog(self, course_dict)
+            dialog.course_saved.connect(self.on_course_saved)
+            dialog.exec()
+        except ImportError as e:
+            QMessageBox.warning(self, "Error", f"Course dialog not available: {e}")
 
     def delete_selected_course(self):
         """Delete the selected course"""
@@ -474,8 +514,23 @@ class TranscriptTableWidget(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            # Implementation will be added in Phase 2C
-            QMessageBox.information(self, "Delete Course", "Delete functionality will be implemented in Phase 2C")
+            row = selected_rows[0].row()
+            if row < len(self.filtered_data):
+                course_data = self.filtered_data[row]
+                course_id = course_data[0] if len(course_data) > 0 else None
+                course_code = course_data[1] if len(course_data) > 1 else "Unknown"
+
+                # Delete from database
+                try:
+                    success = self.database.delete_course_from_transcript(course_id)
+                    if success:
+                        QMessageBox.information(self, "Success", f"Course {course_code} deleted successfully!")
+                        self.courses_modified.emit()
+                        self.load_transcript_data()
+                    else:
+                        QMessageBox.warning(self, "Error", "Failed to delete course from database.")
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"An error occurred while deleting: {str(e)}")
 
     def bulk_edit_courses(self):
         """Bulk edit selected courses"""
@@ -485,7 +540,7 @@ class TranscriptTableWidget(QWidget):
 
         QMessageBox.information(
             self, "Bulk Edit",
-            f"Bulk edit dialog for {len(selected)} courses will be implemented in Phase 2C"
+            f"Bulk edit functionality for {len(selected)} courses will be available in a future update."
         )
 
     def bulk_delete_courses(self):
@@ -503,7 +558,7 @@ class TranscriptTableWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             QMessageBox.information(
                 self, "Bulk Delete",
-                "Bulk delete functionality will be implemented in Phase 2C"
+                "Bulk delete functionality will be available in a future update."
             )
 
     def view_course_details(self):
@@ -512,7 +567,8 @@ class TranscriptTableWidget(QWidget):
         if not selected_rows:
             return
 
-        QMessageBox.information(self, "Course Details", "Course details dialog will be implemented in Phase 2C")
+        # Use the edit dialog for now to view/edit course details
+        self.edit_selected_course()
 
     def refresh_data(self):
         """Refresh transcript data from database"""
