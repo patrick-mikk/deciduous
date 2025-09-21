@@ -40,6 +40,22 @@ ENV/
 *.db-wal
 *.db-shm
 
+# Development and testing files
+tests/
+scripts/
+data/
+temp/
+backup/
+
+# Qt specific files
+*.qrc
+*.ui~
+
+# Logs and debug files
+debug.log
+error.log
+application.log
+
 # Distribution / packaging
 .Python
 build/
