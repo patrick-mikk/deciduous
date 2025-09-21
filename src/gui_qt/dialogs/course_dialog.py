@@ -27,6 +27,10 @@ class CourseDialog(QDialog):
         self.setup_ui()
         self.populate_data()
 
+        # Connect to data manager validation errors if available
+        if self.data_manager:
+            self.data_manager.validation_error.connect(self.show_validation_error)
+
     def setup_ui(self):
         """Setup the dialog layout"""
         title = "Edit Course" if self.is_edit_mode else "Add New Course"
@@ -322,6 +326,10 @@ class CourseDialog(QDialog):
 
         return errors
 
+    def show_validation_error(self, field, error):
+        """Show validation error from data manager"""
+        QMessageBox.warning(self, "Validation Error", f"Error in {field}: {error}")
+
     def get_course_data(self):
         """Get course data from form"""
         mark_value = self.mark_spin.value() if self.mark_spin.value() > 0 else None
@@ -371,7 +379,13 @@ class CourseDialog(QDialog):
                     self.course_saved.emit(course_data)
                     self.accept()
                 else:
-                    QMessageBox.warning(self, "Error", "Failed to save course. Please check your data and try again.")
+                    # Show more detailed error message
+                    error_msg = "Failed to save course. Please check:\n"
+                    error_msg += f"• Course code: '{course_data.get('course_code', '')}'\n"
+                    error_msg += f"• Course title: '{course_data.get('title', '')}'\n"
+                    error_msg += f"• Credits: {course_data.get('credits', 'N/A')}\n"
+                    error_msg += f"• Year: {course_data.get('year', 'N/A')}"
+                    QMessageBox.warning(self, "Save Error", error_msg)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"An error occurred while saving: {str(e)}")
         else:
