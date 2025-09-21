@@ -129,33 +129,69 @@ Transform the current functional tkinter application into a modern, professional
 - **Bulk Operations**: Enhanced bulk edit/delete with modern dialogs
 - **Summary Display**: Rich text summary with formatted statistics
 
-### 📋 **Phase 2C: Advanced Features & Polish (Week 7)**
+### 📋 **Phase 2C: Enhanced Layout & Native PyQt6 Optimization (Week 7)**
 
-#### **Requirements & Planning Tabs**
-- **Requirements Tab**: Visual progress indicators with QProgressBar and custom widgets
-- **Planning Tab**: Drag-and-drop interface with QListWidget and enhanced planning
-- **GPA Dashboard**: Charts and graphs using QChart or matplotlib integration
-- **Analytics Tab**: Advanced visualizations and statistical displays
+#### **🎯 Strategic Redesign: From 6 Dispersed Tabs to 4 Centralized Hubs**
 
-#### **Enhanced Dialogs & Components**
-- **Course Dialog**: Modern QDialog with tabbed interface and validation
-- **Bulk Edit Dialog**: Improved bulk operations with better UX
-- **Settings Dialog**: Application preferences and configuration
-- **About Dialog**: Professional about window with application information
+**New Tab Architecture:**
 
-### 📋 **Phase 2D: Integration & Testing (Week 8)**
+**1. Academic Overview Tab** 📊
+- Main dashboard with status cards (GPA, Credits, Academic Standing)
+- Degree progress visualization with native QProgressBar
+- Recent activity timeline and quick actions
+- Centralized course lookup and add functionality
 
-#### **Final Integration**
-- **Feature Parity**: Ensure all tkinter functionality is replicated and enhanced
-- **Performance Optimization**: Optimize loading times and responsiveness
-- **Error Handling**: Comprehensive error handling and user feedback
-- **Data Migration**: Seamless transition from tkinter version
+**2. Course Management Tab** 🔍
+- Unified Academic Calendar search with selenium integration
+- Transcript management with advanced filtering
+- Detailed course information panel
+- Bulk operations (edit, delete, move to planning)
+- Three-panel layout using QSplitter for optimal screen usage
 
-#### **Testing & Deployment**
-- **Comprehensive Testing**: Test all features, edge cases, and user workflows
-- **Cross-Platform Testing**: Verify functionality on different operating systems
-- **Documentation Update**: Update user guides and developer documentation
-- **Deployment Package**: Create installation packages and distribution files
+**3. Degree Planning Tab** 🎓
+- Integrated requirements tracking with QTreeWidget visualization
+- Course planning workspace with drag-drop functionality
+- Program enrollment and breadth requirements management
+- Prerequisite validation and academic pathway planning
+
+**4. Analytics & Reports Tab** 📈
+- GPA trends and historical analysis using Qt Charts
+- Credit distribution and completion metrics
+- Progress visualization and milestone tracking
+- Export functionality for transcripts and reports
+
+#### **🎨 Native PyQt6 Styling Migration**
+- **Remove Custom CSS**: Eliminate `styles.qss` dependency for maintenance simplicity
+- **QPalette Integration**: Use native color scheme management for system consistency
+- **Built-in Widget Properties**: Leverage Qt's professional appearance standards
+- **Responsive Layouts**: Implement QSplitter and native layout managers for optimal UX
+- **System Theme Compatibility**: Ensure app adapts to user's system preferences
+
+#### **🏗️ Layout Optimization Strategy**
+- **Compact Information Density**: Maximize useful information per screen area
+- **Professional Grouping**: Use QGroupBox and QFrame for logical content organization
+- **User-Resizable Panels**: Implement QSplitter throughout for customizable workspace
+- **Native Controls**: Replace custom styling with Qt's built-in professional appearance
+
+### 📋 **Phase 2D: Polish & Testing (Week 8)**
+
+#### **Enhanced Layout Implementation**
+- **Widget Migration**: Implement new 4-tab architecture with native PyQt6 components
+- **Feature Integration**: Seamlessly migrate existing functionality to centralized layout
+- **Native Styling**: Complete transition from custom CSS to QPalette-based theming
+- **Responsive Design**: Fine-tune QSplitter layouts and widget proportions
+
+#### **User Experience Optimization**
+- **Workflow Testing**: Validate improved task efficiency with consolidated tabs
+- **Cross-Tab Communication**: Implement seamless data flow between centralized features
+- **Performance Tuning**: Optimize native widget rendering and data operations
+- **Accessibility**: Ensure native styling maintains high-contrast accessibility
+
+#### **Quality Assurance & Deployment**
+- **Layout Responsiveness**: Test resizing, splitting, and multi-monitor scenarios
+- **System Integration**: Verify appearance across different OS themes and scaling
+- **Documentation Update**: Update user guides for new tab organization
+- **Migration Guide**: Provide transition documentation for existing users
 
 ### 🎨 **New GUI Features & Enhancements**
 

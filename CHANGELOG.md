@@ -14,8 +14,21 @@
 
 ## [Unreleased]
 
+### Added
+- **Phase 2C Planning**: Comprehensive enhanced layout design plan `docs/PHASE_2C_ENHANCED_LAYOUT_PLAN.md`
+  - 4-tab centralized architecture replacing 6 dispersed tabs
+  - Native PyQt6 styling migration strategy
+  - Compact layout optimization for professional appearance
+  - Enhanced user experience through feature consolidation
+
+### Changed
+- **Master Plan**: Updated Phase 2C with enhanced layout strategy `docs/master_plan.md`
+  - Redesigned tab organization (Academic Overview, Course Management, Degree Planning, Analytics)
+  - Native PyQt6 styling approach replacing custom CSS dependency
+  - Improved workflow efficiency through centralized features
+- **Development Strategy**: Shifted focus from custom styling to native Qt integration
+
 ### In Progress
-- **GUI**: Phase 2C advanced features implementation
 - **Documentation**: Comprehensive API documentation
 - **Testing**: Automated test suite development
 
