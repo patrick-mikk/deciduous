@@ -1238,8 +1238,8 @@ class AcademicCalendarScraper:
         if self.driver:
             self.driver.quit()
 
-    def search_courses(self, course_code):
-        """Search for courses"""
+    def search_courses(self, course_code="", title="", department="", level="", credits="", limit=100):
+        """Search for courses with multiple criteria"""
         if not self.driver:
             return []
 
@@ -1294,8 +1294,13 @@ class AcademicCalendarScraper:
                             pass
                 raise Exception("Could not find search input field")
 
+            # Determine search term based on parameters
+            search_term = course_code or title or department
+            if not search_term:
+                return []
+
             search_input.clear()
-            search_input.send_keys(course_code)
+            search_input.send_keys(search_term)
             search_input.send_keys(Keys.RETURN)
 
             time.sleep(3)
@@ -1343,12 +1348,24 @@ class AcademicCalendarScraper:
                         else:
                             description = title_text
 
-                        results.append({
+                        course_dict = {
                             'course_code': extracted_code,
                             'title': title_text,
                             'url': url,
-                            'description': description
-                        })
+                            'description': description,
+                            'credits': '',  # Will be extracted from course details
+                            'prerequisites': '',
+                            'exclusions': '',
+                            'breadth_requirements': ''
+                        }
+
+                        # Apply filters
+                        if level:
+                            level_num = level.split('-')[0]  # Extract number from "100-level"
+                            if level_num not in extracted_code:
+                                continue
+
+                        results.append(course_dict)
                     except Exception:
                         continue
             except Exception as e:
@@ -1390,11 +1407,30 @@ class AcademicCalendarScraper:
                     except:
                         pass
 
+            # Apply limit
+            results = results[:limit]
             return results
 
         except Exception as e:
             print(f"Search failed: {e}")
             return []
+
+    def get_departments(self):
+        """Get list of available departments"""
+        return [
+            "CSC - Computer Science",
+            "MAT - Mathematics",
+            "STA - Statistics",
+            "PHY - Physics",
+            "CHM - Chemistry",
+            "BIO - Biology",
+            "ECO - Economics",
+            "PSY - Psychology",
+            "SOC - Sociology",
+            "HIS - History",
+            "ENG - English",
+            "FRE - French"
+        ]
 
     def extract_course_details(self, course_url):
         """Extract detailed course information"""

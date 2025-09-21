@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         """Initialize the main user interface"""
-        self.setWindowTitle("UofT Course Dashboard - PyQt6 Edition")
+        self.setWindowTitle("University of Toronto Course Dashboard - Faculty of Arts & Science")
         self.setGeometry(100, 100, 1600, 1000)
         self.setMinimumSize(1200, 800)
 
@@ -113,17 +113,18 @@ class MainWindow(QMainWindow):
         header_layout = QHBoxLayout(header_frame)
 
         # Title section
-        title_label = QLabel("UofT Course Dashboard")
+        title_label = QLabel("University of Toronto Course Dashboard")
         title_font = QFont()
-        title_font.setPointSize(18)
+        title_font.setPointSize(20)
         title_font.setBold(True)
         title_label.setFont(title_font)
+        title_label.setStyleSheet("color: #000000; background-color: transparent;")
 
-        subtitle_label = QLabel("Academic Planning & Degree Management System")
+        subtitle_label = QLabel("Faculty of Arts & Science Academic Management System")
         subtitle_font = QFont()
-        subtitle_font.setPointSize(10)
+        subtitle_font.setPointSize(11)
         subtitle_label.setFont(subtitle_font)
-        subtitle_label.setStyleSheet("color: #333333; background-color: transparent;")
+        subtitle_label.setStyleSheet("color: #333333; background-color: transparent; font-style: italic;")
 
         title_layout = QVBoxLayout()
         title_layout.addWidget(title_label)
@@ -140,9 +141,9 @@ class MainWindow(QMainWindow):
 
     def create_quick_actions(self, layout):
         """Create quick action buttons in header"""
-        quick_search_btn = QPushButton("Quick Search")
-        add_course_btn = QPushButton("Add Course")
-        refresh_btn = QPushButton("Refresh")
+        academic_calendar_btn = QPushButton("Academic Calendar")
+        degree_explorer_btn = QPushButton("Degree Explorer")
+        refresh_btn = QPushButton("Refresh Data")
 
         # Style buttons with high contrast
         button_style = """
@@ -168,26 +169,39 @@ class MainWindow(QMainWindow):
             }
         """
 
-        for btn in [quick_search_btn, add_course_btn, refresh_btn]:
+        for btn in [academic_calendar_btn, degree_explorer_btn, refresh_btn]:
             btn.setStyleSheet(button_style)
             layout.addWidget(btn)
 
-        # Connect buttons (placeholder for now)
+        # Connect buttons
+        academic_calendar_btn.clicked.connect(self.open_academic_calendar)
+        degree_explorer_btn.clicked.connect(self.open_degree_explorer)
         refresh_btn.clicked.connect(self.refresh_all_data)
 
     def create_tabs(self):
         """Create main application tabs"""
-        # Tab 1: Course Search (placeholder)
-        search_tab = QWidget()
-        search_layout = QVBoxLayout(search_tab)
-        search_layout.addWidget(QLabel("Course Search Tab\n\nPyQt6 implementation coming in Phase 2B..."))
-        self.tab_widget.addTab(search_tab, "Course Search")
+        # Tab 1: Course Search (implemented in Phase 2B)
+        try:
+            from gui_qt.widgets.course_search import CourseSearchWidget
+            self.search_tab = CourseSearchWidget(self.database)
+            self.tab_widget.addTab(self.search_tab, "Course Search")
+        except ImportError as e:
+            search_tab = QWidget()
+            search_layout = QVBoxLayout(search_tab)
+            search_layout.addWidget(QLabel(f"Course Search Tab\n\nError loading widget: {e}"))
+            self.tab_widget.addTab(search_tab, "Course Search")
 
-        # Tab 2: Transcript (placeholder)
-        transcript_tab = QWidget()
-        transcript_layout = QVBoxLayout(transcript_tab)
-        transcript_layout.addWidget(QLabel("Transcript Tab\n\nPyQt6 implementation coming in Phase 2B..."))
-        self.tab_widget.addTab(transcript_tab, "Transcript")
+        # Tab 2: Transcript (implemented in Phase 2B)
+        try:
+            from gui_qt.widgets.transcript_table import TranscriptTableWidget
+            self.transcript_tab = TranscriptTableWidget(self.database)
+            self.transcript_tab.courses_modified.connect(self.refresh_all_data)
+            self.tab_widget.addTab(self.transcript_tab, "Transcript")
+        except ImportError as e:
+            transcript_tab = QWidget()
+            transcript_layout = QVBoxLayout(transcript_tab)
+            transcript_layout.addWidget(QLabel(f"Transcript Tab\n\nError loading widget: {e}"))
+            self.tab_widget.addTab(transcript_tab, "Transcript")
 
         # Tab 3: Planning (placeholder)
         planning_tab = QWidget()
@@ -265,7 +279,7 @@ class MainWindow(QMainWindow):
         self.status_bar.addWidget(self.status_label)
 
         # Right side info
-        self.status_bar.addPermanentWidget(QLabel("PyQt6 Edition"))
+        self.status_bar.addPermanentWidget(QLabel("Faculty of Arts & Science"))
 
     def apply_modern_styling(self):
         """Apply modern styling to the application"""
@@ -373,11 +387,27 @@ class MainWindow(QMainWindow):
 
     def show_about(self):
         """Show about dialog"""
-        QMessageBox.about(self, "About UofT Course Dashboard",
-                         "UofT Course Dashboard - PyQt6 Edition\n\n"
-                         "Phase 2A: Foundation & Setup\n"
-                         "Modern academic planning and degree management\n\n"
-                         "Built with PyQt6 for enhanced user experience")
+        QMessageBox.about(self, "About University of Toronto Course Dashboard",
+                         "University of Toronto Course Dashboard\n"
+                         "Faculty of Arts & Science Academic Management System\n\n"
+                         "Features:\n"
+                         "• 20.0 Credit System Tracking\n"
+                         "• Breadth Requirements Management\n"
+                         "• Program Progress Monitoring\n"
+                         "• Academic Calendar Integration\n\n"
+                         "Built with PyQt6 for professional academic planning")
+
+    def open_academic_calendar(self):
+        """Open UofT Academic Calendar in browser"""
+        import webbrowser
+        webbrowser.open("https://artsci.calendar.utoronto.ca/")
+        self.status_message("Opened UofT Academic Calendar in browser")
+
+    def open_degree_explorer(self):
+        """Launch degree exploration functionality"""
+        self.status_message("Degree Explorer functionality coming in Phase 2C...")
+        # Switch to requirements tab for now
+        self.tab_widget.setCurrentIndex(3)  # Requirements tab
 
     def closeEvent(self, event):
         """Handle application close event"""

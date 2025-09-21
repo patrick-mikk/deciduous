@@ -9,28 +9,76 @@ This master plan outlines the complete transformation of the UofT Course Dashboa
 2. **Foundation Complete**: Academic requirements engine and data management (Phase 1 ✅)
 3. **Future Expansion**: Intelligent planning, analytics, and web platform (Phases 3-5)
 
-## Current Status: Phase 1 Complete ✅
+## UofT Faculty of Arts & Science Requirements Framework
 
-**Phase 1: Academic Foundation** has been successfully implemented, providing:
-- ✅ Database migration system with academic planning tables
-- ✅ Requirements calculation engine for UofT degree compliance
-- ✅ Program enrollment and management system
-- ✅ Breadth requirements tracking (5 categories)
-- ✅ Academic standing determination and graduation eligibility
-- ✅ Requirements tab with comprehensive progress visualization
-- ✅ Course search and transcript management functionality
-- ✅ Bulk edit/delete operations for transcript courses
-- ✅ GPA calculation and academic standing tracking
-- ✅ Course information viewer with detailed display
-- ✅ Project reorganization with proper directory structure
-- ✅ Comprehensive documentation and architecture guides
+### 🎓 **Official Academic Requirements**
+Based on the comprehensive UofT Academic Calendar and Faculty policies:
 
-**Current Technical Status:**
-- **Framework**: tkinter-based GUI (functional but dated)
-- **Database**: SQLite with migration system
-- **Web Scraping**: Selenium-powered UofT Academic Calendar integration
-- **Architecture**: Well-structured, documented, and maintainable
-- **Testing**: Validated bulk operations and core functionality
+#### **Degree Completion Requirements**
+- **Total Credits**: Exactly 20.0 credits for undergraduate degree
+- **Faculty Credits**: At least 10.0 credits from Faculty of Arts & Science
+- **Concentration Limit**: Maximum 15.0 credits with same 3-letter course designator
+- **Minimum GPA**: 1.85 cumulative GPA for graduation
+- **Academic Standing**: Continuous satisfactory progress monitoring
+
+#### **Course Level Distribution**
+- **Upper-Level Requirement**: At least 13.0 credits at 200-level or higher
+- **Advanced Study**: At least 6.0 credits at 300-level or higher
+- **Progressive Learning**: 100→200→300→400 level academic advancement
+
+#### **Program Requirements**
+**Specialist Programs (Deepest Study)**
+- Credits: 10.0-14.0 credits (some interdisciplinary up to 16.0)
+- Upper-Level: At least 4.0 credits at 300+ level
+- Advanced: At least 1.0 credit at 400-level
+- Limit: Maximum 2 Major/Specialist programs
+
+**Major Programs (Comprehensive Study)**
+- Credits: 6.0-8.0 credits
+- Upper-Level: At least 2.0 credits at 300+ level
+- Advanced: At least 0.5 credits at 400-level
+- Flexibility: Can combine with other programs
+
+**Minor Programs (Foundational Study)**
+- Credits: Exactly 4.0 credits
+- Upper-Level: At least 1.0 credit at 300+ level
+- Complement: Designed to complement other programs
+
+#### **Breadth Requirements (Liberal Education)**
+- **Total**: 4.0 credits across diverse knowledge areas
+- **Distribution Option 1**: 1.0 credit each in 4 of 5 categories
+- **Distribution Option 2**: 1.0 credit in 3 categories + 0.5 credits in remaining 2
+
+**Five Official Breadth Categories:**
+1. **Creative and Cultural Representations** (Literature, Arts, Culture)
+2. **Thought, Belief and Behaviour** (Psychology, Philosophy, Religion)
+3. **Society and its Institutions** (Politics, Economics, Sociology)
+4. **Living Things and their Environment** (Biology, Ecology, Environmental Science)
+5. **The Physical and Mathematical Universes** (Physics, Chemistry, Mathematics, Computer Science)
+
+## Current Status: Phase 2B Complete ✅
+
+**Phase 1: Academic Foundation** has been successfully implemented with **accurate UofT Faculty of Arts & Science requirements**, providing:
+- ✅ **20.0 Credit System**: Complete credit tracking and validation
+- ✅ **Breadth Requirements**: 4.0 credits across 5 official categories (Creative/Cultural, Thought/Belief/Behaviour, Society/Institutions, Living Things/Environment, Physical/Mathematical)
+- ✅ **Program Types**: Specialist (10.0-14.0 credits), Major (6.0-8.0 credits), Minor (4.0 credits)
+- ✅ **Course Level Requirements**: 13.0+ at 200-level, 6.0+ at 300-level tracking
+- ✅ **Academic Standing**: 1.85 GPA minimum with continuous monitoring
+- ✅ **Concentration Limits**: No more than 15.0 credits with same 3-letter designator
+- ✅ **Upper-Level Requirements**: 4.0+ at 300+ for Specialist, 2.0+ for Major, 1.0+ for Minor
+- ✅ **Prerequisites & Exclusions**: Full course relationship management
+- ✅ **Database migration system** with academic planning tables
+- ✅ **Course search and transcript management** functionality
+- ✅ **Bulk edit/delete operations** for transcript courses
+- ✅ **Project reorganization** with proper directory structure
+
+**Current Technical Status (Phase 2B Complete):**
+- **Framework**: Modern PyQt6 GUI with professional styling ✅
+- **Course Search**: Live filtering with Selenium-powered UofT Academic Calendar integration ✅
+- **Transcript Management**: Advanced table with bulk operations and real-time filtering ✅
+- **Database**: SQLite with accurate UofT academic requirements engine
+- **Architecture**: Clean PyQt6 MVC with widget separation and signal/slot communication
+- **Styling**: High-contrast accessibility theme with professional appearance
 
 ## Phase 2: PyQt6/PySide6 Migration (Weeks 5-8) 🎨
 
