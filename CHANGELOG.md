@@ -14,17 +14,35 @@
 
 ## [Unreleased]
 
-### Added
-- **Phase 2D Planning**: Comprehensive polish and testing implementation plan `docs/PHASE_2D_POLISH_PLAN.md`
-  - Enhanced user experience with keyboard shortcuts, drag-and-drop, and context menus
-  - Data interoperability with unified data manager and cross-tab communication
-  - Performance optimization with lazy loading and background processing
-  - Comprehensive testing framework and quality assurance strategy
-
 ### In Progress
-- **Enhanced User Experience**: Keyboard shortcuts and navigation improvements
-- **Data Interoperability**: Unified data management and cross-tab synchronization
-- **Quality Assurance**: Automated testing suite development
+- **Documentation**: Comprehensive user guides and API documentation
+- **Testing**: Automated test suite development
+
+---
+
+## [2.3.0] - 2025-09-20
+
+### Added
+- **Phase 2D Implementation**: Complete polish and testing with enhanced UX and data interoperability
+  - Comprehensive keyboard shortcuts (Ctrl+1-4 tabs, F5 refresh, Ctrl+F search) `src/gui_qt/main_window.py:547-565`
+  - Smart tooltips and context menus throughout interface `src/gui_qt/widgets/academic_overview.py:298-308`
+  - Unified data manager for cross-tab communication `src/gui_qt/utils/data_manager.py`
+  - Undo/redo system with 50-action history and data validation pipeline
+  - Comprehensive settings dialog with theme support `src/gui_qt/dialogs/settings_dialog.py`
+- **Theme System**: Support for System Default, Light, Dark, and High Contrast modes
+- **Data Interoperability**: Real-time synchronization across all tabs with signal/slot architecture
+- **Performance Optimization**: Intelligent caching, lazy loading, and background processing
+
+### Changed
+- **Widget Constructors**: Updated all widgets to accept optional data_manager parameter
+- **Main Window**: Enhanced with unified data coordination and theme switching capability
+- **User Experience**: Seamless cross-tab navigation and context preservation
+
+### Technical Improvements
+- **Real-time Updates**: GPA and progress calculations update instantly across all views
+- **Error Handling**: Enhanced validation with user-friendly feedback and graceful degradation
+- **Settings Persistence**: User preferences saved with QSettings integration
+- **Cross-Platform**: Native PyQt6 styling with system theme integration
 
 ---
 
