@@ -26,7 +26,7 @@ class CourseSearchThread(QThread):
 
     def run(self):
         try:
-            from main import AcademicCalendarScraper
+            from core import AcademicCalendarScraper
             scraper = AcademicCalendarScraper(debug=False)
             results = scraper.search_courses(self.course_code)
             scraper.close_driver()

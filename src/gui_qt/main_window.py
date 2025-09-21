@@ -22,7 +22,7 @@ except ImportError:
 
 # Import existing core modules
 sys.path.append(str(Path(__file__).parent.parent))
-from main import UnifiedCourseDatabase, RequirementsCalculator, AcademicCalendarScraper
+from core import CourseDatabase, AcademicCalendarScraper
 from gui_qt.utils.data_manager import UnifiedDataManager
 
 
@@ -51,8 +51,8 @@ class MainWindow(QMainWindow):
     def init_database(self):
         """Initialize database and core components"""
         try:
-            self.database = UnifiedCourseDatabase()
-            self.requirements_calculator = RequirementsCalculator(self.database)
+            self.database = CourseDatabase()
+            # Note: RequirementsCalculator will be implemented in PyQt6 widgets
 
             # Initialize unified data manager
             self.data_manager = UnifiedDataManager(self.database)
@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         """Initialize scraper on-demand when needed"""
         if self.scraper is None:
             try:
-                from main import AcademicCalendarScraper
+                from core import AcademicCalendarScraper
                 self.scraper = AcademicCalendarScraper()
                 self.status_message("Web scraper initialized successfully")
                 return True

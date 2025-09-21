@@ -28,7 +28,7 @@ class CourseSearchThread(QThread):
     def run(self):
         try:
             # Initialize scraper for web search
-            from main import AcademicCalendarScraper
+            from core import AcademicCalendarScraper
             scraper = AcademicCalendarScraper(debug=False)
 
             # Search using course code
