@@ -179,53 +179,54 @@ class MainWindow(QMainWindow):
         refresh_btn.clicked.connect(self.refresh_all_data)
 
     def create_tabs(self):
-        """Create main application tabs"""
-        # Tab 1: Course Search (implemented in Phase 2B)
+        """Create main application tabs with Phase 2C enhanced layout"""
+        # Tab 1: Academic Overview - Dashboard with status cards and progress
         try:
-            from gui_qt.widgets.course_search import CourseSearchWidget
-            self.search_tab = CourseSearchWidget(self.database)
-            self.tab_widget.addTab(self.search_tab, "Course Search")
+            from gui_qt.widgets.academic_overview import AcademicOverviewWidget
+            self.overview_tab = AcademicOverviewWidget(self.database)
+            self.overview_tab.course_search_requested.connect(self.on_course_search_requested)
+            self.overview_tab.tab_switch_requested.connect(self.tab_widget.setCurrentIndex)
+            self.tab_widget.addTab(self.overview_tab, "Academic Overview")
         except ImportError as e:
-            search_tab = QWidget()
-            search_layout = QVBoxLayout(search_tab)
-            search_layout.addWidget(QLabel(f"Course Search Tab\n\nError loading widget: {e}"))
-            self.tab_widget.addTab(search_tab, "Course Search")
+            overview_tab = QWidget()
+            overview_layout = QVBoxLayout(overview_tab)
+            overview_layout.addWidget(QLabel(f"Academic Overview Tab\n\nError loading widget: {e}"))
+            self.tab_widget.addTab(overview_tab, "Academic Overview")
 
-        # Tab 2: Transcript (implemented in Phase 2B)
+        # Tab 2: Course Management - Search, transcript, and course details
         try:
-            from gui_qt.widgets.transcript_table import TranscriptTableWidget
-            self.transcript_tab = TranscriptTableWidget(self.database)
-            self.transcript_tab.courses_modified.connect(self.refresh_all_data)
-            self.tab_widget.addTab(self.transcript_tab, "Transcript")
+            from gui_qt.widgets.course_management import CourseManagementWidget
+            self.course_tab = CourseManagementWidget(self.database)
+            self.course_tab.courses_modified.connect(self.refresh_all_data)
+            self.tab_widget.addTab(self.course_tab, "Course Management")
         except ImportError as e:
-            transcript_tab = QWidget()
-            transcript_layout = QVBoxLayout(transcript_tab)
-            transcript_layout.addWidget(QLabel(f"Transcript Tab\n\nError loading widget: {e}"))
-            self.tab_widget.addTab(transcript_tab, "Transcript")
+            course_tab = QWidget()
+            course_layout = QVBoxLayout(course_tab)
+            course_layout.addWidget(QLabel(f"Course Management Tab\n\nError loading widget: {e}"))
+            self.tab_widget.addTab(course_tab, "Course Management")
 
-        # Tab 3: Planning (placeholder)
-        planning_tab = QWidget()
-        planning_layout = QVBoxLayout(planning_tab)
-        planning_layout.addWidget(QLabel("Course Planning Tab\n\nPyQt6 implementation coming in Phase 2C..."))
-        self.tab_widget.addTab(planning_tab, "Planning")
+        # Tab 3: Degree Planning - Requirements tree and planning workspace
+        try:
+            from gui_qt.widgets.degree_planning import DegreePlanningWidget
+            self.planning_tab = DegreePlanningWidget(self.database)
+            self.planning_tab.courses_modified.connect(self.refresh_all_data)
+            self.tab_widget.addTab(self.planning_tab, "Degree Planning")
+        except ImportError as e:
+            planning_tab = QWidget()
+            planning_layout = QVBoxLayout(planning_tab)
+            planning_layout.addWidget(QLabel(f"Degree Planning Tab\n\nError loading widget: {e}"))
+            self.tab_widget.addTab(planning_tab, "Degree Planning")
 
-        # Tab 4: Requirements (placeholder)
-        requirements_tab = QWidget()
-        requirements_layout = QVBoxLayout(requirements_tab)
-        requirements_layout.addWidget(QLabel("Requirements Tab\n\nPyQt6 implementation coming in Phase 2C..."))
-        self.tab_widget.addTab(requirements_tab, "Requirements")
-
-        # Tab 5: GPA Dashboard (placeholder)
-        gpa_tab = QWidget()
-        gpa_layout = QVBoxLayout(gpa_tab)
-        gpa_layout.addWidget(QLabel("GPA Dashboard Tab\n\nPyQt6 implementation coming in Phase 2C..."))
-        self.tab_widget.addTab(gpa_tab, "GPA Dashboard")
-
-        # Tab 6: Analytics (placeholder)
-        analytics_tab = QWidget()
-        analytics_layout = QVBoxLayout(analytics_tab)
-        analytics_layout.addWidget(QLabel("Analytics Tab\n\nPyQt6 implementation coming in Phase 2C..."))
-        self.tab_widget.addTab(analytics_tab, "Analytics")
+        # Tab 4: Analytics & Reports - Performance analytics and export
+        try:
+            from gui_qt.widgets.analytics_reports import AnalyticsReportsWidget
+            self.analytics_tab = AnalyticsReportsWidget(self.database)
+            self.tab_widget.addTab(self.analytics_tab, "Analytics & Reports")
+        except ImportError as e:
+            analytics_tab = QWidget()
+            analytics_layout = QVBoxLayout(analytics_tab)
+            analytics_layout.addWidget(QLabel(f"Analytics & Reports Tab\n\nError loading widget: {e}"))
+            self.tab_widget.addTab(analytics_tab, "Analytics & Reports")
 
     def setup_menu_bar(self):
         """Setup application menu bar"""
@@ -282,58 +283,88 @@ class MainWindow(QMainWindow):
         self.status_bar.addPermanentWidget(QLabel("Faculty of Arts & Science"))
 
     def apply_modern_styling(self):
-        """Apply modern styling to the application"""
+        """Apply native PyQt6 styling with system integration"""
         try:
-            # Load stylesheet from file
-            style_path = Path(__file__).parent / "resources" / "styles.qss"
-            if style_path.exists():
-                with open(style_path, 'r', encoding='utf-8') as f:
-                    stylesheet = f.read()
-                self.setStyleSheet(stylesheet)
-                print("High-contrast light theme loaded successfully")
-            else:
-                print(f"Stylesheet not found at {style_path}, using fallback")
-                self.apply_fallback_styling()
+            # Use native PyQt6 styling instead of custom CSS
+            self.apply_native_styling()
+            print("Native PyQt6 styling applied successfully")
         except Exception as e:
-            print(f"Error loading stylesheet: {e}, using fallback")
+            print(f"Error applying native styling: {e}, using fallback")
             self.apply_fallback_styling()
 
-    def apply_fallback_styling(self):
-        """Apply fallback styling if main stylesheet fails to load"""
+    def apply_native_styling(self):
+        """Apply native PyQt6 styling using QPalette and built-in properties"""
+        from PyQt6.QtGui import QPalette, QColor
+        from PyQt6.QtWidgets import QApplication
+
+        # Get application instance
+        app = QApplication.instance()
+
+        # Create and configure palette for consistent theming
+        palette = QPalette()
+
+        # Set base colors for light theme
+        palette.setColor(QPalette.ColorRole.Window, QColor(255, 255, 255))          # Background
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 0, 0))            # Text
+        palette.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))            # Input backgrounds
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(248, 248, 248))   # Alternate rows
+        palette.setColor(QPalette.ColorRole.Text, QColor(0, 0, 0))                  # Input text
+        palette.setColor(QPalette.ColorRole.Button, QColor(240, 240, 240))          # Button background
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(0, 0, 0))            # Button text
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 102, 204))         # Selection background
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255)) # Selection text
+
+        # Apply palette to application
+        app.setPalette(palette)
+
+        # Configure fonts
+        font = app.font()
+        font.setFamily("Segoe UI")
+        font.setPointSize(9)
+        app.setFont(font)
+
+        # Apply minimal styling for professional appearance
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #ffffff;
-                color: #000000;
-                font-family: "Segoe UI", Arial, sans-serif;
-                font-size: 9pt;
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 4px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
             }
             QTabWidget::pane {
-                border: 2px solid #cccccc;
-                background-color: #ffffff;
+                border: 1px solid #cccccc;
+                background-color: white;
             }
             QTabBar::tab {
-                background-color: #f5f5f5;
-                border: 1px solid #cccccc;
-                padding: 12px 24px;
+                padding: 8px 16px;
                 margin-right: 2px;
-                color: #000000;
             }
             QTabBar::tab:selected {
-                background-color: #ffffff;
                 font-weight: bold;
-                color: #000000;
             }
-            QPushButton {
+            QProgressBar {
+                border: 1px solid #cccccc;
+                border-radius: 3px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
                 background-color: #0066cc;
-                color: #ffffff;
-                border: 2px solid #0066cc;
-                padding: 10px 20px;
-                border-radius: 4px;
-                font-weight: bold;
+                border-radius: 2px;
             }
-            QLabel {
-                color: #000000;
-                background-color: transparent;
+        """)
+
+    def apply_fallback_styling(self):
+        """Apply minimal fallback styling if native styling fails"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: white;
+                color: black;
             }
         """)
 
@@ -368,7 +399,17 @@ class MainWindow(QMainWindow):
         self.status_message("Refreshing data...")
         try:
             self.load_initial_data()
-            # TODO: Update all tabs when implemented
+
+            # Refresh all tabs that support it
+            if hasattr(self, 'overview_tab') and hasattr(self.overview_tab, 'refresh_data'):
+                self.overview_tab.refresh_data()
+            if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'refresh_data'):
+                self.course_tab.refresh_data()
+            if hasattr(self, 'planning_tab') and hasattr(self.planning_tab, 'refresh_data'):
+                self.planning_tab.refresh_data()
+            if hasattr(self, 'analytics_tab') and hasattr(self.analytics_tab, 'refresh_data'):
+                self.analytics_tab.refresh_data()
+
             self.status_message("Data refreshed successfully")
         except Exception as e:
             self.status_message(f"Refresh failed: {e}")
@@ -405,9 +446,9 @@ class MainWindow(QMainWindow):
 
     def open_degree_explorer(self):
         """Launch degree exploration functionality"""
-        self.status_message("Degree Explorer functionality coming in Phase 2C...")
-        # Switch to requirements tab for now
-        self.tab_widget.setCurrentIndex(3)  # Requirements tab
+        self.status_message("Opening Degree Planning workspace...")
+        # Switch to degree planning tab
+        self.tab_widget.setCurrentIndex(2)  # Degree Planning tab
 
     def closeEvent(self, event):
         """Handle application close event"""
@@ -417,6 +458,14 @@ class MainWindow(QMainWindow):
         except:
             pass
         event.accept()
+
+    def on_course_search_requested(self, course_code: str):
+        """Handle course search requests from other tabs"""
+        # Switch to course management tab and perform search
+        self.tab_widget.setCurrentIndex(1)  # Course Management tab
+        if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'search_course'):
+            self.course_tab.search_course(course_code)
+        self.status_message(f"Searching for course: {course_code}")
 
 
 def main():
