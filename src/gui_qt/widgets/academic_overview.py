@@ -188,6 +188,7 @@ class QuickActions(QGroupBox):
 
         self.course_input = QLineEdit()
         self.course_input.setPlaceholderText("Enter course code (e.g. CSC108H1)")
+        self.course_input.setToolTip("Enter a course code to search the Academic Calendar for details")
         search_layout.addWidget(self.course_input)
 
         search_btn = QPushButton("Search Academic Calendar")
@@ -206,14 +207,17 @@ class QuickActions(QGroupBox):
         actions_layout = QVBoxLayout()
 
         add_course_btn = QPushButton("Add Course to Transcript")
+        add_course_btn.setToolTip("Add a new course to your transcript")
         add_course_btn.clicked.connect(self.course_add_requested.emit)
         actions_layout.addWidget(add_course_btn)
 
         view_requirements_btn = QPushButton("View Degree Requirements")
+        view_requirements_btn.setToolTip("View your degree requirements and progress")
         view_requirements_btn.clicked.connect(self.on_requirements_requested)
         actions_layout.addWidget(view_requirements_btn)
 
         export_btn = QPushButton("Export Transcript")
+        export_btn.setToolTip("Export your transcript to a file")
         export_btn.clicked.connect(self.on_export_requested)
         actions_layout.addWidget(export_btn)
 
@@ -246,9 +250,10 @@ class AcademicOverviewWidget(QWidget):
     course_search_requested = pyqtSignal(str)
     tab_switch_requested = pyqtSignal(int)  # Request to switch to specific tab
 
-    def __init__(self, database, parent=None):
+    def __init__(self, database, data_manager=None, parent=None):
         super().__init__(parent)
         self.database = database
+        self.data_manager = data_manager
         self.setup_ui()
         self.setup_connections()
         self.load_data()
@@ -293,11 +298,18 @@ class AcademicOverviewWidget(QWidget):
         cards_group = QGroupBox("Academic Status")
         cards_layout = QGridLayout(cards_group)
 
-        # Create status cards
+        # Create status cards with tooltips
         self.gpa_card = StatusCard("Current GPA", "0.00", "Cumulative")
+        self.gpa_card.setToolTip("Your current Grade Point Average based on completed courses with grades")
+
         self.credits_card = StatusCard("Credits Earned", "0.0", "of 20.0 required")
+        self.credits_card.setToolTip("Total credits completed toward your degree (20.0 credits required)")
+
         self.standing_card = StatusCard("Academic Standing", "Good", "Satisfactory Progress")
+        self.standing_card.setToolTip("Your current academic standing based on GPA and progress")
+
         self.completion_card = StatusCard("Degree Progress", "0%", "Estimated completion")
+        self.completion_card.setToolTip("Percentage of degree requirements completed")
 
         # Arrange in 2x2 grid
         cards_layout.addWidget(self.gpa_card, 0, 0)
@@ -409,3 +421,8 @@ class AcademicOverviewWidget(QWidget):
         """Refresh all dashboard data"""
         self.load_data()
         self.activity_timeline.add_activity("Dashboard refreshed", "Data updated successfully")
+
+    def focus_search(self):
+        """Focus the search input for keyboard shortcut"""
+        self.course_input.setFocus()
+        self.course_input.selectAll()

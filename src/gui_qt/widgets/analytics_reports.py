@@ -294,9 +294,10 @@ class ExportPanel(QGroupBox):
 class AnalyticsReportsWidget(QWidget):
     """Main analytics and reports widget"""
 
-    def __init__(self, database, parent=None):
+    def __init__(self, database, data_manager=None, parent=None):
         super().__init__(parent)
         self.database = database
+        self.data_manager = data_manager
         self.setup_ui()
         self.setup_connections()
         self.load_analytics_data()

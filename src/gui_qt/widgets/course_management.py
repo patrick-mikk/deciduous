@@ -519,9 +519,10 @@ class CourseManagementWidget(QWidget):
     tab_switch_requested = pyqtSignal(int)
     courses_modified = pyqtSignal()
 
-    def __init__(self, database, parent=None):
+    def __init__(self, database, data_manager=None, parent=None):
         super().__init__(parent)
         self.database = database
+        self.data_manager = data_manager
         self.setup_ui()
         self.setup_connections()
 

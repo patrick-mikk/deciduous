@@ -23,6 +23,7 @@ except ImportError:
 # Import existing core modules
 sys.path.append(str(Path(__file__).parent.parent))
 from main import UnifiedCourseDatabase, RequirementsCalculator, AcademicCalendarScraper
+from gui_qt.utils.data_manager import UnifiedDataManager
 
 
 class MainWindow(QMainWindow):
@@ -35,6 +36,7 @@ class MainWindow(QMainWindow):
         self.database = None
         self.scraper = None
         self.requirements_calculator = None
+        self.data_manager = None
 
         # Initialize UI
         self.init_database()
@@ -52,11 +54,15 @@ class MainWindow(QMainWindow):
             self.database = UnifiedCourseDatabase()
             self.requirements_calculator = RequirementsCalculator(self.database)
 
+            # Initialize unified data manager
+            self.data_manager = UnifiedDataManager(self.database)
+            self.setup_data_manager_connections()
+
             # Initialize scraper if available (defer to avoid blocking)
             self.scraper = None
             print("Web scraper initialization deferred for better startup performance")
 
-            self.status_message("Database initialized successfully")
+            self.status_message("Database and data manager initialized successfully")
 
         except Exception as e:
             QMessageBox.critical(self, "Database Error",
@@ -183,7 +189,7 @@ class MainWindow(QMainWindow):
         # Tab 1: Academic Overview - Dashboard with status cards and progress
         try:
             from gui_qt.widgets.academic_overview import AcademicOverviewWidget
-            self.overview_tab = AcademicOverviewWidget(self.database)
+            self.overview_tab = AcademicOverviewWidget(self.database, self.data_manager)
             self.overview_tab.course_search_requested.connect(self.on_course_search_requested)
             self.overview_tab.tab_switch_requested.connect(self.tab_widget.setCurrentIndex)
             self.tab_widget.addTab(self.overview_tab, "Academic Overview")
@@ -196,7 +202,7 @@ class MainWindow(QMainWindow):
         # Tab 2: Course Management - Search, transcript, and course details
         try:
             from gui_qt.widgets.course_management import CourseManagementWidget
-            self.course_tab = CourseManagementWidget(self.database)
+            self.course_tab = CourseManagementWidget(self.database, self.data_manager)
             self.course_tab.courses_modified.connect(self.refresh_all_data)
             self.tab_widget.addTab(self.course_tab, "Course Management")
         except ImportError as e:
@@ -208,7 +214,7 @@ class MainWindow(QMainWindow):
         # Tab 3: Degree Planning - Requirements tree and planning workspace
         try:
             from gui_qt.widgets.degree_planning import DegreePlanningWidget
-            self.planning_tab = DegreePlanningWidget(self.database)
+            self.planning_tab = DegreePlanningWidget(self.database, self.data_manager)
             self.planning_tab.courses_modified.connect(self.refresh_all_data)
             self.tab_widget.addTab(self.planning_tab, "Degree Planning")
         except ImportError as e:
@@ -220,7 +226,7 @@ class MainWindow(QMainWindow):
         # Tab 4: Analytics & Reports - Performance analytics and export
         try:
             from gui_qt.widgets.analytics_reports import AnalyticsReportsWidget
-            self.analytics_tab = AnalyticsReportsWidget(self.database)
+            self.analytics_tab = AnalyticsReportsWidget(self.database, self.data_manager)
             self.tab_widget.addTab(self.analytics_tab, "Analytics & Reports")
         except ImportError as e:
             analytics_tab = QWidget()
@@ -247,6 +253,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        new_course_action = QAction('&Add New Course...', self)
+        new_course_action.setShortcut('Ctrl+N')
+        new_course_action.triggered.connect(self.add_new_course)
+        file_menu.addAction(new_course_action)
+
+        file_menu.addSeparator()
+
         exit_action = QAction('E&xit', self)
         exit_action.setShortcut('Ctrl+Q')
         exit_action.triggered.connect(self.close)
@@ -260,14 +273,54 @@ class MainWindow(QMainWindow):
         refresh_action.triggered.connect(self.refresh_all_data)
         tools_menu.addAction(refresh_action)
 
+        tools_menu.addSeparator()
+
+        search_action = QAction('&Search Courses...', self)
+        search_action.setShortcut('Ctrl+F')
+        search_action.triggered.connect(self.focus_search)
+        tools_menu.addAction(search_action)
+
+        global_search_action = QAction('&Global Search...', self)
+        global_search_action.setShortcut('Ctrl+Shift+F')
+        global_search_action.triggered.connect(self.show_global_search)
+        tools_menu.addAction(global_search_action)
+
+        tools_menu.addSeparator()
+
         settings_action = QAction('&Settings...', self)
+        settings_action.setShortcut('Ctrl+,')
         settings_action.triggered.connect(self.show_settings)
         tools_menu.addAction(settings_action)
+
+        # View menu
+        view_menu = menubar.addMenu('&View')
+
+        # Tab navigation shortcuts
+        overview_action = QAction('&Academic Overview', self)
+        overview_action.setShortcut('Ctrl+1')
+        overview_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        view_menu.addAction(overview_action)
+
+        course_action = QAction('&Course Management', self)
+        course_action.setShortcut('Ctrl+2')
+        course_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        view_menu.addAction(course_action)
+
+        planning_action = QAction('&Degree Planning', self)
+        planning_action.setShortcut('Ctrl+3')
+        planning_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(2))
+        view_menu.addAction(planning_action)
+
+        analytics_action = QAction('&Analytics & Reports', self)
+        analytics_action.setShortcut('Ctrl+4')
+        analytics_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(3))
+        view_menu.addAction(analytics_action)
 
         # Help menu
         help_menu = menubar.addMenu('&Help')
 
         about_action = QAction('&About...', self)
+        about_action.setShortcut('F1')
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
 
@@ -424,7 +477,14 @@ class MainWindow(QMainWindow):
 
     def show_settings(self):
         """Show application settings"""
-        self.status_message("Settings dialog coming in Phase 2C...")
+        try:
+            from gui_qt.dialogs.settings_dialog import SettingsDialog
+            dialog = SettingsDialog(self)
+            dialog.settings_changed.connect(self.apply_settings)
+            dialog.exec()
+        except ImportError as e:
+            self.status_message(f"Settings dialog not available: {e}")
+            QMessageBox.information(self, "Settings", "Settings dialog coming soon...")
 
     def show_about(self):
         """Show about dialog"""
@@ -466,6 +526,180 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'search_course'):
             self.course_tab.search_course(course_code)
         self.status_message(f"Searching for course: {course_code}")
+
+    def add_new_course(self):
+        """Handle add new course request"""
+        # Switch to course management tab and trigger add course
+        self.tab_widget.setCurrentIndex(1)  # Course Management tab
+        if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'add_new_course'):
+            self.course_tab.add_new_course()
+        self.status_message("Add new course dialog")
+
+    def focus_search(self):
+        """Focus the search input in current tab or course management"""
+        current_index = self.tab_widget.currentIndex()
+
+        if current_index == 0:  # Academic Overview
+            if hasattr(self, 'overview_tab') and hasattr(self.overview_tab, 'focus_search'):
+                self.overview_tab.focus_search()
+        elif current_index == 1:  # Course Management
+            if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'focus_search'):
+                self.course_tab.focus_search()
+        else:
+            # Default to course management tab
+            self.tab_widget.setCurrentIndex(1)
+            if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'focus_search'):
+                self.course_tab.focus_search()
+
+        self.status_message("Search focused")
+
+    def show_global_search(self):
+        """Show global search dialog"""
+        self.status_message("Global search dialog coming soon...")
+
+    def keyPressEvent(self, event):
+        """Handle application-wide keyboard shortcuts"""
+        # Quick tab switching with Ctrl+1-4
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_1:
+                self.tab_widget.setCurrentIndex(0)
+                return
+            elif event.key() == Qt.Key.Key_2:
+                self.tab_widget.setCurrentIndex(1)
+                return
+            elif event.key() == Qt.Key.Key_3:
+                self.tab_widget.setCurrentIndex(2)
+                return
+            elif event.key() == Qt.Key.Key_4:
+                self.tab_widget.setCurrentIndex(3)
+                return
+
+        # Call parent implementation for other keys
+        super().keyPressEvent(event)
+
+    def setup_data_manager_connections(self):
+        """Setup connections for unified data manager signals"""
+        if not self.data_manager:
+            return
+
+        # Connect data manager signals to status updates
+        self.data_manager.operation_completed.connect(self.status_message)
+        self.data_manager.validation_error.connect(self.handle_validation_error)
+
+        # Connect data change signals to refresh tabs
+        self.data_manager.course_added.connect(self.on_data_changed)
+        self.data_manager.course_modified.connect(lambda course_id, data: self.on_data_changed())
+        self.data_manager.course_deleted.connect(lambda course_id: self.on_data_changed())
+        self.data_manager.data_refreshed.connect(self.refresh_all_data)
+
+    def handle_validation_error(self, field: str, error: str):
+        """Handle validation errors from data manager"""
+        self.status_message(f"Validation Error - {field}: {error}", 10000)
+        if field == 'general':
+            QMessageBox.warning(self, "Data Error", error)
+
+    def on_data_changed(self):
+        """Handle data changes by refreshing relevant tabs"""
+        try:
+            # Refresh all tabs that support it
+            if hasattr(self, 'overview_tab') and hasattr(self.overview_tab, 'refresh_data'):
+                self.overview_tab.refresh_data()
+            if hasattr(self, 'course_tab') and hasattr(self.course_tab, 'refresh_data'):
+                self.course_tab.refresh_data()
+            if hasattr(self, 'planning_tab') and hasattr(self.planning_tab, 'refresh_data'):
+                self.planning_tab.refresh_data()
+            if hasattr(self, 'analytics_tab') and hasattr(self.analytics_tab, 'refresh_data'):
+                self.analytics_tab.refresh_data()
+        except Exception as e:
+            print(f"Error refreshing tabs after data change: {e}")
+
+    def get_data_manager(self):
+        """Get the unified data manager instance"""
+        return self.data_manager
+
+    def apply_settings(self, settings_dict):
+        """Apply settings changes from settings dialog"""
+        try:
+            # Apply general settings
+            general = settings_dict.get('general', {})
+            if general.get('startup_tab') is not None:
+                # Store for next startup
+                pass
+
+            # Apply display settings
+            display = settings_dict.get('display', {})
+            if display.get('theme') is not None:
+                self.apply_theme_change(display['theme'])
+
+            # Apply data settings
+            data = settings_dict.get('data', {})
+            # Handle database path changes, etc.
+
+            # Apply advanced settings
+            advanced = settings_dict.get('advanced', {})
+            if advanced.get('debug_mode'):
+                print("Debug mode enabled")
+
+            self.status_message("Settings applied successfully")
+
+        except Exception as e:
+            self.status_message(f"Error applying settings: {e}")
+            QMessageBox.warning(self, "Settings Error", f"Failed to apply some settings: {e}")
+
+    def apply_theme_change(self, theme_index):
+        """Apply theme change"""
+        if theme_index == 0:  # System Default
+            self.apply_native_styling()
+        elif theme_index == 1:  # Light
+            self.apply_native_styling()
+        elif theme_index == 2:  # Dark
+            self.apply_dark_theme()
+        elif theme_index == 3:  # High Contrast
+            self.apply_high_contrast_theme()
+
+    def apply_dark_theme(self):
+        """Apply dark theme styling"""
+        from PyQt6.QtGui import QPalette, QColor
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        palette = QPalette()
+
+        # Dark theme colors
+        palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+        palette.setColor(QPalette.ColorRole.Text, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+
+        app.setPalette(palette)
+        self.status_message("Dark theme applied")
+
+    def apply_high_contrast_theme(self):
+        """Apply high contrast theme styling"""
+        from PyQt6.QtGui import QPalette, QColor
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        palette = QPalette()
+
+        # High contrast colors
+        palette.setColor(QPalette.ColorRole.Window, QColor(0, 0, 0))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.Base, QColor(0, 0, 0))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(64, 64, 64))
+        palette.setColor(QPalette.ColorRole.Text, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.Button, QColor(0, 0, 0))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(255, 255, 0))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+
+        app.setPalette(palette)
+        self.status_message("High contrast theme applied")
 
 
 def main():
