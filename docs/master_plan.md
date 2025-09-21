@@ -2,24 +2,228 @@
 
 ## Executive Summary
 
-This master plan outlines the complete transformation of the UofT Course Dashboard from a basic transcript tracker into a comprehensive academic planning and degree management system. The plan leverages advanced web scraping, academic calendar integration, and intelligent course planning to create a world-class tool for University of Toronto students.
+This master plan outlines the complete transformation of the UofT Course Dashboard from a basic transcript tracker into a comprehensive academic planning and degree management system. **Phase 1 (Academic Foundation) is now complete**, and **Phase 2 prioritizes GUI modernization** with PyQt6/PySide6 migration to create a modern, professional user experience. The plan leverages advanced interface design, intelligent course planning, and comprehensive academic integration to create a world-class tool for University of Toronto students.
+
+### 🎯 **Updated Strategic Focus:**
+1. **Immediate Priority**: Modern GUI with PyQt6/PySide6 (Phase 2)
+2. **Foundation Complete**: Academic requirements engine and data management (Phase 1 ✅)
+3. **Future Expansion**: Intelligent planning, analytics, and web platform (Phases 3-5)
 
 ## Current Status: Phase 1 Complete ✅
 
 **Phase 1: Academic Foundation** has been successfully implemented, providing:
-- Database migration system with academic planning tables
-- Requirements calculation engine for UofT degree compliance
-- Program enrollment and management system
-- Breadth requirements tracking (5 categories)
-- Academic standing determination and graduation eligibility
-- New Requirements tab with comprehensive progress visualization
+- ✅ Database migration system with academic planning tables
+- ✅ Requirements calculation engine for UofT degree compliance
+- ✅ Program enrollment and management system
+- ✅ Breadth requirements tracking (5 categories)
+- ✅ Academic standing determination and graduation eligibility
+- ✅ Requirements tab with comprehensive progress visualization
+- ✅ Course search and transcript management functionality
+- ✅ Bulk edit/delete operations for transcript courses
+- ✅ GPA calculation and academic standing tracking
+- ✅ Course information viewer with detailed display
+- ✅ Project reorganization with proper directory structure
+- ✅ Comprehensive documentation and architecture guides
 
-## Phase 2: Intelligent Course Planning & Prerequisites (Weeks 5-8)
+**Current Technical Status:**
+- **Framework**: tkinter-based GUI (functional but dated)
+- **Database**: SQLite with migration system
+- **Web Scraping**: Selenium-powered UofT Academic Calendar integration
+- **Architecture**: Well-structured, documented, and maintainable
+- **Testing**: Validated bulk operations and core functionality
 
-### 🎯 Objectives
+## Phase 2: PyQt6/PySide6 Migration (Weeks 5-8) 🎨
+
+### 🎯 **NEXT MAJOR MILESTONE: Complete GUI Framework Migration**
+Transform the current functional tkinter application into a modern, professional PyQt6/PySide6 application with enhanced user experience and advanced capabilities.
+
+### 🚀 **Migration Approach: Systematic & Manageable**
+
+#### **Why PyQt6/PySide6 Now:**
+- **Professional Interface**: Modern, native look-and-feel across platforms
+- **Enhanced Capabilities**: Advanced widgets, better data handling, rich styling
+- **Performance**: Superior rendering, threading, and responsiveness
+- **Future-Ready**: Active Qt 6 ecosystem, extensive documentation
+- **Industry Standard**: Widely used in professional desktop applications
+
+#### **Migration Strategy:**
+1. **Complete Replacement**: Full migration from tkinter to PyQt6/PySide6
+2. **Preserve Functionality**: Maintain all existing features during migration
+3. **Incremental Development**: Build and test each component systematically
+4. **Data Compatibility**: Ensure seamless database and data integration
+5. **Enhanced UX**: Improve workflows and add new capabilities
+
+### 📋 **Phase 2A: Foundation & Core Structure (Week 5)**
+
+#### **Environment Setup & Planning**
+- **Development Environment**: Configure PyQt6/PySide6 toolchain and dependencies
+- **Project Structure**: Create new PyQt6 application structure alongside existing code
+- **Architecture Design**: Plan MVC architecture for clean separation of concerns
+- **Dependency Management**: Update requirements.txt with PyQt6/PySide6 dependencies
+
+#### **Core Application Framework**
+- **Main Application Window**: Create modern QMainWindow with menu bar and status bar
+- **Tab System**: Implement QTabWidget with improved navigation and styling
+- **Database Integration**: Ensure existing UnifiedCourseDatabase works with new GUI
+- **Styling System**: Establish custom themes and styling framework
+
+### 📋 **Phase 2B: Tab Migration & Core Features (Week 6)**
+
+#### **Course Search Tab (Priority 1)**
+- **Search Interface**: Modern QLineEdit with autocomplete and advanced filters
+- **Results Display**: QTableWidget/QTreeWidget with sorting, filtering, and selection
+- **Course Details**: Rich QTextEdit with formatted course information display
+- **Action Buttons**: Styled QPushButtons with improved layouts and functionality
+
+#### **Transcript Tab (Priority 2)**
+- **Course Table**: Advanced QTableWidget with multi-selection, sorting, and filtering
+- **Quick Add Form**: Streamlined course entry with QComboBox and validation
+- **Bulk Operations**: Enhanced bulk edit/delete with modern dialogs
+- **Summary Display**: Rich text summary with formatted statistics
+
+### 📋 **Phase 2C: Advanced Features & Polish (Week 7)**
+
+#### **Requirements & Planning Tabs**
+- **Requirements Tab**: Visual progress indicators with QProgressBar and custom widgets
+- **Planning Tab**: Drag-and-drop interface with QListWidget and enhanced planning
+- **GPA Dashboard**: Charts and graphs using QChart or matplotlib integration
+- **Analytics Tab**: Advanced visualizations and statistical displays
+
+#### **Enhanced Dialogs & Components**
+- **Course Dialog**: Modern QDialog with tabbed interface and validation
+- **Bulk Edit Dialog**: Improved bulk operations with better UX
+- **Settings Dialog**: Application preferences and configuration
+- **About Dialog**: Professional about window with application information
+
+### 📋 **Phase 2D: Integration & Testing (Week 8)**
+
+#### **Final Integration**
+- **Feature Parity**: Ensure all tkinter functionality is replicated and enhanced
+- **Performance Optimization**: Optimize loading times and responsiveness
+- **Error Handling**: Comprehensive error handling and user feedback
+- **Data Migration**: Seamless transition from tkinter version
+
+#### **Testing & Deployment**
+- **Comprehensive Testing**: Test all features, edge cases, and user workflows
+- **Cross-Platform Testing**: Verify functionality on different operating systems
+- **Documentation Update**: Update user guides and developer documentation
+- **Deployment Package**: Create installation packages and distribution files
+
+### 🎨 **New GUI Features & Enhancements**
+
+#### **Modern Interface Components:**
+- **Navigation**: Sidebar navigation with icons and modern tab system
+- **Search Interface**: Advanced search with filters, autocomplete, and real-time results
+- **Data Tables**: Sortable, filterable tables with multi-selection and context menus
+- **Course Cards**: Visual course display cards with ratings, difficulty, and quick actions
+- **Progress Visualization**: Interactive progress bars, pie charts, and timeline views
+- **Dark/Light Theme**: User-selectable themes with system integration
+
+#### **Enhanced User Experience:**
+- **Responsive Design**: Adaptive layout for different screen sizes
+- **Keyboard Shortcuts**: Comprehensive keyboard navigation and shortcuts
+- **Drag & Drop**: Intuitive course planning with drag-and-drop functionality
+- **Context Menus**: Right-click menus for quick actions
+- **Tool Tips**: Helpful tooltips and guided user experience
+- **Status Indicators**: Clear visual feedback for operations and data states
+
+### 💻 **Technical Implementation Strategy**
+
+#### **Development Approach for Claude Code + Human:**
+1. **Incremental Migration**: Convert one component at a time for manageable changes
+2. **Parallel Development**: Keep tkinter version functional during development
+3. **Modular Architecture**: Design clean, maintainable code structure
+4. **Thorough Testing**: Validate each component before proceeding
+5. **Documentation**: Maintain clear documentation throughout migration
+
+#### **PyQt6/PySide6 Architecture (New Structure):**
+```python
+# Main application architecture
+src/
+├── gui_qt/                    # New PyQt6 GUI package
+│   ├── __init__.py
+│   ├── main_window.py         # QMainWindow - main application
+│   ├── widgets/               # Custom widget components
+│   │   ├── course_search.py   # Course search interface
+│   │   ├── transcript_table.py # Transcript management
+│   │   ├── requirements_view.py # Requirements tracking
+│   │   ├── planning_widget.py  # Course planning
+│   │   └── gpa_dashboard.py    # GPA and analytics
+│   ├── dialogs/               # Dialog windows
+│   │   ├── course_dialog.py   # Course entry/edit
+│   │   ├── bulk_edit.py       # Bulk operations
+│   │   └── settings.py        # Application settings
+│   ├── resources/             # UI resources
+│   │   ├── styles.qss         # Stylesheets
+│   │   ├── icons/             # Application icons
+│   │   └── themes/            # Theme definitions
+│   └── utils/                 # GUI utilities
+│       ├── validators.py      # Input validation
+│       ├── formatters.py      # Text formatting
+│       └── charts.py          # Chart components
+├── core/                      # Existing business logic (unchanged)
+│   ├── database.py           # UnifiedCourseDatabase
+│   ├── requirements.py       # RequirementsCalculator
+│   └── scraper.py            # AcademicCalendarScraper
+└── main_qt.py                # New PyQt6 entry point
+```
+
+#### **Migration Dependencies:**
+```bash
+# Core PyQt6 requirements
+pip install PyQt6>=6.4.0
+pip install PyQt6-tools>=6.4.0
+
+# Enhanced features
+pip install matplotlib>=3.6.0      # For charts and graphs
+pip install pyqtgraph>=0.13.0     # Advanced plotting
+pip install qdarkstyle>=3.1.0     # Professional dark theme
+pip install qtawesome>=1.2.0      # Icon library
+
+# Optional enhancements
+pip install Pillow>=9.0.0          # Image processing
+pip install requests>=2.28.0       # HTTP requests for themes
+```
+
+#### **Key PyQt6 Components to Implement:**
+```python
+# Core application classes
+class MainWindow(QMainWindow):
+    """Main application window with menu bar, status bar, and tab system"""
+
+class CourseSearchWidget(QWidget):
+    """Modern course search with QLineEdit, QTableWidget, and filters"""
+
+class TranscriptTableWidget(QTableWidget):
+    """Enhanced transcript table with sorting, filtering, bulk operations"""
+
+class RequirementsWidget(QWidget):
+    """Requirements tracking with QProgressBar and visual indicators"""
+
+class PlanningWidget(QWidget):
+    """Drag-and-drop planning with QListWidget and enhanced UX"""
+
+class CourseDialog(QDialog):
+    """Modern course entry dialog with tabbed interface"""
+```
+
+### 🎯 **Phase 2 Deliverables**
+- ✅ Complete PyQt6/PySide6 migration
+- ✅ Modern, professional interface design
+- ✅ Enhanced user experience and workflows
+- ✅ Improved performance and responsiveness
+- ✅ Dark/light theme support
+- ✅ Advanced data visualization
+- ✅ Comprehensive testing and validation
+
+---
+
+## Phase 3: Intelligent Course Planning & Prerequisites (Weeks 9-12) 🧠
+
+### 🎯 **Objectives**
 Transform the system into an intelligent academic advisor that understands course dependencies, validates prerequisites, and provides smart course recommendations.
 
-### 🗄️ Database Enhancements
+### 🗄️ **Database Enhancements**
 
 **New Tables:**
 ```sql
@@ -77,7 +281,7 @@ CREATE TABLE planned_course_sequences (
 );
 ```
 
-### 🔧 Core Features Implementation
+### 🔧 **Core Features Implementation**
 
 #### 1. Advanced Prerequisites Engine
 ```python
@@ -279,7 +483,9 @@ class AcademicPredictor:
         """Flag potentially problematic semester combinations"""
 ```
 
-## Phase 4: Integration & Advanced Features (Weeks 13-16)
+---
+
+## Phase 4: Advanced Analytics & Machine Learning (Weeks 13-16) 📊
 
 ### 🎯 Objectives
 Complete the transformation with advanced integrations, multi-campus support, and cutting-edge features.
@@ -649,12 +855,79 @@ This master plan transforms the UofT Course Dashboard from a simple transcript t
 
 The system will serve as a model for academic planning tools, demonstrating how intelligent automation, comprehensive data integration, and user-centric design can revolutionize the student academic experience. With its modular architecture and extensible design, the platform will continue to evolve and adapt to changing academic landscapes while maintaining its core mission of empowering students to make informed academic decisions.
 
+## Phase 5: Web Platform & Cloud Integration (Weeks 17-20) 🌐
+
+### 🎯 **Objectives**
+Transform the desktop application into a modern web platform with cloud integration, multi-user support, and advanced collaboration features.
+
+### 🚀 **Web Platform Migration**
+
+#### **Technology Stack:**
+- **Frontend**: React/Vue.js with modern UI framework
+- **Backend**: FastAPI/Django REST framework
+- **Database**: PostgreSQL with cloud hosting
+- **Authentication**: JWT-based auth with university SSO
+- **Deployment**: Docker containers with cloud hosting (AWS/Azure)
+
+#### **Key Features:**
+- **Multi-User Support**: Individual student accounts with data isolation
+- **Cloud Sync**: Cross-device synchronization
+- **Collaboration**: Shared planning sessions and course discussions
+- **Real-Time Updates**: Live data synchronization across users
+- **API Access**: RESTful API for third-party integrations
+
 ---
 
-**Total Estimated Development Time**: 16 weeks
-**Estimated Lines of Code**: 15,000+ lines
-**Database Tables**: 20+ comprehensive tables
-**API Integrations**: 5+ external systems
-**Student Impact**: Transformational academic planning experience
+## Updated Development Timeline 📅
 
-*This master plan represents the complete vision for the UofT Course Dashboard evolution, building upon the solid Phase 1 foundation to create a world-class academic planning and management system.*
+### **Phase Status Overview:**
+
+| Phase | Duration | Status | Focus Area |
+|-------|----------|--------|------------|
+| **Phase 1** | ✅ **Complete** | Weeks 1-4 | **Academic Foundation** |
+| **Phase 2** | 🎯 **Current Priority** | Weeks 5-8 | **GUI Modernization (PyQt6/PySide6)** |
+| **Phase 3** | 📋 **Planned** | Weeks 9-12 | **Intelligent Course Planning** |
+| **Phase 4** | 📋 **Planned** | Weeks 13-16 | **Advanced Analytics & ML** |
+| **Phase 5** | 🔮 **Future** | Weeks 17-20 | **Web Platform & Cloud** |
+
+### **Phase 2 Ready to Begin: PyQt6/PySide6 Migration**
+
+#### **Current Status: Migration Planning Complete**
+- ✅ **Phase 1**: All academic foundation features implemented and tested
+- ✅ **Architecture**: Well-documented, organized codebase ready for migration
+- ✅ **Planning**: Detailed migration strategy and technical approach defined
+- 🎯 **Next**: Begin PyQt6/PySide6 development environment setup
+
+#### **Immediate Actions for Phase 2A (Week 5):**
+1. **Environment Setup**: Install PyQt6/PySide6 and configure development tools
+2. **Project Structure**: Create new gui_qt/ directory and organize components
+3. **Main Window**: Implement basic QMainWindow with tab system
+4. **Database Integration**: Ensure existing UnifiedCourseDatabase works with PyQt6
+5. **Basic Styling**: Establish initial theme and styling framework
+
+#### **Migration Priority Order:**
+1. **Main Application Window** - Core QMainWindow structure
+2. **Course Search Tab** - Most complex tab with search, results, and details
+3. **Transcript Tab** - Data-heavy tab with table operations
+4. **Requirements Tab** - Visual progress and calculations
+5. **Planning/GPA Tabs** - Enhanced features and visualizations
+6. **Dialogs & Polish** - Course dialogs, bulk operations, themes
+
+### **Success Metrics:**
+
+- ✅ **Phase 1**: Functional academic foundation with comprehensive features
+- 🎯 **Phase 2**: Modern, professional GUI with enhanced user experience
+- 📊 **Phase 3**: Intelligent course recommendations and prerequisite validation
+- 🤖 **Phase 4**: Predictive analytics and machine learning insights
+- 🌐 **Phase 5**: Full web platform with cloud integration and collaboration
+
+---
+
+**Updated Estimated Development Time**: 20 weeks
+**Current Progress**: Phase 1 Complete (25% of total roadmap)
+**Next Milestone**: Modern PyQt6/PySide6 Interface (Phase 2)
+**Estimated Lines of Code**: 20,000+ lines
+**Database Tables**: 25+ comprehensive tables
+**Student Impact**: Revolutionary academic planning experience
+
+*This updated master plan prioritizes frontend modernization to create an exceptional user experience before expanding into advanced backend features. The PyQt6/PySide6 migration will provide a solid foundation for all future enhancements while delivering immediate visual and usability improvements.*

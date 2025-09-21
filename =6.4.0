@@ -1,0 +1,15 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting PyQt6
+  Downloading pyqt6-6.9.1-cp39-abi3-win_amd64.whl.metadata (2.2 kB)
+Collecting PyQt6-sip<14,>=13.8 (from PyQt6)
+  Downloading pyqt6_sip-13.10.2-cp313-cp313-win_amd64.whl.metadata (515 bytes)
+Collecting PyQt6-Qt6<6.10.0,>=6.9.0 (from PyQt6)
+  Downloading pyqt6_qt6-6.9.2-py3-none-win_amd64.whl.metadata (551 bytes)
+Downloading pyqt6-6.9.1-cp39-abi3-win_amd64.whl (25.7 MB)
+   ---------------------------------------- 25.7/25.7 MB 5.7 MB/s  0:00:04
+Downloading pyqt6_qt6-6.9.2-py3-none-win_amd64.whl (74.1 MB)
+   ---------------------------------------- 74.1/74.1 MB 9.4 MB/s  0:00:07
+Downloading pyqt6_sip-13.10.2-cp313-cp313-win_amd64.whl (53 kB)
+Installing collected packages: PyQt6-Qt6, PyQt6-sip, PyQt6
+
+Successfully installed PyQt6-6.9.1 PyQt6-Qt6-6.9.2 PyQt6-sip-13.10.2

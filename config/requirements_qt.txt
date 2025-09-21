@@ -1,0 +1,19 @@
+# PyQt6/PySide6 Migration Dependencies
+# Core PyQt6 requirements
+PyQt6>=6.4.0
+PyQt6-tools>=6.4.0
+
+# Enhanced features
+matplotlib>=3.6.0          # For charts and graphs
+pyqtgraph>=0.13.0         # Advanced plotting
+qdarkstyle>=3.1.0         # Professional dark theme
+qtawesome>=1.2.0          # Icon library
+
+# Optional enhancements
+Pillow>=9.0.0             # Image processing
+requests>=2.28.0          # HTTP requests for themes
+
+# Existing dependencies (from original requirements.txt)
+selenium>=4.0.0
+webdriver-manager>=3.8.0
+beautifulsoup4>=4.11.0
