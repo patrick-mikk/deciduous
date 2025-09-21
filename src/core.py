@@ -296,53 +296,57 @@ class CourseDatabase:
 
 
 class UofTLocators:
-    """Centralized locator definitions for UofT Academic Calendar based on reference documentation."""
+    """Centralized locator definitions for UofT Academic Calendar based on actual HTML structure."""
 
     # Main navigation elements
     COURSE_SEARCH_LINK = (By.XPATH, "//a[@href='/search-courses']")
 
-    # Search interface elements - Updated based on current structure
-    COURSE_SEARCH_FORM = (By.CSS_SELECTOR, "form[action*='search']")
+    # Search interface elements - Updated based on actual HTML structure
+    COURSE_SEARCH_FORM = (By.ID, "views-exposed-form-course-search-page-1")
 
-    # Search input fields - Multiple strategies
+    # Search input fields - Based on actual HTML analysis
     COURSE_KEYWORD_INPUT_STRATEGIES = [
-        (By.NAME, "course-keyword"),
-        (By.NAME, "course_keyword"),
-        (By.NAME, "keyword"),
-        (By.ID, "edit-course-keyword"),
-        (By.ID, "edit-keyword"),
-        (By.CSS_SELECTOR, "input[name*='keyword']"),
-        (By.CSS_SELECTOR, "input[placeholder*='course']"),
-        (By.CSS_SELECTOR, "input[type='text']")
+        (By.ID, "edit-course-keyword"),                    # Primary: id="edit-course-keyword"
+        (By.NAME, "course_keyword"),                       # Primary: name="course_keyword"
+        (By.CSS_SELECTOR, "input[placeholder*='Course Code']"),  # Fallback: placeholder text
+        (By.CSS_SELECTOR, "input[placeholder*='course']"),      # Fallback: general course
+        (By.CSS_SELECTOR, "input[type='text']")                 # Last resort: any text input
     ]
 
-    # Search buttons
+    # Search buttons - Based on actual HTML analysis
     SEARCH_BUTTON_STRATEGIES = [
-        (By.CSS_SELECTOR, "input[type='submit']"),
-        (By.CSS_SELECTOR, "button[type='submit']"),
-        (By.XPATH, "//input[@value='Search' or @value='search']"),
-        (By.XPATH, "//button[contains(text(), 'Search')]"),
-        (By.CSS_SELECTOR, ".form-submit")
+        (By.ID, "edit-submit-course-search"),             # Primary: id="edit-submit-course-search"
+        (By.CSS_SELECTOR, "input[value='Apply']"),        # Primary: value="Apply"
+        (By.CSS_SELECTOR, "input[type='submit']"),        # Fallback: any submit button
+        (By.CSS_SELECTOR, ".form-submit")                 # Fallback: form submit class
     ]
 
-    # Search results - Based on current UofT structure
-    SEARCH_RESULTS_CONTAINER = (By.CSS_SELECTOR, ".view-content, .search-results, .view-course-search")
+    # Search results - Based on actual HTML structure
+    SEARCH_RESULTS_CONTAINER = (By.CSS_SELECTOR, ".view-content")
 
-    # Result items - Modern UofT structure uses views
+    # Result items - Actual structure uses .views-row
     COURSE_RESULT_ITEMS = [
-        (By.CSS_SELECTOR, ".views-row"),
-        (By.CSS_SELECTOR, ".course-result-item"),
-        (By.CSS_SELECTOR, ".search-result"),
-        (By.CSS_SELECTOR, "[data-course-code]")
+        (By.CSS_SELECTOR, ".views-row"),                  # Primary: actual structure
+        (By.CSS_SELECTOR, ".course-result-item"),         # Fallback: alternative naming
+        (By.CSS_SELECTOR, ".search-result")               # Fallback: general search result
     ]
 
-    # Course details in results
+    # Course details in results - Based on actual accordion structure
     COURSE_TITLE_IN_RESULT = [
-        (By.CSS_SELECTOR, "h3.js-views-accordion-group-header"),
-        (By.CSS_SELECTOR, ".course-title"),
-        (By.CSS_SELECTOR, "h3 a"),
-        (By.CSS_SELECTOR, ".views-field-title")
+        (By.CSS_SELECTOR, "h3.js-views-accordion-group-header div"),  # Primary: accordion header div
+        (By.CSS_SELECTOR, "h3.js-views-accordion-group-header"),      # Fallback: accordion header
+        (By.CSS_SELECTOR, ".course-title"),                           # Fallback: course title class
+        (By.CSS_SELECTOR, "h3")                                       # Last resort: any h3
     ]
+
+    # Course page detail selectors - Based on actual live website JS paths
+    COURSE_PAGE_TITLE = (By.CSS_SELECTOR, "#block-w3css-subtheme-page-title > h1")
+    COURSE_PAGE_HOURS = (By.CSS_SELECTOR, "#block-w3css-subtheme-content > article > div > div.w3-row.field.field--name-field-hours.field--type-text.field--label-inline.clearfix > div > p")
+    COURSE_PAGE_DESCRIPTION = (By.CSS_SELECTOR, "#block-w3css-subtheme-content > article > div > div.w3-row.field.field--name-body.field--type-text-with-summary.field--label-hidden.w3-bar-item.field__item")
+    COURSE_PAGE_PREREQUISITES = (By.CSS_SELECTOR, "#block-w3css-subtheme-content > article > div > div.w3-row.field.field--name-field-prerequisite.field--type-text-long.field--label-inline.clearfix > div")
+    COURSE_PAGE_EXCLUSIONS = (By.CSS_SELECTOR, "#block-w3css-subtheme-content > article > div > div.w3-row.field.field--name-field-exclusion.field--type-text-long.field--label-inline.clearfix > div")
+    COURSE_PAGE_BREADTH = (By.CSS_SELECTOR, "#block-w3css-subtheme-content > article > div > div.w3-row.field.field--name-field-breadth-requirements.field--type-list-string.field--label-inline.clearfix > div")
+    COURSE_PAGE_COREQUISITES = (By.CSS_SELECTOR, ".field--name-field-corequisite .field__item")
 
     # Course links
     COURSE_LINKS = (By.XPATH, "//a[contains(@href, '/course/')]")
@@ -564,6 +568,123 @@ class AcademicCalendarScraper:
 
         except Exception:
             return None
+
+    def get_course_details(self, course_code):
+        """Get detailed course information by visiting the course page."""
+        if not self.driver:
+            return None
+
+        try:
+            # Navigate to course page
+            course_url = f"{self.base_url}/course/{course_code.lower()}"
+            if self.debug:
+                print(f"Fetching course details from: {course_url}")
+
+            self.driver.get(course_url)
+            self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+
+            course_details = {
+                'course_code': course_code,
+                'title': '',
+                'description': '',
+                'hours': '',
+                'prerequisites': '',
+                'exclusions': '',
+                'breadth_requirements': '',
+                'corequisites': '',
+                'department': '',
+                'level': 0,
+                'credits': 0.5 if 'H' in course_code else 1.0,
+                'url': course_url
+            }
+
+            # Extract course title
+            try:
+                title_element = self.driver.find_element(*UofTLocators.COURSE_PAGE_TITLE)
+                course_details['title'] = title_element.text.strip()
+            except Exception:
+                pass
+
+            # Extract course description
+            try:
+                desc_element = self.driver.find_element(*UofTLocators.COURSE_PAGE_DESCRIPTION)
+                course_details['description'] = desc_element.text.strip()
+            except Exception:
+                pass
+
+            # Extract course hours
+            try:
+                hours_element = self.driver.find_element(*UofTLocators.COURSE_PAGE_HOURS)
+                course_details['hours'] = hours_element.text.strip()
+            except Exception:
+                pass
+
+            # Extract prerequisites
+            try:
+                prereq_element = self.driver.find_element(*UofTLocators.COURSE_PAGE_PREREQUISITES)
+                course_details['prerequisites'] = prereq_element.text.strip()
+            except Exception:
+                pass
+
+            # Extract exclusions
+            try:
+                excl_element = self.driver.find_element(*UofTLocators.COURSE_PAGE_EXCLUSIONS)
+                course_details['exclusions'] = excl_element.text.strip()
+            except Exception:
+                pass
+
+            # Extract breadth requirements
+            try:
+                breadth_element = self.driver.find_element(*UofTLocators.COURSE_PAGE_BREADTH)
+                course_details['breadth_requirements'] = breadth_element.text.strip()
+            except Exception:
+                pass
+
+            # Extract corequisites
+            try:
+                coreq_element = self.driver.find_element(*UofTLocators.COURSE_PAGE_COREQUISITES)
+                course_details['corequisites'] = coreq_element.text.strip()
+            except Exception:
+                pass
+
+            # Extract department and level from course code
+            course_details['department'] = course_code[:3]
+            level_match = re.search(r'(\d)(?:\d{2})', course_code)
+            if level_match:
+                course_details['level'] = int(level_match.group(1))
+
+            if self.debug:
+                print(f"Extracted course details for {course_code}: {course_details['title']}")
+
+            return course_details
+
+        except Exception as e:
+            if self.debug:
+                print(f"Failed to get course details for {course_code}: {e}")
+            return None
+
+    def search_courses_enhanced(self, keyword, limit=10, include_details=True):
+        """Enhanced search with optional detailed course information."""
+        # First get basic search results
+        basic_results = self.search_courses(keyword, limit)
+
+        if not include_details or not basic_results:
+            return basic_results
+
+        # Enhance with detailed information
+        enhanced_results = []
+        for course in basic_results:
+            course_code = course.get('course_code')
+            if course_code:
+                detailed_info = self.get_course_details(course_code)
+                if detailed_info:
+                    # Merge basic and detailed information
+                    course.update(detailed_info)
+                enhanced_results.append(course)
+            else:
+                enhanced_results.append(course)
+
+        return enhanced_results
 
     def __del__(self):
         """Cleanup on object destruction."""
