@@ -65,13 +65,11 @@ class UnifiedDataManager(QObject):
 
     def add_course(self, course_data: Dict) -> bool:
         """Add a new course with validation and signals"""
-        print(f"DataManager.add_course called with: {course_data}")  # Debug logging
         with self._lock:
             try:
                 # Validate course data
                 validation_errors = self._validate_course_data(course_data)
                 if validation_errors:
-                    print(f"Validation errors in add_course: {validation_errors}")  # Debug logging
                     for field, error in validation_errors.items():
                         self.validation_error.emit(field, error)
                     return False

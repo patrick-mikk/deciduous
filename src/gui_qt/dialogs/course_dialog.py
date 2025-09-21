@@ -246,7 +246,14 @@ class CourseDialog(QDialog):
             return
 
         # Basic information
-        self.course_code_edit.setText(self.course_data.get('course_code', ''))
+        course_code = self.course_data.get('course_code', '')
+        self.course_code_edit.setText(course_code)
+
+        # If course code came from academic calendar search, make it read-only to prevent accidental changes
+        if course_code and not self.is_edit_mode:
+            self.course_code_edit.setReadOnly(True)
+            self.course_code_edit.setStyleSheet("background-color: #f0f0f0;")
+
         self.title_edit.setText(self.course_data.get('title', ''))
 
         if 'credits' in self.course_data:
@@ -334,8 +341,14 @@ class CourseDialog(QDialog):
         """Get course data from form"""
         mark_value = self.mark_spin.value() if self.mark_spin.value() > 0 else None
 
+        # Ensure course code is not empty
+        course_code = self.course_code_edit.text().strip().upper()
+        if not course_code:
+            # Try to restore from original course data if available
+            course_code = self.course_data.get('course_code', '').strip().upper()
+
         return {
-            'course_code': self.course_code_edit.text().strip().upper(),
+            'course_code': course_code,
             'title': self.title_edit.text().strip(),
             'credits': self.credits_spin.value(),
             'grade': self.grade_combo.currentText() if self.grade_combo.currentText() else None,
