@@ -224,7 +224,7 @@ class CourseDatabase:
                 course_data.get('title', ''),
                 course_data.get('credits', 0.5),
                 course_data.get('grade', ''),
-                course_data.get('semester', ''),
+                course_data.get('semester', course_data.get('session', '')),
                 course_data.get('year', ''),
                 course_data.get('gpa_points', 0.0),
                 course_data.get('status', 'completed')

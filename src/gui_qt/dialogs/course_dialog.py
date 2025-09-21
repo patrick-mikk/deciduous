@@ -274,6 +274,33 @@ class CourseDialog(QDialog):
             if index >= 0:
                 self.status_combo.setCurrentIndex(index)
 
+        # Academic details - populate from scraped data
+        if 'prerequisites' in self.course_data:
+            self.prerequisites_edit.setPlainText(str(self.course_data['prerequisites']))
+
+        if 'description' in self.course_data:
+            self.description_edit.setPlainText(str(self.course_data['description']))
+
+        if 'breadth_requirements' in self.course_data and self.course_data['breadth_requirements']:
+            # Try to match breadth requirement text
+            breadth_text = str(self.course_data['breadth_requirements'])
+            for i in range(self.breadth_combo.count()):
+                if breadth_text.lower() in self.breadth_combo.itemText(i).lower():
+                    self.breadth_combo.setCurrentIndex(i)
+                    break
+
+        # Additional fields if available
+        if 'exclusions' in self.course_data:
+            # Store exclusions in notes for now (we can add an exclusions field later)
+            existing_notes = getattr(self, 'notes_edit', None)
+            if existing_notes and self.course_data['exclusions']:
+                current_text = existing_notes.toPlainText()
+                exclusions_text = f"Exclusions: {self.course_data['exclusions']}"
+                if current_text:
+                    existing_notes.setPlainText(f"{current_text}\n\n{exclusions_text}")
+                else:
+                    existing_notes.setPlainText(exclusions_text)
+
     def validate_data(self):
         """Validate form data before saving"""
         errors = []

@@ -75,7 +75,8 @@ class UnifiedDataManager(QObject):
                     return False
 
                 # Add to database
-                success = self.database.add_course_to_transcript(**course_data)
+                result = self.database.save_course(course_data)
+                success = result is not None
 
                 if success:
                     # Record action for undo
@@ -221,7 +222,7 @@ class UnifiedDataManager(QObject):
                 elif action.action_type == 'delete':
                     # Re-add the deleted course
                     course_data = action.data['course_data']
-                    self.database.add_course_to_transcript(**course_data)
+                    self.database.save_course(course_data)
 
                 # Move to redo stack
                 self.redo_stack.append(action)
@@ -248,7 +249,7 @@ class UnifiedDataManager(QObject):
             try:
                 if action.action_type == 'add':
                     # Re-add the course
-                    self.database.add_course_to_transcript(**action.data)
+                    self.database.save_course(action.data)
 
                 elif action.action_type == 'edit':
                     # Re-apply the edit

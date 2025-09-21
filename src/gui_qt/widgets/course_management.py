@@ -575,16 +575,26 @@ class CourseManagementWidget(QWidget):
     def on_add_to_transcript(self, course_data):
         """Handle adding course to transcript"""
         try:
-            from gui_qt.dialogs.course_dialog import QuickAddCourseDialog
+            from gui_qt.dialogs.course_dialog import CourseDialog
 
-            # Pre-populate dialog with course data from academic calendar
+            # Pre-populate dialog with ALL course data from academic calendar
             dialog_data = {
                 'course_code': course_data.get('course_code', ''),
                 'title': course_data.get('title', ''),
-                'credits': course_data.get('credits', 0.5),  # Default to 0.5 credits
+                'credits': course_data.get('credits', 0.5),
+                'description': course_data.get('description', ''),
+                'prerequisites': course_data.get('prerequisites', ''),
+                'exclusions': course_data.get('exclusions', ''),
+                'breadth_requirements': course_data.get('breadth_requirements', ''),
+                'url': course_data.get('url', ''),
+                # Set default values for transcript entry
+                'session': 'Fall',
+                'year': 2024,
+                'status': 'completed'
             }
 
-            dialog = QuickAddCourseDialog(self, dialog_data)
+            # Use the full CourseDialog instead of QuickAddCourseDialog for better data entry
+            dialog = CourseDialog(self, dialog_data, self.data_manager)
             dialog.course_saved.connect(self.on_course_saved)
             dialog.exec()
 
