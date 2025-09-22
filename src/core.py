@@ -8,6 +8,8 @@ import os
 import re
 import time
 import logging
+import subprocess
+import sys
 from typing import List, Dict, Optional
 
 # Selenium imports (optional)
@@ -28,9 +30,17 @@ try:
 except ImportError:
     print("Selenium not installed - course search functionality will be limited")
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - suppress selenium and webdriver logs
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# Suppress selenium and webdriver-manager logs
+selenium_logger = logging.getLogger('selenium')
+selenium_logger.setLevel(logging.WARNING)
+wdm_logger = logging.getLogger('WDM')
+wdm_logger.setLevel(logging.WARNING)
+urllib3_logger = logging.getLogger('urllib3')
+urllib3_logger.setLevel(logging.WARNING)
 
 
 class CourseDatabase:
@@ -289,8 +299,8 @@ class CourseDatabase:
             cursor.execute('''
                 INSERT OR REPLACE INTO course_details
                 (course_code, title, description, prerequisites, exclusions,
-                 breadth_requirements, department, level, credits, url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 breadth_requirements, department, level, credits, url, hours, corequisites)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 course_details.get('course_code', ''),
                 course_details.get('title', ''),
@@ -301,13 +311,50 @@ class CourseDatabase:
                 course_details.get('department', ''),
                 course_details.get('level', 0),
                 course_details.get('credits', 0.5),
-                course_details.get('url', '')
+                course_details.get('url', ''),
+                course_details.get('hours', ''),
+                course_details.get('corequisites', '')
             ))
             conn.commit()
             return True
         except Exception as e:
             print(f"Error saving course details: {e}")
             return False
+        finally:
+            conn.close()
+
+    def get_course_details(self, course_code):
+        """Get detailed course information from database"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT course_code, title, description, prerequisites, exclusions,
+                       breadth_requirements, department, level, credits, url, hours, corequisites
+                FROM course_details
+                WHERE course_code = ?
+            ''', (course_code,))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'course_code': row[0],
+                    'title': row[1],
+                    'description': row[2],
+                    'prerequisites': row[3],
+                    'exclusions': row[4],
+                    'breadth_requirements': row[5],
+                    'department': row[6],
+                    'level': row[7],
+                    'credits': row[8],
+                    'url': row[9],
+                    'hours': row[10],
+                    'corequisites': row[11]
+                }
+            return None
+        except Exception as e:
+            print(f"Error retrieving course details: {e}")
+            return None
         finally:
             conn.close()
 
@@ -390,7 +437,7 @@ class AcademicCalendarScraper:
             if self.headless and not self.debug:
                 chrome_options.add_argument("--headless")
 
-            # Performance optimizations from reference documentation
+            # Performance optimizations
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
@@ -399,23 +446,51 @@ class AcademicCalendarScraper:
             chrome_options.add_argument("--disable-plugins")
             chrome_options.add_argument("--window-size=1920,1080")
 
+            # Suppress error messages and logs
+            chrome_options.add_argument("--log-level=3")  # Fatal errors only
+            chrome_options.add_argument("--silent")
+            chrome_options.add_argument("--disable-logging")
+            chrome_options.add_argument("--disable-dev-tools")
+            chrome_options.add_argument("--disable-background-networking")
+            chrome_options.add_argument("--disable-sync")
+            chrome_options.add_argument("--disable-translate")
+            chrome_options.add_argument("--disable-features=TranslateUI")
+            chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+            chrome_options.add_argument("--disable-ipc-flooding-protection")
+            chrome_options.add_argument("--disable-component-extensions-with-background-pages")
+            chrome_options.add_argument("--disable-default-apps")
+            chrome_options.add_argument("--disable-background-timer-throttling")
+            chrome_options.add_argument("--disable-renderer-backgrounding")
+            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+            chrome_options.add_argument("--disable-client-side-phishing-detection")
+            chrome_options.add_argument("--disable-component-update")
+            chrome_options.add_argument("--disable-domain-reliability")
+
             # User agent for better compatibility
             chrome_options.add_argument(
                 "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             )
 
-            # Enable logging for debugging
-            if self.debug:
-                chrome_options.add_argument("--enable-logging")
-                chrome_options.add_argument("--v=1")
-
-            # Setup service
+            # Setup service with logging disabled
             try:
                 from webdriver_manager.chrome import ChromeDriverManager
-                service = Service(ChromeDriverManager().install())
+                # Redirect webdriver-manager output to devnull
+                with open(os.devnull, 'w') as devnull:
+                    original_stdout = sys.stdout
+                    original_stderr = sys.stderr
+                    sys.stdout = devnull
+                    sys.stderr = devnull
+                    try:
+                        service = Service(ChromeDriverManager().install())
+                    finally:
+                        sys.stdout = original_stdout
+                        sys.stderr = original_stderr
             except ImportError:
                 service = Service()  # Assumes chromedriver in PATH
+
+            # Suppress Chrome logs
+            service.creation_flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.implicitly_wait(10)
