@@ -417,13 +417,13 @@ class UnifiedDataManager(QObject):
             }
 
             for course in courses:
-                if len(course) > 3 and course[3]:  # Has credits
-                    credits = float(course[3])
+                if len(course) > 2 and course[2]:  # Has credits (index 2)
+                    credits = float(course[2])
                     total_credits += credits
 
-                    # GPA calculation
-                    if len(course) > 4 and course[4] in grade_points:
-                        total_points += grade_points[course[4]] * credits
+                    # GPA calculation (grade is at index 3)
+                    if len(course) > 3 and course[3] and course[3] in grade_points:
+                        total_points += grade_points[course[3]] * credits
                         grade_credits += credits
 
             current_gpa = total_points / grade_credits if grade_credits > 0 else 0.0

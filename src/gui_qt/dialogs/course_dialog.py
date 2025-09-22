@@ -18,11 +18,11 @@ class CourseDialog(QDialog):
 
     course_saved = pyqtSignal(dict)
 
-    def __init__(self, parent=None, course_data=None, data_manager=None):
+    def __init__(self, parent=None, course_data=None, data_manager=None, is_edit_mode=False):
         super().__init__(parent)
         self.course_data = course_data or {}
         self.data_manager = data_manager
-        self.is_edit_mode = bool(course_data)
+        self.is_edit_mode = is_edit_mode  # Explicitly set edit mode instead of inferring from course_data
 
         self.setup_ui()
         self.populate_data()

@@ -346,18 +346,18 @@ class AcademicOverviewWidget(QWidget):
             }
 
             for course in courses:
-                if len(course) > 3 and course[3]:  # Has credits
-                    credits = float(course[3])
+                if len(course) > 2 and course[2]:  # Has credits (index 2)
+                    credits = float(course[2])
                     total_credits += credits
 
-                    # GPA calculation
-                    if len(course) > 4 and course[4] in grade_points:
-                        total_points += grade_points[course[4]] * credits
+                    # GPA calculation (grade is at index 3)
+                    if len(course) > 3 and course[3] and course[3] in grade_points:
+                        total_points += grade_points[course[3]] * credits
                         grade_credits += credits
 
                     # Level analysis
-                    if len(course) > 1:  # Has course code
-                        course_code = course[1]
+                    if len(course) > 0:  # Has course code
+                        course_code = course[0]
                         # Extract course level (e.g., CSC108 -> 1, CSC200 -> 2)
                         level_match = None
                         for char in course_code:

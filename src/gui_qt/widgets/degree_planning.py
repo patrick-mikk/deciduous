@@ -191,12 +191,12 @@ class RequirementsPanel(QGroupBox):
             }
 
             for course in courses:
-                if len(course) > 3 and course[3]:
-                    credits = float(course[3])
+                if len(course) > 2 and course[2]:
+                    credits = float(course[2])
                     total_credits += credits
 
-                    if len(course) > 4 and course[4] in grade_points:
-                        total_points += grade_points[course[4]] * credits
+                    if len(course) > 3 and course[3] and course[3] in grade_points:
+                        total_points += grade_points[course[3]] * credits
                         grade_credits += credits
 
             # Update progress bars

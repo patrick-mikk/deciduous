@@ -250,6 +250,23 @@ class CourseDatabase:
         finally:
             conn.close()
 
+    def get_programs(self):
+        """Get all available programs"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, program_code, program_name, program_type, faculty,
+                       total_credits, description
+                FROM programs ORDER BY faculty, program_name
+            ''')
+            return cursor.fetchall()
+        except Exception as e:
+            print(f"Error fetching programs: {e}")
+            return []
+        finally:
+            conn.close()
+
     def delete_course(self, course_code):
         """Delete course from transcript"""
         conn = self.get_connection()
@@ -546,23 +563,28 @@ class AcademicCalendarScraper:
 
             extracted_code = course_code_match.group(1)
 
+            # Extract proper title and description
+            clean_title = title_text
+            description = ''
+
+            # If title contains " - ", split into course code and actual title
+            if ' - ' in title_text:
+                parts = title_text.split(' - ', 1)
+                if len(parts) > 1:
+                    clean_title = parts[1].strip()  # Use the part after the dash as the title
+                    description = parts[1].strip()   # Also use it as description for now
+
             # Build course data
             course_data = {
                 'course_code': extracted_code,
-                'title': title_text,
+                'title': clean_title,
                 'url': f"{self.base_url}/course/{extracted_code.lower()}",
-                'description': '',
+                'description': description,
                 'credits': 0.5 if 'H' in extracted_code else 1.0,
                 'prerequisites': '',
                 'exclusions': '',
                 'breadth_requirements': ''
             }
-
-            # Extract description if available
-            if ' - ' in title_text:
-                parts = title_text.split(' - ', 1)
-                if len(parts) > 1:
-                    course_data['description'] = parts[1].strip()
 
             return course_data
 

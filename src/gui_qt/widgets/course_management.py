@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QTextEdit,
     QSplitter, QGroupBox, QHeaderView, QAbstractItemView,
     QComboBox, QFormLayout, QFrame, QProgressBar, QMessageBox,
-    QCheckBox, QMenu
+    QCheckBox, QMenu, QSpinBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QAction
@@ -290,8 +290,8 @@ class TranscriptPanel(QGroupBox):
         """Populate grade filter with available grades"""
         grades = set()
         for course in self.transcript_data:
-            if len(course) > 4 and course[4]:
-                grades.add(course[4])
+            if len(course) > 3 and course[3]:
+                grades.add(course[3])
 
         self.grade_filter.clear()
         self.grade_filter.addItem("All Grades")
@@ -307,7 +307,7 @@ class TranscriptPanel(QGroupBox):
         if code_filter:
             self.filtered_data = [
                 course for course in self.filtered_data
-                if code_filter in course[1].upper()  # Course code is at index 1
+                if code_filter in course[0].upper()  # Course code is at index 0
             ]
 
         # Session filter
@@ -315,7 +315,7 @@ class TranscriptPanel(QGroupBox):
         if session_filter != "All Sessions":
             self.filtered_data = [
                 course for course in self.filtered_data
-                if len(course) > 5 and course[5] == session_filter
+                if len(course) > 4 and course[4] == session_filter
             ]
 
         # Grade filter
@@ -323,7 +323,7 @@ class TranscriptPanel(QGroupBox):
         if grade_filter != "All Grades":
             self.filtered_data = [
                 course for course in self.filtered_data
-                if len(course) > 4 and course[4] == grade_filter
+                if len(course) > 3 and course[3] == grade_filter
             ]
 
         self.populate_transcript_table()
@@ -335,16 +335,16 @@ class TranscriptPanel(QGroupBox):
 
         for row, course in enumerate(self.filtered_data):
             # Extract course data safely
-            course_code = course[1] if len(course) > 1 else ""
-            title = course[2] if len(course) > 2 else ""
-            credits = str(course[3]) if len(course) > 3 else ""
-            grade = course[4] if len(course) > 4 else ""
-            mark = str(course[5]) if len(course) > 5 and course[5] is not None else ""
-            session = course[6] if len(course) > 6 else ""
-            year = str(course[7]) if len(course) > 7 else ""
-            status = course[8] if len(course) > 8 else ""
+            course_code = course[0] if len(course) > 0 else ""
+            title = course[1] if len(course) > 1 else ""
+            credits = str(course[2]) if len(course) > 2 else ""
+            grade = course[3] if len(course) > 3 else ""
+            session = course[4] if len(course) > 4 else ""
+            year = str(course[5]) if len(course) > 5 else ""
+            mark = str(course[6]) if len(course) > 6 and course[6] is not None else ""
+            status = course[7] if len(course) > 7 else ""
 
-            # Populate cells
+            # Populate cells (matching header order: Course Code, Title, Credits, Grade, Mark, Session, Year, Status)
             items = [course_code, title, credits, grade, mark, session, year, status]
             for col, value in enumerate(items):
                 item = QTableWidgetItem(str(value))
@@ -367,13 +367,13 @@ class TranscriptPanel(QGroupBox):
         }
 
         for course in self.filtered_data:
-            if len(course) > 3 and course[3]:
+            if len(course) > 2 and course[2]:
                 try:
-                    credits = float(course[3])
+                    credits = float(course[2])
                     total_credits += credits
 
-                    if len(course) > 4 and course[4] in grade_points:
-                        gpa_points += grade_points[course[4]] * credits
+                    if len(course) > 3 and course[3] and course[3] in grade_points:
+                        gpa_points += grade_points[course[3]] * credits
                         gpa_credits += credits
                 except (ValueError, TypeError):
                     pass
@@ -422,9 +422,11 @@ class DetailsPanel(QGroupBox):
     add_to_transcript_requested = pyqtSignal(dict)
     add_to_planning_requested = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, database=None, data_manager=None, parent=None):
         super().__init__("Course Details", parent)
         self.current_course = None
+        self.database = database
+        self.data_manager = data_manager
         self.setup_ui()
 
     def setup_ui(self):
@@ -434,11 +436,38 @@ class DetailsPanel(QGroupBox):
         # Course details display
         self.details_text = QTextEdit()
         self.details_text.setReadOnly(True)
-        self.details_text.setMaximumHeight(400)
+        self.details_text.setMaximumHeight(250)
         layout.addWidget(self.details_text)
 
+        # Inline transcript entry form
+        form_group = QGroupBox("Add to Transcript")
+        form_layout = QFormLayout(form_group)
+
+        # Grade selection
+        self.grade_combo = QComboBox()
+        self.grade_combo.addItems(["", "A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F", "FZ", "P", "CR", "NCR"])
+        form_layout.addRow("Grade:", self.grade_combo)
+
+        # Session selection
+        self.session_combo = QComboBox()
+        self.session_combo.addItems(["Fall", "Winter", "Summer"])
+        form_layout.addRow("Session:", self.session_combo)
+
+        # Year input
+        self.year_spin = QSpinBox()
+        self.year_spin.setRange(2000, 2030)
+        self.year_spin.setValue(2024)
+        form_layout.addRow("Year:", self.year_spin)
+
+        # Status selection
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["completed", "in_progress", "planned", "dropped"])
+        form_layout.addRow("Status:", self.status_combo)
+
+        layout.addWidget(form_group)
+
         # Action buttons
-        action_layout = QVBoxLayout()
+        action_layout = QHBoxLayout()
 
         self.add_transcript_btn = QPushButton("Add to Transcript")
         self.add_transcript_btn.setEnabled(False)
@@ -504,8 +533,49 @@ class DetailsPanel(QGroupBox):
 
     def on_add_to_transcript(self):
         """Handle add to transcript request"""
-        if self.current_course:
-            self.add_to_transcript_requested.emit(self.current_course)
+        if not self.current_course or not self.data_manager:
+            return
+
+        try:
+            # Gather data from current course and form
+            course_data = {
+                'course_code': self.current_course.get('course_code', ''),
+                'title': self.current_course.get('title', ''),
+                'credits': self.current_course.get('credits', 0.5),
+                'description': self.current_course.get('description', ''),
+                'prerequisites': self.current_course.get('prerequisites', ''),
+                'exclusions': self.current_course.get('exclusions', ''),
+                'breadth_requirements': self.current_course.get('breadth_requirements', ''),
+                'grade': self.grade_combo.currentText() if self.grade_combo.currentText() else None,
+                'session': self.session_combo.currentText(),
+                'year': self.year_spin.value(),
+                'status': self.status_combo.currentText()
+            }
+
+            # Add course using data manager
+            success = self.data_manager.add_course(course_data)
+
+            if success:
+                print(f"[SUCCESS] Course {course_data['course_code']} added to transcript successfully!")
+                # Clear the form
+                self.grade_combo.setCurrentIndex(0)
+                self.session_combo.setCurrentIndex(0)
+                self.year_spin.setValue(2024)
+                self.status_combo.setCurrentIndex(0)
+                # Emit signal to refresh transcript panel
+                self.add_to_transcript_requested.emit(course_data)
+                # Show message box only if parent exists (interactive mode)
+                if self.parent():
+                    QMessageBox.information(self, "Success", f"Course {course_data['course_code']} added to transcript successfully!")
+            else:
+                print(f"[ERROR] Failed to add course to transcript: {course_data['course_code']}")
+                if self.parent():
+                    QMessageBox.warning(self, "Error", "Failed to add course to transcript. Please check the course information.")
+
+        except Exception as e:
+            print(f"[ERROR] Exception while adding course: {str(e)}")
+            if self.parent():
+                QMessageBox.critical(self, "Error", f"An error occurred while adding the course: {str(e)}")
 
     def on_add_to_planning(self):
         """Handle add to planning request"""
@@ -542,7 +612,7 @@ class CourseManagementWidget(QWidget):
         right_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Top right - Course details
-        self.details_panel = DetailsPanel()
+        self.details_panel = DetailsPanel(self.database, self.data_manager)
         self.details_panel.setMaximumHeight(500)
         right_splitter.addWidget(self.details_panel)
 
@@ -568,54 +638,10 @@ class CourseManagementWidget(QWidget):
         # Transcript panel signals
         self.transcript_panel.course_details_requested.connect(self.details_panel.display_course)
 
-        # Details panel signals
-        self.details_panel.add_to_transcript_requested.connect(self.on_add_to_transcript)
+        # Details panel signals (now just refreshes transcript after inline addition)
+        self.details_panel.add_to_transcript_requested.connect(self.transcript_panel.refresh_data)
         self.details_panel.add_to_planning_requested.connect(self.on_add_to_planning)
 
-    def on_add_to_transcript(self, course_data):
-        """Handle adding course to transcript"""
-        try:
-            from gui_qt.dialogs.course_dialog import CourseDialog
-
-            # Pre-populate dialog with ALL course data from academic calendar
-            dialog_data = {
-                'course_code': course_data.get('course_code', ''),
-                'title': course_data.get('title', ''),
-                'credits': course_data.get('credits', 0.5),
-                'description': course_data.get('description', ''),
-                'prerequisites': course_data.get('prerequisites', ''),
-                'exclusions': course_data.get('exclusions', ''),
-                'breadth_requirements': course_data.get('breadth_requirements', ''),
-                'url': course_data.get('url', ''),
-                # Set default values for transcript entry
-                'session': 'Fall',
-                'year': 2024,
-                'status': 'completed'
-            }
-
-            # Use the full CourseDialog instead of QuickAddCourseDialog for better data entry
-            dialog = CourseDialog(self, dialog_data, self.data_manager)
-            dialog.course_saved.connect(self.on_course_saved)
-            dialog.exec()
-
-        except ImportError as e:
-            QMessageBox.warning(self, "Error", f"Course dialog not available: {e}")
-
-    def on_course_saved(self, course_data):
-        """Handle course saved from dialog"""
-        if self.data_manager:
-            success = self.data_manager.add_course(course_data)
-            if success:
-                self.courses_modified.emit()  # Signal that courses were modified
-                QMessageBox.information(self, "Success",
-                                      f"Course {course_data['course_code']} added to transcript!")
-            else:
-                QMessageBox.warning(self, "Error", "Failed to add course to transcript.")
-        else:
-            # Emit signal for parent to handle
-            self.courses_modified.emit()
-            QMessageBox.information(self, "Course Added",
-                                  f"Course {course_data['course_code']} will be added to transcript.")
 
     def on_add_to_planning(self, course_data):
         """Handle adding course to planning"""

@@ -201,9 +201,9 @@ class CoursePerformanceTable(QGroupBox):
             if len(course) < 5:
                 continue
 
-            course_code = course[1] if len(course) > 1 else ""
-            grade = course[4] if len(course) > 4 else ""
-            credits = str(course[3]) if len(course) > 3 else ""
+            course_code = course[0] if len(course) > 0 else ""
+            grade = course[3] if len(course) > 3 else ""
+            credits = str(course[2]) if len(course) > 2 else ""
 
             gpa_points = grade_points.get(grade, 0.0)
 
@@ -429,18 +429,18 @@ class AnalyticsReportsWidget(QWidget):
             }
 
             for course in courses:
-                if len(course) > 3 and course[3]:
-                    credits = float(course[3])
+                if len(course) > 2 and course[2]:
+                    credits = float(course[2])
                     total_credits += credits
 
                     # GPA calculation
-                    if len(course) > 4 and course[4] in grade_points:
-                        total_points += grade_points[course[4]] * credits
+                    if len(course) > 3 and course[3] in grade_points:
+                        total_points += grade_points[course[3]] * credits
                         grade_credits += credits
 
                     # Level distribution
-                    if len(course) > 1:
-                        course_code = course[1]
+                    if len(course) > 0:
+                        course_code = course[0]
                         for char in course_code:
                             if char.isdigit():
                                 level = char + '00'
@@ -479,7 +479,7 @@ class AnalyticsReportsWidget(QWidget):
 
             # Update performance metrics
             if courses:
-                grades = [course[4] for course in courses if len(course) > 4 and course[4]]
+                grades = [course[3] for course in courses if len(course) > 3 and course[3]]
                 if grades:
                     # Calculate average grade (simplified)
                     grade_values = [grade_points.get(g, 0) for g in grades if g in grade_points]
@@ -583,14 +583,14 @@ class AnalyticsReportsWidget(QWidget):
             for course in courses:
                 if len(course) >= 8:
                     course_dict = {
-                        'course_code': course[1],
-                        'title': course[2],
-                        'credits': course[3],
-                        'grade': course[4],
-                        'mark': course[5],
-                        'session': course[6],
-                        'year': course[7],
-                        'status': course[8] if len(course) > 8 else ''
+                        'course_code': course[0],
+                        'title': course[1],
+                        'credits': course[2],
+                        'grade': course[3],
+                        'session': course[4],
+                        'year': course[5],
+                        'mark': course[6],
+                        'status': course[7] if len(course) > 7 else ''
                     }
                     transcript_data.append(course_dict)
 
