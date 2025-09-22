@@ -404,6 +404,8 @@ class CourseDashboardCLI:
                     "🔍 Search Courses",
                     "📖 Get Course Details",
                     "📜 View Transcript",
+                    "✏️ Edit Course in Transcript",
+                    "🗑️ Delete Course from Transcript",
                     "💾 Export Transcript",
                     "📥 Import from CSV",
                     "➕ Add Course to Transcript",
@@ -437,6 +439,10 @@ class CourseDashboardCLI:
                     self.interactive_course_details()
                 elif "View Transcript" in selected:
                     self.interactive_transcript_view()
+                elif "Edit Course" in selected:
+                    self.interactive_edit_course()
+                elif "Delete Course" in selected:
+                    self.interactive_delete_course()
                 elif "Export Transcript" in selected:
                     self.interactive_export()
                 elif "Import from CSV" in selected:
@@ -860,6 +866,265 @@ class CourseDashboardCLI:
 
         except Exception as e:
             self.console.print(f"[bold red]Import failed:[/bold red] {e}")
+
+        self.pause_for_user()
+
+    def interactive_delete_course(self):
+        """Interactive course deletion from transcript"""
+        self.console.print("\n[bold red]🗑️ Delete Course from Transcript[/bold red]")
+
+        try:
+            # Get all courses from transcript
+            courses = self.database.get_transcript_courses()
+
+            if not courses:
+                self.console.print("[yellow]No courses in transcript to delete[/yellow]")
+                return
+
+            # Create course choices for selection
+            course_choices = []
+            for course in courses:
+                if isinstance(course, (list, tuple)) and len(course) >= 6:
+                    code = course[0] if len(course) > 0 else ''
+                    title = course[1] if len(course) > 1 else ''
+                    grade = course[3] if len(course) > 3 else ''
+                    session = course[4] if len(course) > 4 else ''
+                    year = course[5] if len(course) > 5 else ''
+
+                    # Create display string
+                    display_text = f"{code} - {title[:50]} (Grade: {grade or 'N/A'}, {session} {year})"
+                    course_choices.append(display_text)
+
+            if not course_choices:
+                self.console.print("[yellow]No valid courses found to delete[/yellow]")
+                return
+
+            # Add option to cancel
+            course_choices.append("[Cancel - Return to Main Menu]")
+
+            # Interactive selection
+            delete_question = [
+                inquirer.List(
+                    'course',
+                    message="Select course to delete",
+                    choices=course_choices,
+                    carousel=True
+                )
+            ]
+
+            delete_answer = inquirer.prompt(delete_question)
+            if not delete_answer or "[Cancel" in delete_answer['course']:
+                self.console.print("[yellow]Deletion cancelled[/yellow]")
+                return
+
+            # Extract course code
+            selected_course = delete_answer['course']
+            course_code = selected_course.split(" - ")[0]
+
+            # Confirmation dialog
+            confirm_message = f"Are you sure you want to delete [bold red]{course_code}[/bold red] from your transcript?"
+            if not Confirm.ask(confirm_message):
+                self.console.print("[yellow]Deletion cancelled[/yellow]")
+                return
+
+            # Delete the course
+            success = self.database.delete_course(course_code)
+
+            if success:
+                self.console.print(f"[bold green]✓ Successfully deleted {course_code} from transcript[/bold green]")
+            else:
+                self.console.print(f"[bold red]✗ Failed to delete {course_code} from transcript[/bold red]")
+
+        except Exception as e:
+            self.console.print(f"[bold red]Error deleting course:[/bold red] {e}")
+
+        self.pause_for_user()
+
+    def interactive_edit_course(self):
+        """Interactive course editing in transcript"""
+        self.console.print("\n[bold blue]✏️ Edit Course in Transcript[/bold blue]")
+
+        try:
+            # Get all courses from transcript
+            courses = self.database.get_transcript_courses()
+
+            if not courses:
+                self.console.print("[yellow]No courses in transcript to edit[/yellow]")
+                return
+
+            # Create course choices for selection
+            course_choices = []
+            course_data_map = {}
+
+            for course in courses:
+                if isinstance(course, (list, tuple)) and len(course) >= 6:
+                    code = course[0] if len(course) > 0 else ''
+                    title = course[1] if len(course) > 1 else ''
+                    credits = course[2] if len(course) > 2 else 0.5
+                    grade = course[3] if len(course) > 3 else ''
+                    session = course[4] if len(course) > 4 else ''
+                    year = course[5] if len(course) > 5 else ''
+
+                    # Create display string
+                    display_text = f"{code} - {title[:50]} (Grade: {grade or 'N/A'}, {session} {year})"
+                    course_choices.append(display_text)
+
+                    # Store course data for editing
+                    course_data_map[display_text] = {
+                        'course_code': code,
+                        'title': title,
+                        'credits': credits,
+                        'grade': grade,
+                        'semester': session,
+                        'year': year
+                    }
+
+            if not course_choices:
+                self.console.print("[yellow]No valid courses found to edit[/yellow]")
+                return
+
+            # Add option to cancel
+            course_choices.append("[Cancel - Return to Main Menu]")
+
+            # Interactive selection
+            edit_question = [
+                inquirer.List(
+                    'course',
+                    message="Select course to edit",
+                    choices=course_choices,
+                    carousel=True
+                )
+            ]
+
+            edit_answer = inquirer.prompt(edit_question)
+            if not edit_answer or "[Cancel" in edit_answer['course']:
+                self.console.print("[yellow]Edit cancelled[/yellow]")
+                return
+
+            # Get the course data
+            selected_course = edit_answer['course']
+            if selected_course not in course_data_map:
+                self.console.print("[red]Error: Course data not found[/red]")
+                return
+
+            current_course = course_data_map[selected_course]
+            self.console.print(f"\n[bold cyan]Editing: {current_course['course_code']} - {current_course['title']}[/bold cyan]")
+
+            # Select what to edit
+            edit_options = [
+                "Grade",
+                "Session",
+                "Year",
+                "All Fields",
+                "Cancel"
+            ]
+
+            edit_choice_question = [
+                inquirer.List(
+                    'field',
+                    message="What would you like to edit?",
+                    choices=edit_options
+                )
+            ]
+
+            edit_choice_answer = inquirer.prompt(edit_choice_question)
+            if not edit_choice_answer or edit_choice_answer['field'] == 'Cancel':
+                return
+
+            choice = edit_choice_answer['field']
+            updated_course = current_course.copy()
+
+            # Edit based on selection
+            if choice in ['Grade', 'All Fields']:
+                # Grade selection
+                grade_choices = [
+                    'A+', 'A', 'A-',           # Excellent (4.0, 4.0, 3.7)
+                    'B+', 'B', 'B-',           # Good (3.3, 3.0, 2.7)
+                    'C+', 'C', 'C-',           # Adequate (2.3, 2.0, 1.7)
+                    'D+', 'D', 'D-',           # Marginal (1.3, 1.0, 0.7)
+                    'F',                       # Inadequate (0.0)
+                    'CR', 'NCR', 'P', 'LWD', 'WDR', 'IPR', 'INC',  # Special grades
+                    'No Grade (TBD)'           # To be determined
+                ]
+
+                grade_question = [
+                    inquirer.List(
+                        'grade',
+                        message=f"Select new grade (current: {current_course['grade'] or 'None'})",
+                        choices=grade_choices,
+                        default=current_course['grade'] if current_course['grade'] in grade_choices else 'A'
+                    )
+                ]
+
+                grade_answer = inquirer.prompt(grade_question)
+                if grade_answer:
+                    updated_course['grade'] = '' if grade_answer['grade'] == 'No Grade (TBD)' else grade_answer['grade']
+
+            if choice in ['Session', 'All Fields']:
+                # Session selection
+                session_question = [
+                    inquirer.List(
+                        'session',
+                        message=f"Select new session (current: {current_course['semester']})",
+                        choices=['Fall', 'Winter', 'Summer'],
+                        default=current_course['semester'] if current_course['semester'] in ['Fall', 'Winter', 'Summer'] else 'Fall'
+                    )
+                ]
+
+                session_answer = inquirer.prompt(session_question)
+                if session_answer:
+                    updated_course['semester'] = session_answer['session']
+
+            if choice in ['Year', 'All Fields']:
+                # Year selection
+                current_year = 2025
+                year_choices = [str(year) for year in range(current_year-5, current_year+3)]
+
+                year_question = [
+                    inquirer.List(
+                        'year',
+                        message=f"Select new year (current: {current_course['year']})",
+                        choices=year_choices,
+                        default=str(current_course['year']) if str(current_course['year']) in year_choices else str(current_year)
+                    )
+                ]
+
+                year_answer = inquirer.prompt(year_question)
+                if year_answer:
+                    updated_course['year'] = int(year_answer['year'])
+
+            # Confirm changes
+            changes = []
+            if updated_course['grade'] != current_course['grade']:
+                changes.append(f"Grade: {current_course['grade'] or 'None'} → {updated_course['grade'] or 'None'}")
+            if updated_course['semester'] != current_course['semester']:
+                changes.append(f"Session: {current_course['semester']} → {updated_course['semester']}")
+            if updated_course['year'] != current_course['year']:
+                changes.append(f"Year: {current_course['year']} → {updated_course['year']}")
+
+            if not changes:
+                self.console.print("[yellow]No changes made[/yellow]")
+                return
+
+            self.console.print("\n[bold yellow]Changes to be made:[/bold yellow]")
+            for change in changes:
+                self.console.print(f"  • {change}")
+
+            if not Confirm.ask("\nSave these changes?"):
+                self.console.print("[yellow]Changes cancelled[/yellow]")
+                return
+
+            # Save the updated course
+            updated_course['status'] = 'completed'  # Maintain status
+            success = self.database.save_course(updated_course)
+
+            if success:
+                self.console.print(f"[bold green]✓ Successfully updated {updated_course['course_code']}[/bold green]")
+            else:
+                self.console.print(f"[bold red]✗ Failed to update {updated_course['course_code']}[/bold red]")
+
+        except Exception as e:
+            self.console.print(f"[bold red]Error editing course:[/bold red] {e}")
 
         self.pause_for_user()
 
