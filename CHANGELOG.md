@@ -20,6 +20,64 @@
 
 ---
 
+## [3.0.0] - 2025-09-22
+
+### Added
+- **Interactive CLI Interface**: Complete migration to modern interactive terminal with arrow key navigation
+  - **inquirer** library integration for arrow key navigation and menu selection `src/cli_app.py:16-21`
+  - **rich** library for enhanced terminal output with colors, tables, and panels `src/cli_app.py:17-20`
+  - Interactive main menu with emoji icons and visual feedback `src/cli_app.py:375-387`
+  - Selectable search results with arrow navigation `src/cli_app.py:563-600`
+  - Interactive course detail panels with rich formatting `src/cli_app.py:626-675`
+- **Enhanced Course Display**: Modern table-based course information presentation
+  - Rich table format for transcript view with colored columns `src/cli_app.py:413-419`
+  - Course details displayed in formatted panels with proper spacing `src/cli_app.py:663-668`
+  - Academic progress statistics with visual indicators `src/cli_app.py:464-474`
+- **CSV Import Functionality**: Automated course data import from CSV files
+  - Interactive CSV file selection with default path `src/cli_app.py:755`
+  - Automatic course title generation for missing data `src/cli_app.py:787-788`
+  - Progress indicators during import process `src/cli_app.py:769`
+  - Import statistics with success/failure counts `src/cli_app.py:814-817`
+- **UofT Grade Scale Integration**: Official University of Toronto grading system
+  - Complete grade scale with proper GPA values (A+ through F) `src/cli_app.py:172-185`
+  - Support for special grades (CR, NCR, P, LWD, WDR, IPR, INC) `src/cli_app.py:456-467`
+  - Accurate GPA calculation excluding non-GPA grades `src/cli_app.py:488-498`
+
+### Changed
+- **User Interface**: Complete overhaul from text-based to interactive terminal
+  - Replaced numbered menu selection with arrow key navigation
+  - Enhanced visual feedback with colors and formatting
+  - Modern terminal UI with consistent styling throughout
+- **Data Parsing**: Fixed course data structure handling
+  - Corrected database field mapping for proper course display `src/cli_app.py:466-471`
+  - Added robust error handling for malformed course data `src/cli_app.py:477-479`
+  - Improved type checking and validation throughout application
+- **Grade System**: Updated to match official UofT undergraduate scale
+  - A+/A: 4.0, A-: 3.7, B+: 3.3, B: 3.0, B-: 2.7, C+: 2.3, C: 2.0, C-: 1.7, D+: 1.3, D: 1.0, D-: 0.7, F: 0.0
+  - Special grades properly handled without affecting GPA calculations
+
+### Fixed
+- **Data Display Errors**: Resolved "object of type 'float' has no len()" errors
+  - Added type checking for course data before processing `src/cli_app.py:457`
+  - Improved error handling with try-catch blocks throughout data parsing
+  - Fixed course field index mapping to match database structure
+- **WebDriver Cleanup**: Eliminated urllib3 connection warnings on application exit
+  - Enhanced logging configuration to suppress connection warnings `src/core.py:38-45`
+  - Improved WebDriver cleanup with silent error handling `src/core.py:511-522`
+  - Added warning suppression during driver quit operations `src/cli_app.py:1114-1119`
+- **Unicode Handling**: Maintained emoji support while fixing encoding issues
+  - Proper terminal encoding configuration for Windows compatibility
+  - Balanced emoji usage with ASCII fallbacks where needed
+
+### Technical Improvements
+- **Interactive Library Integration**: Professional CLI experience with modern libraries
+- **Enhanced Error Handling**: Comprehensive exception handling with user-friendly messages
+- **Data Validation**: Robust course data processing with type checking and fallbacks
+- **Performance**: Optimized data parsing and display rendering
+- **Code Quality**: Improved separation of concerns and method organization
+
+---
+
 ## [2.3.0] - 2025-09-20
 
 ### Added

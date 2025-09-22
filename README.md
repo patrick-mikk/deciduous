@@ -20,10 +20,11 @@ A command-line tool for University of Toronto students to search courses, manage
 
 ### Core Components
 
-#### 1. Command-Line Interface (`src/cli_app.py`)
-- **Purpose**: Primary user interface for all application functionality
-- **Framework**: Python argparse for command parsing
-- **Features**: Course search, detailed course information, transcript management, data export
+#### 1. Interactive Command-Line Interface (`src/cli_app.py`)
+- **Purpose**: Modern interactive terminal interface with arrow key navigation
+- **Framework**: Python argparse + inquirer for interactive menus + rich for enhanced output
+- **Features**: Interactive course search, visual course details, rich transcript tables, CSV import/export
+- **UI Libraries**: inquirer (arrow navigation), rich (colored tables, panels, progress bars)
 
 #### 2. Database Layer (`src/core.py`)
 - **Purpose**: SQLite-based storage for transcript data and course information
@@ -50,29 +51,50 @@ User Input → CLI Parser → Database/Scraper → Data Processing → Formatted
 
 ### Currently Implemented
 
-#### ✅ Course Search
-- **Command**: `python cli_app.py search <query>`
-- **Functionality**: Search UofT Academic Calendar by course code or keywords
-- **Output**: List of matching courses with codes, titles, credits, and descriptions
-- **Example**: `python cli_app.py search POL208`
+#### ✅ Interactive Course Search
+- **Access**: Main menu → "🔍 Search Courses" or `python cli_app.py search <query>`
+- **Features**:
+  - Arrow key navigation through search results
+  - Rich table display with colored columns
+  - Selectable result limit (5, 10, 15, 20)
+  - Direct access to course details from results
+- **Example**: Search for "POL208" and navigate with arrow keys
 
-#### ✅ Detailed Course Information
-- **Command**: `python cli_app.py details <course_code>`
-- **Functionality**: Get comprehensive course details including prerequisites, exclusions, and breadth requirements
-- **Interactive**: Option to add course directly to transcript
-- **Example**: `python cli_app.py details POL208H1`
+#### ✅ Enhanced Course Information Display
+- **Access**: Main menu → "📖 Get Course Details" or `python cli_app.py details <course_code>`
+- **Features**:
+  - Rich formatted panels with course information
+  - Prerequisites, exclusions, and breadth requirements displayed clearly
+  - Interactive option to add course directly to transcript
+  - Professional layout with color-coded sections
 
-#### ✅ Transcript Management
-- **Command**: `python cli_app.py transcript`
-- **Functionality**: View all courses in personal transcript with GPA calculation
-- **Statistics**: Total credits, course count, current GPA
-- **Grade Support**: Full UofT grading scale (A+ to F, P/F, CR/NCR)
+#### ✅ Modern Transcript Management
+- **Access**: Main menu → "📜 View Transcript" or `python cli_app.py transcript`
+- **Features**:
+  - Rich table format with sortable columns (Code, Title, Credits, Grade, Session, Year)
+  - Real-time GPA calculation using official UofT grading scale
+  - Academic progress panel with credit tracking (X/20.0 credits)
+  - Proper handling of special grades (CR, NCR, P, LWD, WDR, IPR, INC)
+  - Visual statistics with colored progress indicators
 
-#### ✅ Data Export
-- **Command**: `python cli_app.py export [filename]`
-- **Format**: CSV export with all transcript data
-- **Fields**: Course code, title, credits, grade, session, year, status
-- **Usage**: Easy backup and sharing of academic records
+#### ✅ CSV Import/Export System
+- **Import**: Main menu → "📥 Import from CSV"
+  - Interactive file selection with default path (docs/my_courses.csv)
+  - Automatic course title generation for missing data
+  - Progress indicators and import statistics
+  - Error handling for malformed data
+- **Export**: Main menu → "💾 Export Transcript" or `python cli_app.py export [filename]`
+  - CSV format with all transcript data
+  - Proper field mapping and data validation
+
+#### ✅ Interactive Terminal Interface
+- **Launch**: `python cli_app.py interactive` or just `python cli_app.py`
+- **Navigation**: Use arrow keys to navigate menus, Enter to select
+- **Features**:
+  - Emoji-enhanced menu options
+  - Rich welcome banner and status displays
+  - Interactive prompts for all user input
+  - Graceful error handling with user-friendly messages
 
 ### Planned Features (Feasible for CLI Implementation)
 
@@ -94,9 +116,10 @@ User Input → CLI Parser → Database/Scraper → Data Processing → Formatted
 - **Grade Distribution**: Analyze grade patterns by department/level
 - **Progress Reports**: Generate degree completion summaries
 
-#### 🔄 Import/Export Enhancements
-- **ACORN Integration**: Import official transcript data (if API available)
-- **Multiple Export Formats**: JSON, XML support beyond CSV
+#### ✅ Import/Export Enhancements (COMPLETED)
+- **CSV Import**: Interactive import from CSV files with data validation
+- **CSV Export**: Full transcript export with proper formatting
+- **Future**: ACORN Integration, Multiple Export Formats (JSON, XML)
 - **Backup/Restore**: Complete database backup and restoration
 - **Data Validation**: Verify transcript accuracy against official records
 

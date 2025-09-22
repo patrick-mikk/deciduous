@@ -36,11 +36,13 @@ logger = logging.getLogger(__name__)
 
 # Suppress selenium and webdriver-manager logs
 selenium_logger = logging.getLogger('selenium')
-selenium_logger.setLevel(logging.WARNING)
+selenium_logger.setLevel(logging.ERROR)
 wdm_logger = logging.getLogger('WDM')
-wdm_logger.setLevel(logging.WARNING)
+wdm_logger.setLevel(logging.ERROR)
 urllib3_logger = logging.getLogger('urllib3')
-urllib3_logger.setLevel(logging.WARNING)
+urllib3_logger.setLevel(logging.ERROR)
+urllib3_connectionpool_logger = logging.getLogger('urllib3.connectionpool')
+urllib3_connectionpool_logger.setLevel(logging.ERROR)
 
 
 class CourseDatabase:
@@ -508,11 +510,16 @@ class AcademicCalendarScraper:
         """Close the WebDriver safely."""
         try:
             if self.driver:
-                self.driver.quit()
+                # Suppress warnings during cleanup
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    self.driver.quit()
                 if self.debug:
                     print("WebDriver closed successfully")
-        except Exception as e:
-            print(f"Error closing WebDriver: {e}")
+        except Exception:
+            # Silently ignore all cleanup errors
+            pass
 
     def search_courses(self, course_code="", title="", department="", level="", credits="", limit=100):
         """Enhanced course search with improved error handling."""

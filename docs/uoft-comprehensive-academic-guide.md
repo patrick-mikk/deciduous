@@ -295,3 +295,5 @@ The complexity of the system reflects the complexity of knowledge itself and the
 Understanding the requirements is only the beginning. True success comes from engaging deeply with learning opportunities, building relationships with faculty and peers, and using university resources to pursue both academic excellence and personal growth. The University of Toronto provides the framework; students must bring the curiosity, dedication, and intellectual courage to make the most of the opportunities it provides.
 
 The investment of time and effort required to complete a University of Toronto degree is substantial, but the rewards—intellectual, personal, and professional—justify this investment for students who approach their education thoughtfully and purposefully. The knowledge, skills, and credentials students gain provide foundations for lifelong learning and career success in an increasingly complex and interconnected world.
+
+
