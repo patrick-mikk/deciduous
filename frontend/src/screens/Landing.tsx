@@ -106,7 +106,7 @@ export default function Landing() {
           </p>
 
           <div className="dc-landing__cta-row">
-            <Button type="button" variant="primary" size="lg" onClick={() => navigate("/signup")}>
+            <Button type="button" variant="primary" size="lg" onClick={() => navigate("/onboarding")}>
               Get started
             </Button>
             <Button type="button" variant="secondary" size="lg" onClick={scrollToFeatures}>

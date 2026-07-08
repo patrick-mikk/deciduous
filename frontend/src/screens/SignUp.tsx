@@ -2,7 +2,7 @@ import * as React from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 import { AuthCard, Input, PasswordField, Button, Checkbox, Callout } from "@/ds";
-import { ensureCsrfToken, isMockApi } from "@/api";
+import { api, ensureCsrfToken, isMockApi, loadGuestProfile, saveGuestProfile, clearGuestProfile } from "@/api";
 
 /**
  * Sign up (design/screens/01-auth-and-onboarding.md, flow F1 step 1-2).
@@ -10,8 +10,14 @@ import { ensureCsrfToken, isMockApi } from "@/api";
  * Same "no auth endpoint on ApiClient yet" situation as SignIn.tsx: posts to
  * `${VITE_API_BASE}/auth/signup` when a backend is configured, otherwise
  * simulates the round trip so the flow renders and completes offline.
- * On success, lands on /onboarding (F1 step 4) — email verification (F1
- * step 3) isn't wired up in this preview.
+ *
+ * Onboarding no longer requires an account (Onboarding.tsx), so a visitor
+ * may already have a guest profile (programs + term) saved in localStorage
+ * by the time they get here — e.g. from the "Create a free account to sync"
+ * nudge at the end of the tutorial. On success, best-effort push those
+ * programs into the new account (same `api.addMyProgram` the "My programs"
+ * reorder feature uses) and land straight on /dashboard; a cold signup with
+ * no guest profile still lands on /onboarding as before.
  */
 
 const API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
@@ -75,7 +81,24 @@ export default function SignUp() {
     setLoading(true);
     try {
       await signUp(email, password);
-      navigate("/onboarding", { replace: true });
+      const guestProfile = loadGuestProfile();
+      if (guestProfile && guestProfile.programs.length > 0) {
+        const results = await Promise.allSettled(guestProfile.programs.map((p) => api.addMyProgram(p.code)));
+        // Keep any programs whose sync failed in the guest profile rather than
+        // dropping them silently — the account has whatever synced, and a
+        // later visit/retry can still pick up the rest. Clear only on full
+        // success. (A rejected add is most often a 409 "already enrolled",
+        // which is effectively success, but a real failure shouldn't lose data.)
+        const failed = guestProfile.programs.filter((_, i) => results[i].status === "rejected");
+        if (failed.length > 0) {
+          saveGuestProfile({ ...guestProfile, programs: failed });
+        } else {
+          clearGuestProfile();
+        }
+        navigate("/dashboard", { replace: true });
+      } else {
+        navigate("/onboarding", { replace: true });
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Couldn't create your account. Try again.");
     } finally {
