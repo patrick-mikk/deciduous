@@ -114,7 +114,10 @@ def _course_records(db, user, data_key: bytes | None) -> list[CourseRecord]:
 def _program_requirements(db, user) -> list[ProgramRequirement]:
     cache = get_course_cache()
     reqs: list[ProgramRequirement] = []
-    for enrolment in db.query(ProgramEnrolment).filter_by(user_id=user.id).all():
+    enrolments = (
+        db.query(ProgramEnrolment).filter_by(user_id=user.id).order_by(ProgramEnrolment.position).all()
+    )
+    for enrolment in enrolments:
         program = cache.get_program(enrolment.program_code)
         if program is None:
             continue

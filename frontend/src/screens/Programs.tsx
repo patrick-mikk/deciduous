@@ -8,6 +8,7 @@ import {
   Input,
   Select,
   Button,
+  IconButton,
   ProgramCard,
   Skeleton,
   EmptyState,
@@ -15,7 +16,7 @@ import {
   POStCombinationValidator,
 } from "@/ds";
 import { api, creditFromCode } from "@/api";
-import type { Program, ProgramType, RequirementProgress, StudentRecord } from "@/api";
+import type { Program, ProgramType, RequirementProgress } from "@/api";
 
 /**
  * Screen — routed at "/programs" (design/screens/03-programs-and-courses.md,
@@ -117,24 +118,28 @@ export default function Programs() {
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // ---- My programs (record + per-program progress) -------------------------
-  const [record, setRecord] = React.useState<StudentRecord | null>(null);
+  // ---- My programs (enrolled list, in saved order, + per-program progress) -
   const [progressByCode, setProgressByCode] = React.useState<Record<string, RequirementProgress[]>>({});
-  const [myPrograms, setMyPrograms] = React.useState<Map<string, Program>>(new Map());
+  const [myPrograms, setMyPrograms] = React.useState<Program[]>([]);
   const [myLoading, setMyLoading] = React.useState(true);
   const [myError, setMyError] = React.useState<string | null>(null);
+  const [myActionError, setMyActionError] = React.useState<string | null>(null);
+  const [dragCode, setDragCode] = React.useState<string | null>(null);
 
-  // Student record + requirement progress, once — drives every card's
-  // enrolled/Add-vs-Remove state and the "My programs" tab.
+  // Enrolled programs (in the student's saved order, `GET /api/me/programs`)
+  // + requirement progress, once — drives every card's enrolled/Add-vs-Remove
+  // state and the "My programs" tab.
   React.useEffect(() => {
     let cancelled = false;
     setMyLoading(true);
-    Promise.all([api.getMyRecord(), api.getMyRequirementProgress()])
-      .then(([r, progress]) => {
+    Promise.all([api.getMyPrograms(), api.getMyRequirementProgress()])
+      .then(([enrolled, progress]) => {
         if (cancelled) return;
-        setRecord(r);
         setProgressByCode(progress);
         setMyError(null);
+        return Promise.all(enrolled.map((p) => api.getProgram(p.code))).then((resolved) => {
+          if (!cancelled) setMyPrograms(resolved.filter((p): p is Program => p !== null));
+        });
       })
       .catch(() => {
         if (!cancelled) setMyError("Couldn't load your enrolled programs.");
@@ -146,27 +151,6 @@ export default function Programs() {
       cancelled = true;
     };
   }, []);
-
-  // Resolve full Program records for whatever's on the student record.
-  React.useEffect(() => {
-    if (!record) return;
-    let cancelled = false;
-    Promise.all(record.programs.map((p) => api.getProgram(p.code)))
-      .then((results) => {
-        if (cancelled) return;
-        setMyPrograms((prev) => {
-          const next = new Map(prev);
-          for (const p of results) if (p) next.set(p.code, p);
-          return next;
-        });
-      })
-      .catch(() => {
-        // Surfaced via myError above already; nothing further to do.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [record]);
 
   // Subject filter options: distinct departments across the unfiltered catalog.
   React.useEffect(() => {
@@ -215,16 +199,63 @@ export default function Programs() {
     fetchPrograms(next, true);
   }
 
-  function addProgram(program: Program) {
-    setMyPrograms((prev) => new Map(prev).set(program.code, program));
+  async function addProgram(program: Program) {
+    setMyActionError(null);
+    try {
+      await api.addMyProgram(program.code);
+      setMyPrograms((prev) => (prev.some((p) => p.code === program.code) ? prev : [...prev, program]));
+    } catch {
+      setMyActionError(`Couldn't add ${program.code}. It may conflict with a program you're already enrolled in.`);
+    }
   }
 
-  function removeProgram(code: string) {
-    setMyPrograms((prev) => {
-      const next = new Map(prev);
-      next.delete(code);
-      return next;
-    });
+  async function removeProgram(code: string) {
+    setMyActionError(null);
+    try {
+      await api.removeMyProgram(code);
+      setMyPrograms((prev) => prev.filter((p) => p.code !== code));
+    } catch {
+      setMyActionError(`Couldn't remove ${code}. Try again.`);
+    }
+  }
+
+  // Optimistic reorder: apply locally first (drag/keyboard both feel instant),
+  // then persist; roll back to the prior order if the save fails.
+  async function persistOrder(next: Program[]) {
+    const previous = myPrograms;
+    setMyPrograms(next);
+    setMyActionError(null);
+    try {
+      await api.reorderMyPrograms(next.map((p) => p.code));
+    } catch {
+      setMyPrograms(previous);
+      setMyActionError("Couldn't save the new order. Try again.");
+    }
+  }
+
+  /** Keyboard/touch alternative to dragging (also usable with a mouse). */
+  function moveProgram(code: string, direction: -1 | 1) {
+    const index = myPrograms.findIndex((p) => p.code === code);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= myPrograms.length) return;
+    const next = [...myPrograms];
+    [next[index], next[target]] = [next[target], next[index]];
+    persistOrder(next);
+  }
+
+  function dropProgramOn(code: string) {
+    if (!dragCode || dragCode === code) {
+      setDragCode(null);
+      return;
+    }
+    const from = myPrograms.findIndex((p) => p.code === dragCode);
+    const to = myPrograms.findIndex((p) => p.code === code);
+    setDragCode(null);
+    if (from < 0 || to < 0) return;
+    const next = [...myPrograms];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    persistOrder(next);
   }
 
   function clearFilters() {
@@ -233,8 +264,8 @@ export default function Programs() {
     setSubject("");
   }
 
-  const mineList = Array.from(myPrograms.values());
-  const combo = evaluateCombination(mineList, progressByCode);
+  const myProgramCodes = React.useMemo(() => new Set(myPrograms.map((p) => p.code)), [myPrograms]);
+  const combo = evaluateCombination(myPrograms, progressByCode);
   const filtersActive = Boolean(q || type || subject);
 
   function creditsFor(program: Program): { earned: number; total: number } | undefined {
@@ -252,7 +283,7 @@ export default function Programs() {
       <Tabs
         tabs={[
           { value: "browse", label: "Browse" },
-          { value: "mine", label: `My programs${mineList.length ? ` (${mineList.length})` : ""}` },
+          { value: "mine", label: `My programs${myPrograms.length ? ` (${myPrograms.length})` : ""}` },
         ]}
         active={tab}
         onChange={(v: TabKey) => setTab(v)}
@@ -351,7 +382,7 @@ export default function Programs() {
                           department={p.department}
                           earned={cr?.earned}
                           total={cr?.total}
-                          enrolled={myPrograms.has(p.code)}
+                          enrolled={myProgramCodes.has(p.code)}
                           onView={() => navigate(`/programs/${p.code}`)}
                           onAdd={() => addProgram(p)}
                           onRemove={() => removeProgram(p.code)}
@@ -377,7 +408,12 @@ export default function Programs() {
                 {myError}
               </Callout>
             )}
-            {!myError && mineList.length > 0 && (
+            {myActionError && (
+              <Callout tone="danger" title="Couldn't update your programs">
+                {myActionError}
+              </Callout>
+            )}
+            {!myError && myPrograms.length > 0 && (
               <POStCombinationValidator valid={combo.valid} message={combo.message} notes={combo.notes} />
             )}
             {myLoading ? (
@@ -386,7 +422,7 @@ export default function Programs() {
                   <Skeleton key={i} height={78} />
                 ))}
               </div>
-            ) : !myError && mineList.length === 0 ? (
+            ) : !myError && myPrograms.length === 0 ? (
               <EmptyState
                 icon="graduation-cap"
                 title="No programs yet"
@@ -395,22 +431,57 @@ export default function Programs() {
               />
             ) : (
               !myError && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {mineList.map((p) => {
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {myPrograms.map((p, i) => {
                     const cr = creditsFor(p);
                     return (
-                      <ProgramCard
+                      <div
                         key={p.code}
-                        code={p.code}
-                        name={p.title}
-                        programType={p.programType || "major"}
-                        department={p.department}
-                        earned={cr?.earned}
-                        total={cr?.total}
-                        enrolled
-                        onView={() => navigate(`/programs/${p.code}`)}
-                        onRemove={() => removeProgram(p.code)}
-                      />
+                        draggable
+                        onDragStart={() => setDragCode(p.code)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => dropProgramOn(p.code)}
+                        onDragEnd={() => setDragCode(null)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          cursor: "grab",
+                          opacity: dragCode === p.code ? 0.5 : 1,
+                        }}
+                      >
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <IconButton
+                            icon="chevron-up"
+                            label={`Move ${p.code} up in priority`}
+                            disabled={i === 0}
+                            onClick={() => moveProgram(p.code, -1)}
+                          />
+                          <IconButton
+                            icon="chevron-down"
+                            label={`Move ${p.code} down in priority`}
+                            disabled={i === myPrograms.length - 1}
+                            onClick={() => moveProgram(p.code, 1)}
+                          />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <ProgramCard
+                            code={p.code}
+                            name={p.title}
+                            programType={p.programType || "major"}
+                            department={p.department}
+                            earned={cr?.earned}
+                            total={cr?.total}
+                            enrolled
+                            onView={() => navigate(`/programs/${p.code}`)}
+                            onRemove={() => removeProgram(p.code)}
+                          />
+                        </div>
+                      </div>
                     );
                   })}
                 </div>

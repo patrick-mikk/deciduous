@@ -19,6 +19,7 @@ import type {
   BreadthData,
   Course,
   DegreeAuditData,
+  EnrolledProgramRef,
   Program,
   SessionCode,
   StudentRecord,
@@ -63,6 +64,13 @@ export interface ApiClient {
   getMyBreadth(): Promise<{ data: BreadthData; evaluation: ReturnType<typeof evaluateBreadth> }>;
   getMySummary(): Promise<Summary>;
   getMyAlerts(): Promise<Alert[]>;
+
+  // Me — enrolled programs (design/02-user-flows.md "/programs/mine": add/remove/reorder priority)
+  getMyPrograms(): Promise<EnrolledProgramRef[]>;
+  addMyProgram(code: string): Promise<void>;
+  removeMyProgram(code: string): Promise<void>;
+  /** Persists the given display order; `codes` must be every enrolled program code, reordered. */
+  reorderMyPrograms(codes: string[]): Promise<void>;
 
   // Share
   createShareLink(): Promise<{ token: string; url: string }>;
@@ -119,6 +127,27 @@ export const mockClient: ApiClient = {
   getMySummary: () => delay(mock.mockSummary),
   getMyAlerts: () => delay(mock.mockAlerts),
 
+  getMyPrograms: () => delay(mock.mockStudentRecord.programs),
+  addMyProgram: async (code) => {
+    await delay(null);
+    if (mock.mockStudentRecord.programs.some((p) => p.code === code)) return;
+    const catalog = mock.findProgram(code);
+    mock.mockStudentRecord.programs.push({
+      code,
+      name: catalog?.title ?? code,
+      startSession: "",
+    });
+  },
+  removeMyProgram: async (code) => {
+    await delay(null);
+    mock.mockStudentRecord.programs = mock.mockStudentRecord.programs.filter((p) => p.code !== code);
+  },
+  reorderMyPrograms: async (codes) => {
+    await delay(null);
+    const byCode = new Map(mock.mockStudentRecord.programs.map((p) => [p.code, p]));
+    mock.mockStudentRecord.programs = codes.map((code) => byCode.get(code)!).filter(Boolean);
+  },
+
   createShareLink: () => delay({ token: "demo-share-token", url: `${window.location.origin}/share/demo-share-token` }),
   getShared: (token) =>
     delay(
@@ -130,11 +159,36 @@ export const mockClient: ApiClient = {
 
 const API_BASE = import.meta.env.VITE_API_BASE;
 
+/**
+ * Double-submit CSRF (backend/app.py `_register_csrf_guard`): every non-GET
+ * `/api/*` request needs an `X-CSRF-Token` header matching the readable
+ * `csrf_token` cookie, fetched once from `GET /api/auth/csrf`.
+ */
+function readCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+let csrfReady: Promise<unknown> | null = null;
+
+async function ensureCsrfToken(): Promise<string> {
+  const existing = readCookie("csrf_token");
+  if (existing) return existing;
+  csrfReady ??= fetch(`${API_BASE}/auth/csrf`, { credentials: "include" });
+  await csrfReady;
+  return readCookie("csrf_token") ?? "";
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (method !== "GET") {
+    headers["X-CSRF-Token"] = await ensureCsrfToken();
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
   });
   if (res.status === 404) {
     // Design/06 + conventions.md: TTB-backed no-match search legitimately 404s — treat as empty, not an error.
@@ -171,6 +225,17 @@ export const httpClient: ApiClient = {
   getMyBreadth: () => http("/me/breadth"),
   getMySummary: () => http("/me/summary"),
   getMyAlerts: () => http("/me/alerts"),
+
+  getMyPrograms: () =>
+    http<{ programs: { code: string; title: string | null; startSession: string | null }[] }>(
+      "/me/programs",
+    ).then((res) => res.programs.map((p) => ({ code: p.code, name: p.title ?? p.code, startSession: p.startSession ?? "" }))),
+  addMyProgram: (code) =>
+    http("/me/programs", { method: "POST", body: JSON.stringify({ code }) }).then(() => undefined),
+  removeMyProgram: (code) =>
+    http(`/me/programs/${encodeURIComponent(code)}`, { method: "DELETE" }).then(() => undefined),
+  reorderMyPrograms: (codes) =>
+    http("/me/programs/order", { method: "PUT", body: JSON.stringify({ codes }) }).then(() => undefined),
 
   createShareLink: () => http("/share", { method: "POST" }),
   getShared: (token) => http(`/share/${encodeURIComponent(token)}`),
