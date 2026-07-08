@@ -160,6 +160,7 @@ def _enrolment_json(row: ProgramEnrolment) -> dict:
         "startSession": row.start_session,
         "programType": parsed[0] if parsed else "",
         "subject": parsed[1] if parsed else "",
+        "position": row.position,
         "addedAt": row.created_at.isoformat(),
     }
 
@@ -361,7 +362,7 @@ def list_my_programs():
     rows = (
         db.query(ProgramEnrolment)
         .filter_by(user_id=current_user().id)
-        .order_by(ProgramEnrolment.created_at)
+        .order_by(ProgramEnrolment.position, ProgramEnrolment.created_at)
         .all()
     )
     return jsonify(
@@ -419,7 +420,11 @@ def add_my_program():
     start_session = (data.get("startSession") or "").strip() or None
 
     row = ProgramEnrolment(
-        user_id=user.id, program_code=code, program_title=title, start_session=start_session
+        user_id=user.id,
+        program_code=code,
+        program_title=title,
+        start_session=start_session,
+        position=len(existing),
     )
     db.add(row)
     try:
@@ -453,3 +458,34 @@ def remove_my_program(code: str):
 
     remaining = db.query(ProgramEnrolment).filter_by(user_id=user.id).all()
     return jsonify({"ok": True, "combination": _combination_status(remaining)})
+
+
+@bp.route("/api/me/programs/order", methods=["PUT"])
+@require_auth
+def reorder_my_programs():
+    """Persist "My programs" display order (design/02-user-flows.md: "reorder
+    priority"). Body: `{"codes": [...]}` — every enrolled program code, in the
+    student's desired order. Rejects a mismatched set (missing/unknown/duplicate
+    codes) with 422 rather than silently reordering a subset, since a partial
+    write would leave `position` values ambiguous relative to the omitted rows.
+    """
+    data = request.get_json(silent=True) or {}
+    codes = data.get("codes")
+    if not isinstance(codes, list) or not all(isinstance(c, str) for c in codes):
+        return json_error("codes must be a list of program codes.", 422)
+    codes = [c.strip().upper() for c in codes]
+
+    db = db_session()
+    user = current_user()
+    rows = db.query(ProgramEnrolment).filter_by(user_id=user.id).all()
+    by_code = {row.program_code: row for row in rows}
+
+    if len(codes) != len(set(codes)) or set(codes) != set(by_code):
+        return json_error("codes must match your enrolled programs exactly, with no duplicates.", 422)
+
+    for index, code in enumerate(codes):
+        by_code[code].position = index
+    db.commit()
+
+    ordered = sorted(rows, key=lambda r: r.position)
+    return jsonify({"programs": [_enrolment_json(r) for r in ordered]})

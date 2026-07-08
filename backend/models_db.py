@@ -168,6 +168,10 @@ class ProgramEnrolment(Base):
     program_code: Mapped[str] = mapped_column(String(30), nullable=False)
     program_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     start_session: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # User-controlled "My programs" display/priority order (design/02-user-flows.md
+    # "reorder priority"), same pattern as `PlanItem.position` above -- assigned on
+    # insert (append-to-end) and rewritten wholesale by `PUT /api/me/programs/order`.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(), nullable=False, default=_utcnow)
 
     user: Mapped["User"] = relationship(back_populates="program_enrolments")

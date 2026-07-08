@@ -2,7 +2,7 @@ import * as React from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 import { AuthCard, Input, PasswordField, Button, Checkbox, Callout } from "@/ds";
-import { isMockApi } from "@/api";
+import { ensureCsrfToken, isMockApi } from "@/api";
 
 /**
  * Sign up (design/screens/01-auth-and-onboarding.md, flow F1 step 1-2).
@@ -31,7 +31,7 @@ async function signUp(email: string, password: string): Promise<void> {
     const res = await fetch(`${API_BASE}/auth/signup`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": await ensureCsrfToken() },
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {

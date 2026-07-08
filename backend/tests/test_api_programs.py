@@ -379,3 +379,77 @@ def test_delete_program_not_enrolled_is_404(client):
     headers = _csrf_headers(client)
     resp = client.delete("/api/me/programs/ASMAJ9999A", headers=headers)
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /api/me/programs/order
+# ---------------------------------------------------------------------------
+
+
+def test_reorder_programs_persists_across_list_calls(client):
+    _signup(client)
+    for code in ("ASMAJ1305A", "ASMAJ0608A", "ASMIN0301A"):
+        headers = _csrf_headers(client)
+        resp = client.post("/api/me/programs", json={"code": code}, headers=headers)
+        assert resp.status_code == 201
+
+    listed = client.get("/api/me/programs")
+    assert [p["code"] for p in listed.get_json()["programs"]] == [
+        "ASMAJ1305A",
+        "ASMAJ0608A",
+        "ASMIN0301A",
+    ]
+
+    headers = _csrf_headers(client)
+    resp = client.put(
+        "/api/me/programs/order",
+        json={"codes": ["ASMIN0301A", "ASMAJ1305A", "ASMAJ0608A"]},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert [p["code"] for p in resp.get_json()["programs"]] == [
+        "ASMIN0301A",
+        "ASMAJ1305A",
+        "ASMAJ0608A",
+    ]
+
+    # The new order survives a fresh GET, i.e. it's persisted, not request-local.
+    listed = client.get("/api/me/programs")
+    assert [p["code"] for p in listed.get_json()["programs"]] == [
+        "ASMIN0301A",
+        "ASMAJ1305A",
+        "ASMAJ0608A",
+    ]
+
+
+def test_reorder_programs_rejects_mismatched_code_set(client):
+    _signup(client)
+    headers = _csrf_headers(client)
+    client.post("/api/me/programs", json={"code": "ASMAJ1305A"}, headers=headers)
+    headers = _csrf_headers(client)
+    client.post("/api/me/programs", json={"code": "ASMAJ0608A"}, headers=headers)
+
+    headers = _csrf_headers(client)
+    missing = client.put("/api/me/programs/order", json={"codes": ["ASMAJ1305A"]}, headers=headers)
+    assert missing.status_code == 422
+
+    headers = _csrf_headers(client)
+    unknown = client.put(
+        "/api/me/programs/order",
+        json={"codes": ["ASMAJ1305A", "ASMAJ0608A", "ASMAJ9999A"]},
+        headers=headers,
+    )
+    assert unknown.status_code == 422
+
+    headers = _csrf_headers(client)
+    duplicate = client.put(
+        "/api/me/programs/order",
+        json={"codes": ["ASMAJ1305A", "ASMAJ1305A"]},
+        headers=headers,
+    )
+    assert duplicate.status_code == 422
+
+
+def test_reorder_programs_requires_auth(client):
+    resp = client.put("/api/me/programs/order", json={"codes": []})
+    assert resp.status_code in (401, 403)

@@ -2455,7 +2455,19 @@ function Checkbox({
   onChange,
   disabled = false
 }) {
+  const toggle = () => !disabled && onChange && onChange(!checked);
   return /*#__PURE__*/React.createElement("label", {
+    role: 'checkbox',
+    'aria-checked': checked,
+    'aria-disabled': disabled,
+    tabIndex: disabled ? -1 : 0,
+    onClick: toggle,
+    onKeyDown: (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        toggle();
+      }
+    },
     style: {
       display: 'inline-flex',
       alignItems: 'center',
@@ -2465,7 +2477,6 @@ function Checkbox({
       opacity: disabled ? 0.5 : 1
     }
   }, /*#__PURE__*/React.createElement("span", {
-    onClick: () => !disabled && onChange && onChange(!checked),
     style: {
       width: 18,
       height: 18,
