@@ -137,8 +137,16 @@ export default function Programs() {
         if (cancelled) return;
         setProgressByCode(progress);
         setMyError(null);
-        return Promise.all(enrolled.map((p) => api.getProgram(p.code))).then((resolved) => {
-          if (!cancelled) setMyPrograms(resolved.filter((p): p is Program => p !== null));
+        // allSettled: one enrolled program's catalog lookup failing (stale
+        // code, transient network blip) shouldn't take down the whole list —
+        // show what resolved and drop the rest, rather than erroring out.
+        return Promise.allSettled(enrolled.map((p) => api.getProgram(p.code))).then((results) => {
+          if (cancelled) return;
+          setMyPrograms(
+            results
+              .map((r) => (r.status === "fulfilled" ? r.value : null))
+              .filter((p): p is Program => p !== null),
+          );
         });
       })
       .catch(() => {
