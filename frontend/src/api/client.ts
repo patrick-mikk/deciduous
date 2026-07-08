@@ -215,13 +215,23 @@ function qs(params: object | undefined): string {
 export const httpClient: ApiClient = {
   getSessions: () => http("/sessions"),
 
-  getPrograms: (params) => http(`/programs${qs(params)}`),
+  // `GET /api/programs` and `/api/courses` return a paginated envelope
+  // (`{programs: [...], page, total, ...}` / `{courses: [...], ...}`), not a
+  // bare array -- except on the legit "no-match 404" path (see `http()`
+  // above), where the 404 fallback is already the bare `[]` this unwraps to.
+  getPrograms: (params) =>
+    http<{ programs: Program[] } | Program[]>(`/programs${qs(params)}`).then((res) =>
+      Array.isArray(res) ? res : res.programs,
+    ),
   getProgram: (code) => http(`/programs/${encodeURIComponent(code)}`),
   getProgramRequirements: (code) => http(`/programs/${encodeURIComponent(code)}/requirements`),
   reparseProgramRequirements: (code) =>
     http(`/programs/${encodeURIComponent(code)}/requirements/reparse`, { method: "POST" }),
 
-  getCourses: (params) => http(`/courses${qs(params)}`),
+  getCourses: (params) =>
+    http<{ courses: Course[] } | Course[]>(`/courses${qs(params)}`).then((res) =>
+      Array.isArray(res) ? res : res.courses,
+    ),
   getCourse: (code) => http(`/courses/${encodeURIComponent(code)}`),
 
   getMyRecord: () => http("/me"),
