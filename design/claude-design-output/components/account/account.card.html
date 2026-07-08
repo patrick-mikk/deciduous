@@ -1,0 +1,39 @@
+<!-- @dsCard group="Account" viewport="860x560" name="Account — Import, Recovery, Notifications, Toggles, DangerZone" subtitle="Account & data components" -->
+<html><head>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;background:var(--bg);padding:24px;box-sizing:border-box;font-family:var(--font-sans)}.grid{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start}</style>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const { ImportPanel, ImportPreview, RecoveryCodeCard, NotificationPanel, ThemeToggle, DensityToggle, DangerZone, DataExportMenu, Card } = window.DeciduousDesignSystem_6c95c0;
+function Demo(){
+  const [theme,setTheme]=React.useState('light');
+  const [density,setDensity]=React.useState('comfortable');
+  React.useEffect(()=>{window.lucide&&window.lucide.createIcons();});
+  return (<div style={{display:'flex',flexDirection:'column',gap:20}}>
+    <div className="grid">
+      <Card><ImportPanel tab="pdf" onTab={()=>{}} onFile={()=>{}}
+        preview={<div style={{marginTop:16}}><ImportPreview programs={['Major: Public Policy','Minor: American Studies']} courseCount={25} cgpa={2.70} onConfirm={()=>{}} /></div>} /></Card>
+      <NotificationPanel items={[
+        {id:'1',kind:'deadline',title:'Enrolment opens July 21',time:'in 3 days'},
+        {id:'2',kind:'prereq',title:'POL208H1 prerequisite unmet',time:'1h ago'},
+        {id:'3',kind:'seat',title:'Seat opened in PPG301H1',time:'yesterday',read:true},
+      ]} onMarkRead={()=>{}} onMarkAllRead={()=>{}} />
+    </div>
+    <div style={{display:'flex',gap:16,alignItems:'center',flexWrap:'wrap'}}>
+      <ThemeToggle value={theme} onChange={setTheme} showLabels />
+      <DensityToggle value={density} onChange={setDensity} />
+      <DataExportMenu onExport={()=>{}} />
+    </div>
+    <div className="grid">
+      <RecoveryCodeCard code="DCDS-4KQ9-7ZP2-XM31" onRegenerate={()=>{}} />
+      <DangerZone onDelete={()=>{}} />
+    </div>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script></body></html>

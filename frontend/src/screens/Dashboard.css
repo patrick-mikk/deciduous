@@ -1,0 +1,79 @@
+/* Dashboard (`/dashboard`) — design/screens/02-dashboard-and-progress.md.
+   Grid layout only; visual styling comes entirely from design-system components
+   and CSS custom properties (frontend/src/styles/tokens). */
+
+.dc-dashboard__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4, 16px);
+  margin-bottom: var(--space-6, 24px);
+}
+
+.dc-dashboard__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-6, 24px);
+  align-items: start;
+  margin-bottom: var(--space-6, 24px);
+}
+
+.dc-dashboard__left,
+.dc-dashboard__right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5, 20px);
+  min-width: 0;
+}
+
+.dc-dashboard__section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3, 12px);
+}
+
+.dc-dashboard__section-title h2 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-h3);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+
+.dc-dashboard__hero {
+  display: flex;
+  gap: var(--space-6, 24px);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dc-dashboard__program-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.dc-dashboard__next-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.dc-dashboard__next-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+}
+
+.dc-dashboard__skeleton-row {
+  display: flex;
+  gap: var(--space-4, 16px);
+  margin-bottom: var(--space-6, 24px);
+}
+
+@media (max-width: 900px) {
+  .dc-dashboard__columns {
+    grid-template-columns: 1fr;
+  }
+}

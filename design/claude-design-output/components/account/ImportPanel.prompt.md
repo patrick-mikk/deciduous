@@ -1,0 +1,1 @@
+Onboarding import: Upload PDF / Bookmarklet / Start blank tabs, with a Dropzone and the ImportPreview (detected programs + transcript diff) before applying. Both `ImportPanel` and `ImportPreview` are exported.

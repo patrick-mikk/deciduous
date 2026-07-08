@@ -1,0 +1,40 @@
+<!-- @dsCard group="Courses" viewport="820x560" name="Courses — CourseCard, SectionList, PrereqTree, CourseDetailPanel" subtitle="Course-domain components" -->
+<html><head>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;background:var(--bg);padding:24px;box-sizing:border-box;font-family:var(--font-sans)}</style>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const { CourseCard, CourseDetailPanel } = window.DeciduousDesignSystem_6c95c0;
+const sections = [
+  {name:'LEC0101',teachMethod:'LEC',currentEnrol:162,maxEnrol:185,waitlist:12,instructors:[{first:'A',last:'Krannich'}],meetingTimes:[{day:2,startMin:1080,endMin:1200},{day:4,startMin:1080,endMin:1140}]},
+  {name:'LEC5101',teachMethod:'LEC',currentEnrol:60,maxEnrol:60,waitlist:4,instructors:[{first:'J',last:'Lee'}],meetingTimes:[{day:1,startMin:600,endMin:720}]},
+  {name:'TUT0101',teachMethod:'TUT',currentEnrol:19,maxEnrol:40,instructors:[],meetingTimes:[{day:3,startMin:540,endMin:600}]},
+];
+const course = {
+  code:'POL208H1', title:'Introduction to International Relations', credit:0.5, campus:'St. George',
+  description:'A survey of the theories and history of international relations: war and peace, international political economy, and global governance.',
+  breadth:['BR3'], exclusions:'POL208Y1 / POL208Y5', hours:'24L / 12T', sections,
+  prereqTree:{type:'group',op:'OR',children:[{type:'credits',text:'4.0 credits',met:true},{type:'course',code:'POL101Y1',met:false}]},
+  satisfies:[{programCode:'ASMAJ2660',programName:'Public Policy Major',group:'Methods'},{programCode:'ASPRGHBA',programName:'HBA degree',group:'BR3',breadth:'BR3'}],
+};
+function Demo(){
+  const [sel,setSel]=React.useState({LEC:'LEC0101'});
+  React.useEffect(()=>{window.lucide&&window.lucide.createIcons();});
+  return (<div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:20,alignItems:'start'}}>
+    <div style={{display:'flex',flexDirection:'column',gap:12}}>
+      <CourseCard code="POL208H1" title="Introduction to International Relations" credit={0.5} breadth={['BR3']} fall winter status="available" onAdd={()=>{}} onDetails={()=>{}} />
+      <CourseCard compact code="CSC207H1" title="Software Design" credit={0.5} status="planned" />
+      <CourseCard compact code="MAT137Y1" title="Calculus with Proofs" credit={1.0} status="blocked" />
+    </div>
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:20}}>
+      <CourseDetailPanel course={course} selectedSections={sel} onSelectSection={(m,n)=>setSel({...sel,[m]:n})} onAddPlan={()=>{}} onAddTimetable={()=>{}} />
+    </div>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script></body></html>

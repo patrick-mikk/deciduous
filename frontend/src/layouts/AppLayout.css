@@ -1,0 +1,38 @@
+/* Mirrors the grid the design system's own AppShell uses internally (top/nav/main/strip
+   named areas — see design/claude-design-output/_ds_bundle.js, components/layout/AppShell.jsx),
+   but composed by hand here so this app's ThemeProvider can drive TopBar's theme
+   toggle directly instead of AppShell's built-in (uncontrolled) theme state. */
+.dc-app-shell {
+  display: grid;
+  grid-template-areas: "top top" "nav main" "strip strip";
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+.dc-app-shell__main {
+  grid-area: main;
+  overflow-y: auto;
+  padding: var(--gutter);
+}
+
+.dc-app-shell__main-inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+@media (max-width: 720px) {
+  .dc-app-shell {
+    grid-template-areas: "top" "main" "strip";
+    grid-template-columns: 1fr;
+  }
+
+  .dc-app-shell__main {
+    padding: var(--gutter-mobile);
+  }
+}

@@ -1,0 +1,36 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Node / frontend build
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+build/
+*.tsbuildinfo
+
+# Large design zips (the unpacked design/ tree is committed; the zips are not)
+*.zip
+
+# Local caches / data dumps (see cache.py, Get-TtbCourses.ps1)
+*.sqlite
+*.sqlite3
+.cache/
+backend/.cache/
+backend/tui/logs/
+programs_corpus.jsonl
+TTB_*.json
+TTB_*.csv
+
+# personal files
+personal/
