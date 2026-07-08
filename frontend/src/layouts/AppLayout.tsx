@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "@/theme/ThemeProvider";
 import { TopBar, SideNav, ProgressStrip } from "@/ds";
 import { api } from "@/api";
+import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import "./AppLayout.css";
 
 /**
@@ -73,7 +74,9 @@ export function AppLayout() {
       <SideNav active={active} onNavigate={(key: string) => navigate(`/${key}`)} collapsed={collapsed} />
       <main className="dc-app-shell__main">
         <div className="dc-app-shell__main-inner">
-          <Outlet />
+          <RouteErrorBoundary key={location.pathname}>
+            <Outlet />
+          </RouteErrorBoundary>
         </div>
       </main>
       <ProgressStrip {...progress} onDetails={() => navigate("/dashboard")} />
