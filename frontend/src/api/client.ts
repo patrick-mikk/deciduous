@@ -171,7 +171,12 @@ function readCookie(name: string): string | null {
 
 let csrfReady: Promise<unknown> | null = null;
 
-async function ensureCsrfToken(): Promise<string> {
+/**
+ * Exported so SignIn/SignUp — which talk to `/api/auth/*` directly instead of
+ * through `http()` above (see those screens' own doc comments) — can attach
+ * the same double-submit header the backend's CSRF guard requires.
+ */
+export async function ensureCsrfToken(): Promise<string> {
   const existing = readCookie("csrf_token");
   if (existing) return existing;
   csrfReady ??= fetch(`${API_BASE}/auth/csrf`, { credentials: "include" });

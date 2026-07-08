@@ -2,7 +2,7 @@ import * as React from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 
 import { AuthCard, Input, PasswordField, Button, Divider, Callout } from "@/ds";
-import { isMockApi } from "@/api";
+import { ensureCsrfToken, isMockApi } from "@/api";
 
 /**
  * Sign in (design/screens/01-auth-and-onboarding.md, flow F2).
@@ -23,7 +23,7 @@ async function signIn(email: string, password: string): Promise<void> {
     const res = await fetch(`${API_BASE}/auth/signin`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": await ensureCsrfToken() },
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
