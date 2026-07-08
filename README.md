@@ -1,11 +1,11 @@
 # Deciduous
 
-A degree & timetable planner for **University of Toronto Arts & Science** students —
-plan your whole degree by the seasons: enrolled programs, what each still requires,
+A degree & timetable planner for **University of Toronto Arts & Science** students. 
+Plan your whole degree by the seasons: enrolled programs, what each still requires,
 which courses satisfy what, prerequisite/exclusion checks, GPA tracking, and a
-conflict-free timetable — from live UofT data.
+conflict-free timetable from live UofT data.
 
-> Unofficial student tool. Not affiliated with or endorsed by the University of Toronto.
+> Unofficial student tool; Not affiliated with or endorsed by the University of Toronto.
 
 ## Architecture
 
