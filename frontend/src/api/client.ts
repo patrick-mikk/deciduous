@@ -157,7 +157,11 @@ export const mockClient: ApiClient = {
     ),
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE;
+// `VITE_API_BASE` wins when set. Otherwise: production builds (the SPA is
+// served same-origin by Flask -- backend/app.py's `_register_spa`) default to
+// `/api`; dev builds stay `undefined` so `npm run dev` keeps using the mock
+// adapter unless a backend is explicitly configured.
+export const API_BASE: string | undefined = import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? "/api" : undefined);
 
 /**
  * Double-submit CSRF (backend/app.py `_register_csrf_guard`): every non-GET
@@ -256,7 +260,7 @@ export const httpClient: ApiClient = {
   getShared: (token) => http(`/share/${encodeURIComponent(token)}`),
 };
 
-/** The client screens should use. Real backend when VITE_API_BASE is set, mock adapter otherwise. */
+/** The client screens should use. Real backend when `API_BASE` is resolved (see above), mock adapter otherwise. */
 export const api: ApiClient = API_BASE ? httpClient : mockClient;
 
 export const isMockApi = !API_BASE;

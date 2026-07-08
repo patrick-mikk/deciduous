@@ -50,7 +50,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from backend.data_sources.http import get_html, strip_html
+from backend.data_sources.http import get_html, strip_html, throttle
 from backend.data_sources.models import Program, RequirementGroup, RequirementRule
 
 SEARCH_URL = "https://artsci.calendar.utoronto.ca/search-programs"
@@ -878,6 +878,9 @@ class ProgramClient:
         """Search programs by keyword/type, paging until a page comes back empty.
 
         Network entry point; parsing itself (`parse_results`) stays pure.
+        Paces successive page requests with `throttle()` (AGENTS.md:
+        "throttle bulk pulls") - a full-catalog pull (as `refresh_cache.py`
+        does, with `max_pages=60`) can run to dozens of pages.
         """
         programs: list[Program] = []
         for page in range(max_pages):
@@ -892,4 +895,5 @@ class ProgramClient:
             if not page_programs:
                 break
             programs.extend(page_programs)
+            throttle()
         return programs

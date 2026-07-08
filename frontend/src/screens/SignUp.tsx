@@ -2,14 +2,24 @@ import * as React from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 import { AuthCard, Input, PasswordField, Button, Checkbox, Callout } from "@/ds";
-import { api, ensureCsrfToken, isMockApi, loadGuestProfile, saveGuestProfile, clearGuestProfile } from "@/api";
+import {
+  api,
+  API_BASE,
+  ensureCsrfToken,
+  isMockApi,
+  loadGuestProfile,
+  saveGuestProfile,
+  clearGuestProfile,
+} from "@/api";
 
 /**
  * Sign up (design/screens/01-auth-and-onboarding.md, flow F1 step 1-2).
  *
  * Same "no auth endpoint on ApiClient yet" situation as SignIn.tsx: posts to
- * `${VITE_API_BASE}/auth/signup` when a backend is configured, otherwise
- * simulates the round trip so the flow renders and completes offline.
+ * `${API_BASE}/auth/signup` (resolved in `src/api/client.ts` -- `VITE_API_BASE`,
+ * else `/api` in production builds, else unset in dev) when a backend is
+ * configured, otherwise simulates the round trip so the flow renders and
+ * completes offline.
  *
  * Onboarding no longer requires an account (Onboarding.tsx), so a visitor
  * may already have a guest profile (programs + term) saved in localStorage
@@ -19,8 +29,6 @@ import { api, ensureCsrfToken, isMockApi, loadGuestProfile, saveGuestProfile, cl
  * reorder feature uses) and land straight on /dashboard; a cold signup with
  * no guest profile still lands on /onboarding as before.
  */
-
-const API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
 
 function scorePassword(pw: string): number {
   let s = 0;

@@ -2,20 +2,21 @@ import * as React from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 
 import { AuthCard, Input, PasswordField, Button, Divider, Callout } from "@/ds";
-import { ensureCsrfToken, isMockApi } from "@/api";
+import { API_BASE, ensureCsrfToken, isMockApi } from "@/api";
 
 /**
  * Sign in (design/screens/01-auth-and-onboarding.md, flow F2).
  *
  * There's no `/api/auth/*` surface on the shared `ApiClient` yet (design/06
  * lists it, but `src/api/client.ts` — owned by a different agent — doesn't
- * implement it). This screen therefore talks to `${VITE_API_BASE}/auth/signin`
- * directly when a backend is configured, and otherwise falls back to a local
- * simulation (same "offline-renders" contract `mockClient` gives every other
- * screen) so the flow is fully exercisable without a backend.
+ * implement it). This screen therefore talks to `${API_BASE}/auth/signin`
+ * directly when a backend is configured (`API_BASE` resolves in
+ * `src/api/client.ts`: `VITE_API_BASE`, else `/api` in production builds,
+ * else unset in dev), and otherwise falls back to a local simulation (same
+ * "offline-renders" contract `mockClient` gives every other screen) so the
+ * flow is fully exercisable without a backend.
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
 const RATE_LIMIT_ATTEMPTS = 3;
 
 async function signIn(email: string, password: string): Promise<void> {

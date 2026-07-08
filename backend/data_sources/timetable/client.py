@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.data_sources.http import get_json, post_json, strip_html
+from backend.data_sources.http import get_json, post_json, strip_html, throttle
 from backend.data_sources.models import Course, Instructor, MeetingTime, Section
 
 BASE_URL = "https://api.easi.utoronto.ca/ttb"
@@ -163,6 +163,11 @@ class TTBClient:
 
         A no-match search returns HTTP 404 (surfaced by `post_json` as
         `None`), which is treated as an empty result, not an error.
+
+        Paces successive page requests with `throttle()` (AGENTS.md:
+        "throttle bulk pulls") - a division-wide pull (`course_code=""`, as
+        `refresh_cache.py` and the courses API's session-sync both do) can
+        run to 100+ pages.
         """
         courses: list[Course] = []
         total: int | None = None
@@ -188,6 +193,7 @@ class TTBClient:
             courses.extend(normalize_course(raw) for raw in raw_courses)
             if total is not None and len(courses) >= total:
                 break
+            throttle()
             page += 1
         return courses
 

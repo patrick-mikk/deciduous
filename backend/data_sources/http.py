@@ -11,11 +11,19 @@ encode the project-wide conventions:
   that as `None` so callers can treat it as "empty result", not an exception.
 - Retry only on connection errors / timeouts / 5xx - a 4xx (including the 404
   above) is a real, non-transient response and is returned/handled as-is.
+- `throttle()` is the shared pacing primitive for paginated pulls against
+  these undocumented public endpoints (AGENTS.md: "throttle bulk pulls") -
+  callers that page through results (`TTBClient.search`,
+  `ProgramClient.search`) call it between page fetches instead of each
+  re-implementing a sleep. `backend/scripts/harvest_programs.py` predates
+  this and still keeps its own equivalent `_throttle()` for its
+  self-contained pagination loop.
 """
 
 from __future__ import annotations
 
 import html
+import random
 import re
 import time
 from typing import Any
@@ -29,8 +37,23 @@ TTB_ORIGIN = "https://ttb.utoronto.ca"
 _MAX_RETRIES = 2  # additional attempts after the first (3 tries total)
 _BACKOFF_SECONDS = 0.5  # multiplied by attempt number for a small linear backoff
 
+# Between-page pacing for paginated pulls (see `throttle()`). Same range
+# `backend/scripts/harvest_programs.py` already used for its own bulk harvest.
+THROTTLE_MIN = 0.15
+THROTTLE_MAX = 0.30
+
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": USER_AGENT})
+
+
+def throttle() -> None:
+    """Sleep a short random interval between paginated requests.
+
+    Call this between successive page fetches in any loop that paginates
+    against TTB or the Academic Calendar, so a full-catalog pull is not a
+    burst of back-to-back requests (AGENTS.md: "throttle bulk pulls").
+    """
+    time.sleep(random.uniform(THROTTLE_MIN, THROTTLE_MAX))
 
 
 def _request(method: str, url: str, **kwargs: Any) -> requests.Response:
