@@ -2,7 +2,7 @@ import * as React from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 import { AuthCard, Input, PasswordField, Button, Checkbox, Callout } from "@/ds";
-import { api, ensureCsrfToken, isMockApi, loadGuestProfile, clearGuestProfile } from "@/api";
+import { api, ensureCsrfToken, isMockApi, loadGuestProfile, saveGuestProfile, clearGuestProfile } from "@/api";
 
 /**
  * Sign up (design/screens/01-auth-and-onboarding.md, flow F1 step 1-2).
@@ -83,8 +83,18 @@ export default function SignUp() {
       await signUp(email, password);
       const guestProfile = loadGuestProfile();
       if (guestProfile && guestProfile.programs.length > 0) {
-        await Promise.allSettled(guestProfile.programs.map((p) => api.addMyProgram(p.code)));
-        clearGuestProfile();
+        const results = await Promise.allSettled(guestProfile.programs.map((p) => api.addMyProgram(p.code)));
+        // Keep any programs whose sync failed in the guest profile rather than
+        // dropping them silently — the account has whatever synced, and a
+        // later visit/retry can still pick up the rest. Clear only on full
+        // success. (A rejected add is most often a 409 "already enrolled",
+        // which is effectively success, but a real failure shouldn't lose data.)
+        const failed = guestProfile.programs.filter((_, i) => results[i].status === "rejected");
+        if (failed.length > 0) {
+          saveGuestProfile({ ...guestProfile, programs: failed });
+        } else {
+          clearGuestProfile();
+        }
         navigate("/dashboard", { replace: true });
       } else {
         navigate("/onboarding", { replace: true });

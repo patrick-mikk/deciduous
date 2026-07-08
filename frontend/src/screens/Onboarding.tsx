@@ -273,8 +273,10 @@ export default function Onboarding() {
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12, margin: "16px 0" }}>
-          {catalogLoading && myPrograms.length === 0 && [0, 1].map((i) => <Skeleton key={i} height={78} radius="var(--radius-lg)" />)}
-          {myPrograms.length === 0 && !catalogLoading && (
+          {/* myPrograms is synchronous (localStorage, not a fetch), so there's
+              no loading state for it — the empty state shows immediately.
+              catalogLoading only gates the "add a program" Combobox below. */}
+          {myPrograms.length === 0 && (
             <EmptyState
               icon="search"
               title="No programs yet"
@@ -387,9 +389,9 @@ export default function Onboarding() {
         <h2 style={sectionTitleStyle}>How Deciduous works</h2>
         <p style={mutedStyle}>A quick look at what you can do next.</p>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, margin: "20px 0" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", margin: "var(--space-5) 0" }}>
           {TOUR_ITEMS.map((item) => (
-            <div key={item.title} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div key={item.title} style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start" }}>
               <div
                 style={{
                   width: 40,
@@ -408,7 +410,7 @@ export default function Onboarding() {
                 <div style={{ fontSize: "var(--text-body)", fontWeight: "var(--weight-semibold)", color: "var(--text)" }}>
                   {item.title}
                 </div>
-                <p style={{ ...mutedStyle, marginTop: 2 }}>{item.desc}</p>
+                <p style={{ ...mutedStyle, marginTop: "var(--space-1)" }}>{item.desc}</p>
               </div>
             </div>
           ))}
@@ -419,7 +421,7 @@ export default function Onboarding() {
             tone="info"
             title="Create a free account to sync across devices"
             action={
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: "var(--space-2)" }}>
                 <Button size="sm" variant="secondary" onClick={() => setSyncPromptDismissed(true)}>
                   Not now
                 </Button>
