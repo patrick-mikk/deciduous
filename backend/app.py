@@ -9,7 +9,10 @@
 3. Auto-registers every `bp` Blueprint found in `backend/api/*.py` — see the
    contract documented in `backend/api/__init__.py`.
 4. Installs same-origin-with-credentials CORS, a double-submit CSRF guard,
-   and JSON-only error handlers (never a stack trace to the client).
+   the dev-only auto-login bypass (`backend.dev_auth` -- inert unless
+   `FLASK_ENV=development` or `FLASK_SKIP_AUTH` is truthy, and never active in
+   production), and JSON-only error handlers (never a stack trace to the
+   client).
 
 Run locally with `flask --app backend.app run` (from the repo root, with
 `PYTHONUTF8=1` on Windows) or via `backend/passenger_wsgi.py` on cPanel.
@@ -28,6 +31,7 @@ from werkzeug.exceptions import HTTPException, NotFound
 
 from backend.config import load_env
 from backend.config_app import Config
+from backend.dev_auth import register_dev_auth_bypass
 from backend.extensions import create_all, init_db
 
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -54,6 +58,7 @@ def create_app(config: Config | None = None) -> Flask:
 
     _register_cors(app)
     _register_csrf_guard(app)
+    register_dev_auth_bypass(app)
     _register_spa(app)
     _register_error_handlers(app)
 
