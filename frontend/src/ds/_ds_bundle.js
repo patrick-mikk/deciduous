@@ -2520,6 +2520,7 @@ function Combobox({
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const ref = React.useRef(null);
+  const triggerRef = React.useRef(null);
   React.useEffect(() => {
     const onDoc = e => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
@@ -2531,6 +2532,16 @@ function Combobox({
   const filtered = options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()));
   return /*#__PURE__*/React.createElement("label", {
     ref: ref,
+    onKeyDown: e => {
+      if (e.key === 'Escape' && open) {
+        // Keep the Escape from also dismissing any enclosing modal/sheet.
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+        setQuery('');
+        triggerRef.current && triggerRef.current.focus();
+      }
+    },
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -2547,6 +2558,7 @@ function Combobox({
     }
   }, label), /*#__PURE__*/React.createElement("button", {
     type: "button",
+    ref: triggerRef,
     onClick: () => setOpen(o => !o),
     style: {
       display: 'flex',
