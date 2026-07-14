@@ -114,8 +114,23 @@ def register_dev_auth_bypass(app: Flask) -> None:
     if not is_bypass_active():
         return
 
+    # Loud, unmissable startup banner -- logged every time the bypass is active
+    # (i.e. once per worker process boot) so it can never be silently forgotten.
+    # Kept ASCII-only so it survives plain log files and Passenger's stderr.log,
+    # and emitted as one WARNING record so the banner stays intact in the log.
+    trigger = os.environ.get("FLASK_ENV", "development")
     app.logger.warning(
-        "AUTH BYPASS ACTIVE (FLASK_SKIP_AUTH/dev) -- auto-signed-in dev user; NEVER use in production"
+        "\n"
+        "  ============================================================\n"
+        "  !!!  AUTH BYPASS ACTIVE -- DEVELOPMENT ONLY  !!!\n"
+        "  Every /api/* request is auto-signed-in as %s.\n"
+        "  Trigger: FLASK_ENV=%s (dev default) or FLASK_SKIP_AUTH truthy.\n"
+        "  This is fail-closed: it NEVER runs when FLASK_ENV=production.\n"
+        "  If you are seeing this on a production host, STOP -- the app\n"
+        "  is misconfigured and user auth is being bypassed.\n"
+        "  ============================================================",
+        DEV_USER_EMAIL,
+        trigger,
     )
 
     @app.before_request
