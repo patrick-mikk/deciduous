@@ -157,11 +157,17 @@ export const mockClient: ApiClient = {
     ),
 };
 
-// `VITE_API_BASE` wins when set. Otherwise: production builds (the SPA is
-// served same-origin by Flask -- backend/app.py's `_register_spa`) default to
-// `/api`; dev builds stay `undefined` so `npm run dev` keeps using the mock
-// adapter unless a backend is explicitly configured.
-export const API_BASE: string | undefined = import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? "/api" : undefined);
+// `VITE_API_BASE` wins when set. Otherwise EVERY build -- dev and prod --
+// defaults to `/api`: prod is served same-origin by Flask (backend/app.py's
+// `_register_spa`), and `npm run dev` reaches Flask through vite.config.ts's
+// `server.proxy`. When no backend is running, requests fail LOUDLY (see
+// `http()` below) instead of silently rendering demo data.
+//
+// The offline mock adapter (mock.ts) is opt-in only: set `VITE_API_BASE=mock`.
+export const isMockApi = import.meta.env.VITE_API_BASE === "mock";
+export const API_BASE: string | undefined = isMockApi
+  ? undefined
+  : import.meta.env.VITE_API_BASE || "/api";
 
 /**
  * Double-submit CSRF (backend/app.py `_register_csrf_guard`): every non-GET
@@ -194,17 +200,37 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (method !== "GET") {
     headers["X-CSRF-Token"] = await ensureCsrfToken();
   }
-  const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
-    ...init,
-    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      credentials: "include",
+      ...init,
+      headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
+    });
+  } catch {
+    // Network-level failure (backend down, proxy unreachable) -- fail LOUDLY
+    // with an actionable message instead of a bare "Failed to fetch".
+    throw new Error(
+      `Can't reach the backend API (${API_BASE}${path}). Is the Flask server running? ` +
+        "Start it with `python -m flask --app backend.app run` -- see frontend/.env.example.",
+    );
+  }
   if (res.status === 404) {
     // Design/06 + conventions.md: TTB-backed no-match search legitimately 404s — treat as empty, not an error.
     return [] as unknown as T;
   }
   if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+    const text = await res.text().catch(() => res.statusText);
+    // A 5xx whose body isn't the backend's JSON error shape is the dev proxy
+    // reporting a dead upstream (vite's http-proxy answers 500 with plain
+    // text when Flask isn't running) -- surface that clearly.
+    if (res.status >= 500 && !text.trimStart().startsWith("{")) {
+      throw new Error(
+        `Can't reach the backend API (${API_BASE}${path}). Is the Flask server running? ` +
+          "Start it with `python -m flask --app backend.app run` -- see frontend/.env.example.",
+      );
+    }
+    throw new Error(`API error ${res.status}: ${text}`);
   }
   return res.json() as Promise<T>;
 }
@@ -260,7 +286,5 @@ export const httpClient: ApiClient = {
   getShared: (token) => http(`/share/${encodeURIComponent(token)}`),
 };
 
-/** The client screens should use. Real backend when `API_BASE` is resolved (see above), mock adapter otherwise. */
-export const api: ApiClient = API_BASE ? httpClient : mockClient;
-
-export const isMockApi = !API_BASE;
+/** The client screens should use. Real backend unless `VITE_API_BASE=mock` opted into the demo adapter (see `isMockApi` above). */
+export const api: ApiClient = isMockApi ? mockClient : httpClient;
