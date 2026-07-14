@@ -19,6 +19,9 @@ from typing import Any
 from flask import Blueprint, jsonify
 
 from backend.api import current_data_key, current_user, db_session, require_auth
+from backend.api._audit import TranscriptRow
+from backend.api._audit import requirement_progress as _audit_requirement_progress
+from backend.api.programs import _enrolment_json
 from backend.data_sources.cache import SqliteCache
 from backend.extensions import get_course_cache
 from backend.models_db import Plan, ProgramEnrolment, TranscriptEntry
@@ -129,6 +132,109 @@ def _program_requirements(db, user) -> list[ProgramRequirement]:
 
 def _issues(issues) -> list[dict[str, Any]]:
     return [asdict(issue) for issue in issues]
+
+
+def _enrolments_for_user(db, user) -> list[ProgramEnrolment]:
+    """Same query/ordering as `backend.api.programs.list_my_programs`."""
+    return (
+        db.query(ProgramEnrolment)
+        .filter_by(user_id=user.id)
+        .order_by(ProgramEnrolment.position, ProgramEnrolment.created_at)
+        .all()
+    )
+
+
+def _program_refs(enrolments: list[ProgramEnrolment]) -> list[dict[str, Any]]:
+    """`EnrolledProgramRef[]` (frontend/src/api/types.ts) — the same
+    `{code, name, startSession}` mapping `httpClient.getMyPrograms` derives
+    client-side from `_enrolment_json` (backend/api/programs.py), done here
+    server-side so `/api/me` doesn't need a second round trip."""
+    return [
+        {"code": j["code"], "name": j["title"] or j["code"], "startSession": j["startSession"] or ""}
+        for j in map(_enrolment_json, enrolments)
+    ]
+
+
+def _transcript_courses(db, user, data_key: bytes | None) -> list[dict[str, Any]]:
+    """`TranscriptCourse[]` (frontend/src/api/types.ts) — a flat, per-course
+    variant of the `/transcript` route's per-session grouping, reusing the
+    same decrypt helpers (`decrypt_field`, `_decrypt_mark`)."""
+    out: list[dict[str, Any]] = []
+    for entry in db.query(TranscriptEntry).filter_by(user_id=user.id).all():
+        grade = (
+            decrypt_field(entry.grade_encrypted, data_key)
+            if (entry.grade_encrypted and data_key)
+            else None
+        )
+        out.append(
+            {
+                "code": entry.code,
+                "title": entry.title,
+                "credits": entry.credits,
+                "mark": _decrypt_mark(entry.mark_encrypted, data_key),
+                "grade": grade or "",
+                "session": entry.term_session or "",
+                "status": entry.status if entry.status in _VALID_STATUSES else "completed",
+            }
+        )
+    return out
+
+
+def _requirement_progress_by_program(
+    enrolments: list[ProgramEnrolment], records: list[CourseRecord]
+) -> dict[str, list[dict[str, Any]]]:
+    """`Record<programCode, RequirementProgress[]>` (frontend/src/api/
+    types.ts), via `backend.api._audit.requirement_progress` — the
+    already-written per-`RequirementGroup` cross-reference against the
+    transcript, adapted from the same `CourseRecord`s `_course_records`
+    builds for the other `/api/me/*` routes."""
+    cache = get_course_cache()
+    rows = [
+        TranscriptRow(
+            code=r.code,
+            credits=r.credits,
+            status=r.status,
+            session=r.session or "",
+            grade=r.grade or "",
+            mark=r.mark,
+            is_artsci=r.is_artsci,
+        )
+        for r in records
+    ]
+    progress: dict[str, list[dict[str, Any]]] = {}
+    for enrolment in enrolments:
+        program = cache.get_program(enrolment.program_code)
+        if program is None:
+            continue
+        progress[enrolment.program_code] = _audit_requirement_progress(program, rows)
+    return progress
+
+
+@bp.route("", methods=["GET"])
+@require_auth
+def student_record():
+    """`GET /api/me` — the aggregate `StudentRecord` the frontend's
+    `httpClient.getMyRecord()` fetches for the Dashboard and several other
+    screens (frontend/src/api/client.ts, frontend/src/api/types.ts). A thin
+    composition of the same building blocks the sibling `/summary`,
+    `/transcript`, `/requirements` routes here and `GET /api/me/programs`
+    (backend/api/programs.py) already use — see those for the canonical
+    per-field behavior; this route does not change any of them."""
+    db = db_session()
+    user = current_user()
+    data_key = current_data_key()
+
+    enrolments = _enrolments_for_user(db, user)
+    records = _course_records(db, user, data_key)
+
+    return jsonify(
+        {
+            "programs": _program_refs(enrolments),
+            "transcript": _transcript_courses(db, user, data_key),
+            "requirementProgress": _requirement_progress_by_program(enrolments, records),
+            "cgpa": cgpa(records).gpa or 0.0,
+        }
+    )
 
 
 @bp.route("/summary", methods=["GET"])
