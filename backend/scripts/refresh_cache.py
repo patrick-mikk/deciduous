@@ -37,7 +37,7 @@ import datetime
 import sys
 
 from backend.config import load_env
-from backend.data_sources.cache import SqliteCache
+from backend.data_sources.cache import PROGRAMS_CATALOG_FULL_AT, SqliteCache
 from backend.data_sources.models import Program
 from backend.data_sources.programs.client import ProgramClient
 from backend.data_sources.timetable.client import TTBClient
@@ -85,6 +85,10 @@ def _refresh_courses(ttb: TTBClient, cache: SqliteCache, sessions: list[str], fe
 def _refresh_programs(cache: SqliteCache, fetched_at: str) -> int:
     programs: list[Program] = ProgramClient().search(max_pages=_PROGRAM_MAX_PAGES)
     cache.upsert_programs(programs, fetched_at)
+    if programs:
+        # Mark the catalog complete so `/api/programs` catalog browses trust
+        # the cache instead of re-pulling (backend/api/programs.py).
+        cache.set_meta(PROGRAMS_CATALOG_FULL_AT, fetched_at)
     _throttle()
     print(f"  programs: {len(programs)} cached")
     return len(programs)

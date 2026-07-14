@@ -176,7 +176,7 @@ export default function Dashboard() {
         api.getMyDegreeAudit(),
         api.getMyBreadth(),
         api.getMyRecord(),
-        api.getPrograms(),
+        api.getAllPrograms(),
         api.getMyAlerts(),
       ]);
       setAlerts(myAlerts);

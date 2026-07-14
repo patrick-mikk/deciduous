@@ -39,6 +39,7 @@ export interface ProgramSearchParams {
   type?: string;
   subject?: string;
   page?: number;
+  pageSize?: number;
 }
 
 /** The full surface a screen can call. Both `mockClient` and `httpClient` implement this. */
@@ -48,6 +49,13 @@ export interface ApiClient {
 
   // Programs
   getPrograms(params?: ProgramSearchParams): Promise<Program[]>;
+  /**
+   * The WHOLE program catalog, for screens that filter client-side
+   * (onboarding search, department dropdowns). `GET /api/programs` is
+   * paginated (default page size 20), so a bare `getPrograms()` silently
+   * returns only the first page — this pages through until exhausted.
+   */
+  getAllPrograms(): Promise<Program[]>;
   getProgram(code: string): Promise<Program | null>;
   getProgramRequirements(code: string): Promise<Program["completionRequirements"]>;
   /** POST /api/programs/:code/requirements/reparse — on-demand Gemini grouper, ~10-20s. */
@@ -93,6 +101,7 @@ export const mockClient: ApiClient = {
     if (params?.type) results = results.filter((p) => p.programType === params.type);
     return delay(results);
   },
+  getAllPrograms: () => delay(mock.mockPrograms),
   getProgram: (code) => delay(mock.findProgram(code) ?? null),
   getProgramRequirements: (code) => delay(mock.findProgram(code)?.completionRequirements ?? []),
   reparseProgramRequirements: async (code) => {
@@ -253,6 +262,19 @@ export const httpClient: ApiClient = {
     http<{ programs: Program[] } | Program[]>(`/programs${qs(params)}`).then((res) =>
       Array.isArray(res) ? res : res.programs,
     ),
+  getAllPrograms: async () => {
+    // Page until a short page. The 10-page ceiling only bounds a runaway —
+    // the full catalog is ~420 programs (and the backend serves a browse from
+    // at most 500 cached rows), so 5 pages is the expected worst case.
+    const pageSize = 100;
+    const all: Program[] = [];
+    for (let page = 1; page <= 10; page += 1) {
+      const batch = await httpClient.getPrograms({ page, pageSize });
+      all.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return all;
+  },
   getProgram: (code) => http(`/programs/${encodeURIComponent(code)}`),
   getProgramRequirements: (code) => http(`/programs/${encodeURIComponent(code)}/requirements`),
   reparseProgramRequirements: (code) =>

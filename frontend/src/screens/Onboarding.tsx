@@ -240,7 +240,7 @@ export default function Onboarding() {
     setCatalogLoading(true);
     setCatalogError(null);
     try {
-      setCatalog(await api.getPrograms());
+      setCatalog(await api.getAllPrograms());
     } catch {
       setCatalogError("Couldn't load the program catalog search.");
     } finally {

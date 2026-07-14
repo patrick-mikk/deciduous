@@ -167,7 +167,7 @@ export default function Programs() {
   React.useEffect(() => {
     let cancelled = false;
     api
-      .getPrograms({})
+      .getAllPrograms()
       .then((all) => {
         if (cancelled) return;
         setSubjectOptions(Array.from(new Set(all.map((p) => p.department).filter(Boolean))).sort());

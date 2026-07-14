@@ -40,10 +40,11 @@ import re
 from collections import Counter
 from dataclasses import replace
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from backend.api import current_user, db_session, json_error, require_auth
+from backend.data_sources.cache import PROGRAMS_CATALOG_FULL_AT
 from backend.data_sources.llm_grouper import GeminiGrouper, LLMGroupingError
 from backend.data_sources.models import Program, RequirementGroup
 from backend.data_sources.programs.client import ProgramClient
@@ -54,6 +55,11 @@ bp = Blueprint("programs", __name__)
 
 _DEFAULT_PAGE_SIZE = 20
 _MAX_PAGE_SIZE = 100
+# Page cap for the one-time full-catalog pull below — same generous ceiling as
+# `refresh_cache.py`'s (the whole catalog needed ~14 pages as of 2026-07-08);
+# `ProgramClient.search` stops early at the first empty page and throttles
+# between pages, so the cap only bounds a runaway, it isn't the expected cost.
+_FULL_CATALOG_MAX_PAGES = 60
 
 # AS + 3-letter type prefix + 3-4 digit subject + optional stream letter, e.g.
 # "ASMAJ1305A" (see backend/data_sources/programs/client.py's own copy of this
@@ -207,15 +213,39 @@ def search_programs():
 
     cache = get_course_cache()
     results = cache.search_programs(q, limit=500)
-    if not results and (q or program_type):
-        # Cache miss: pull live from the Academic Calendar (docs/conventions.md:
-        # cache aggressively) and seed the cache for next time.
+
+    # A "catalog browse" (no q, no type — e.g. onboarding loading the whole
+    # list to filter client-side) must see the FULL catalog. Until a full pull
+    # has completed (PROGRAMS_CATALOG_FULL_AT meta, normally set by
+    # backend/scripts/refresh_cache.py), the cache may hold only the handful
+    # of programs individual keyword searches happened to seed — so a browse
+    # self-heals with one full, page-throttled pull instead of trusting it.
+    is_browse = not q and not program_type
+    needs_full_pull = is_browse and cache.get_meta(PROGRAMS_CATALOG_FULL_AT) is None
+    if needs_full_pull or (not results and not is_browse):
         try:
-            results = ProgramClient().search(q, program_type)
+            if needs_full_pull:
+                fetched = ProgramClient().search(max_pages=_FULL_CATALOG_MAX_PAGES)
+            else:
+                # Keyword/type cache miss: pull live from the Academic Calendar
+                # (docs/conventions.md: cache aggressively) and seed the cache.
+                fetched = ProgramClient().search(q, program_type)
         except Exception as exc:  # noqa: BLE001 - degrade to a clean JSON error
-            return json_error(f"Program search failed: {exc}", 502)
-        if results:
-            cache.upsert_programs(results, _now_iso())
+            if not results:
+                return json_error(f"Program search failed: {exc}", 502)
+            # Partial cache beats a hard failure for a browse; say so in the log.
+            current_app.logger.warning(
+                "Full program-catalog pull failed (%s); serving %d cached program(s).",
+                exc,
+                len(results),
+            )
+            fetched = []
+        if fetched:
+            fetched_at = _now_iso()
+            cache.upsert_programs(fetched, fetched_at)
+            if needs_full_pull:
+                cache.set_meta(PROGRAMS_CATALOG_FULL_AT, fetched_at)
+            results = cache.search_programs(q, limit=500)
 
     if program_type:
         results = [p for p in results if p.program_type == program_type]
