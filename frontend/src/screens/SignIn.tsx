@@ -29,7 +29,7 @@ async function signIn(email: string, password: string): Promise<void> {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw new Error((body && body.message) || "Incorrect email or password.");
+      throw new Error((body && (body.error || body.message)) || "Incorrect email or password.");
     }
     return;
   }

@@ -50,7 +50,7 @@ async function signUp(email: string, password: string): Promise<void> {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw new Error((body && body.message) || "Couldn't create your account.");
+      throw new Error((body && (body.error || body.message)) || "Couldn't create your account.");
     }
     return;
   }
