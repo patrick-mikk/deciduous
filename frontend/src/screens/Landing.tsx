@@ -29,7 +29,7 @@ const FEATURES = [
   {
     icon: "upload",
     title: "Import in seconds",
-    desc: "Drop in your Degree Explorer PDF or run the bookmarklet — your programs and transcript populate automatically, encrypted at rest.",
+    desc: "Drop in your Academic History PDF from ACORN or run the bookmarklet — your programs and transcript populate automatically, encrypted at rest.",
   },
   {
     icon: "list-checks",

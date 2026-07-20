@@ -13,6 +13,7 @@ SQLAlchemy==2.0.38
 PyMySQL==1.1.1
 bcrypt==4.2.1
 cryptography==48.0.1
+pdfplumber==0.11.10
 
 # --- tests (dev) ---
 pytest==9.0.3

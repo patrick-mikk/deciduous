@@ -4129,8 +4129,8 @@ function ImportPanel({
     active: tab,
     onChange: onTab
   }), tab === 'pdf' && /*#__PURE__*/React.createElement(__ds_scope.Dropzone, {
-    label: "Drop your Degree Explorer PDF here",
-    hint: "or click to browse \xB7 parsed locally & encrypted",
+    label: "Drop your Academic History PDF here",
+    hint: "from ACORN \xB7 parsed locally & encrypted",
     accept: "application/pdf",
     onFile: onFile,
     progress: progress

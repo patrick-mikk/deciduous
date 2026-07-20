@@ -1,10 +1,11 @@
 """Import blueprint: `POST /api/import/pdf`, `POST /api/import/capture`.
 
-Parses a Degree Explorer audit (PDF, via `backend.ingest.degree_explorer`) or a
-bookmarklet capture (the `<degree-explorer-capture>…</degree-explorer-capture>`
-JSON) into the signed-in user's transcript + program enrolments, then returns the
-persisted record + parser warnings for the onboarding ImportPreview step
-(`design/screens/01-auth-and-onboarding.md`).
+Parses an Academic History PDF (downloaded from ACORN; PDF handling lives in
+`backend.ingest.degree_explorer`, module name kept as-is -- see that module's
+docstring) or a bookmarklet capture (the `<degree-explorer-capture>…</degree-
+explorer-capture>` JSON) into the signed-in user's transcript + program
+enrolments, then returns the persisted record + parser warnings for the
+onboarding ImportPreview step (`design/screens/01-auth-and-onboarding.md`).
 
 Transcript grades/marks are encrypted at rest with the caller's per-session data
 key (ADR-0005); nothing sensitive is written in plaintext.
@@ -88,14 +89,14 @@ def _persist(db, user, data_key, draft: StudentRecordDraft) -> dict[str, Any]:
 def import_pdf():
     upload = request.files.get("file")
     if upload is None:
-        return json_error("Attach the Degree Explorer PDF as the form field 'file'.", 422)
+        return json_error("Attach your Academic History PDF (from ACORN) as the form field 'file'.", 422)
     data = upload.read(_MAX_PDF_BYTES + 1)
     if len(data) > _MAX_PDF_BYTES:
         return json_error("That PDF is too large (max 8 MB).", 413)
     try:
         draft = parse_pdf_bytes(data)
     except DegreeExplorerParseError as exc:
-        return json_error(f"Could not read that Degree Explorer PDF: {exc}", 422)
+        return json_error(f"Could not read that Academic History PDF: {exc}", 422)
     return jsonify(_persist(db_session(), current_user(), current_data_key(), draft))
 
 

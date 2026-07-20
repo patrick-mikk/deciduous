@@ -1,14 +1,29 @@
-"""Parse a UofT Degree Explorer export into a normalized `StudentRecordDraft`.
+"""Parse a UofT **Academic History PDF** (ACORN -> Academic History -> Print/
+PDF) into a normalized `StudentRecordDraft`.
+
+WHAT THIS ACTUALLY PARSES (read this before touching the regexes below):
+UofT's "Degree Explorer" is a *live web tool* -- there is no such thing as a
+downloadable "Degree Explorer PDF". The document students actually have is
+the Academic History PDF exported from ACORN. This module (and its
+identifiers/module name, kept as-is to avoid churning imports across
+`backend/api/import_.py` and `backend/api/plan.py`) predates that
+correction and still says "Degree Explorer" in a few internal places; the
+parsing logic below now targets the ACORN Academic History layout.
 
 Two independent front doors, one shared internal shape:
 
 - `parse_pdf_bytes` / `parse_pdf_text` -- the "Upload PDF" onboarding path
-  (`design/screens/01-auth-and-onboarding.md`). Degree Explorer has no
-  documented export schema, so this is a **heuristic, line-oriented** parser:
-  it scans each line of the extracted text for a course-code token
+  (`design/screens/01-auth-and-onboarding.md`). ACORN has no documented
+  export schema either, so this is still a **heuristic, line-oriented**
+  parser: it scans each line of the extracted text for a course-code token
   (`backend.planner.course_code.parse_course_code`) or a program-code token
   and pulls session/title/mark/grade context from around it, rather than
-  assuming fixed table columns. `raw_text` is always attached to a low-
+  assuming fixed table columns. On top of that, it now tracks a *running
+  session* updated whenever a line looks like a bare per-session section
+  heading ("2023 Fall" / "Fall 2023" -- ACORN groups course rows under one
+  heading per session rather than repeating the session on every row), and
+  falls back to that running session for course rows that don't carry their
+  own inline session mention. `raw_text` is always attached to a low-
   confidence draft so a failed parse degrades to "review manually", never a
   silent wrong answer.
 - `parse_capture` -- the bookmarklet path. The bookmarklet (browser-side,
@@ -16,13 +31,46 @@ Two independent front doors, one shared internal shape:
   `StudentRecord` TS interface in `design/06-data-model-and-api.md`, wrapped
   in `<degree-explorer-capture>...</degree-explorer-capture>` tags for the
   user to copy/paste (`design/screens/05-transcript-settings-share.md`);
-  this just unwraps + validates + normalizes it.
+  this just unwraps + validates + normalizes it. (This tag name is a
+  leftover identifier too -- the bookmarklet target is a separate, later
+  concern from the PDF-import fix this module docstring is describing.)
 
 Both paths return the same `StudentRecordDraft`; `backend/api/import_.py` is
 the only caller and owns persistence (turning a draft into `TranscriptEntry`/
 `ProgramEnrolment` rows) and auth. Nothing in this module touches the
 network, the DB, or Flask, and it never receives real student data in tests
--- only synthetic fixtures (`backend/tests/fixtures/`).
+-- only synthetic fixtures (`backend/tests/fixtures/`,
+`backend/tests/test_degree_explorer_ingest.py`).
+
+ASSUMPTIONS THAT STILL NEED VALIDATION AGAINST A REAL ACORN PDF (no sample
+PDF is available in this sandbox -- see the synthetic fixture text in
+`backend/tests/test_degree_explorer_ingest.py` for what was actually tested):
+
+- Session headings are assumed to render as their own text line, containing
+  little else besides "Fall 2023" or "2023 Fall" (optionally with a
+  trailing "Session"/"Term" word or a colon/dash). If ACORN instead puts
+  other text on that same line (e.g. a sessional GPA), `_SESSION_HEADING_RE`
+  below won't match it and courses under it will fall back to whatever
+  session was last recognised (or "" if none yet).
+- Course rows are assumed to extract as one text line per course in the
+  order "CODE  TITLE  CREDIT-WEIGHT  MARK  LETTER-GRADE  [notation]"
+  (matching pdfplumber's default left-to-right, top-to-bottom reading
+  order for a simple table). A multi-line-wrapped title, or a PDF that
+  places the grade in a separate visual column pdfplumber reorders
+  differently, would not be handled.
+- The credit weight printed in the PDF (e.g. "0.50") is not read back out
+  as the authoritative credit value -- it's derived from the course code
+  itself (`parse_course_code(...).credit_value`) same as before, per
+  `design/06-data-model-and-api.md`. If ACORN and the course code ever
+  disagree (e.g. a transfer credit with a nonstandard weight), the code-
+  derived value wins silently.
+- The CGPA line is assumed to contain the phrase "Cumulative G.P.A." (with
+  optional periods) somewhere on its own line; ACORN's exact wording
+  ("Cumulative GPA", "CGPA:", etc.) is unverified.
+- A grade/notation token search still isn't column-aware, so a course title
+  containing a bare single-letter word (rare, but possible) could in theory
+  be mistaken for a one-letter grade; this is a pre-existing heuristic
+  limitation, not something the ACORN-shaped fixture below exercises.
 """
 
 from __future__ import annotations
@@ -120,9 +168,29 @@ class StudentRecordDraft:
 
 
 # ------------------------------------------------------------------ session codes
-_SESSION_LABEL_RE = re.compile(r"\b(Fall|Winter|Summer)\s+(\d{4})\b", re.IGNORECASE)
+# Both orderings show up in the wild: Degree Explorer-style exports tend to
+# say "Fall 2023"; ACORN's Academic History PDF headings are commonly
+# "2023 Fall" (year first) -- see module docstring's ASSUMPTIONS section.
+_SESSION_LABEL_RE = re.compile(
+    r"\b(?:(Fall|Winter|Summer)\s+(\d{4})|(\d{4})\s+(Fall|Winter|Summer))\b",
+    re.IGNORECASE,
+)
 _SESSION_CODE_RE = re.compile(r"\b(2\d{3}[159])\b")
 _TERM_DIGIT = {"summer": "5", "fall": "9", "winter": "1"}
+
+# A line that is *just* a session heading -- ACORN groups course rows under
+# one "2023 Fall" / "Fall 2023" section header per session rather than
+# repeating the session on every course row, unlike the original Degree
+# Explorer-oriented parser this module was written against. Conservative on
+# purpose: only lines that are essentially nothing but the session label
+# (plus an optional trailing "Session"/"Term" word or a colon/dash) update
+# the running section session, so an ordinary line that merely *mentions* a
+# term in passing doesn't hijack the session for later rows.
+_SESSION_HEADING_RE = re.compile(
+    r"^\s*(?:(?:Fall|Winter|Summer)\s+\d{4}|\d{4}\s+(?:Fall|Winter|Summer))"
+    r"\s*(?:Session|Term)?\s*[:\-]?\s*$",
+    re.IGNORECASE,
+)
 
 
 def normalize_session(text: str) -> str:
@@ -131,10 +199,20 @@ def normalize_session(text: str) -> str:
     Returns "" if no session is recognisable."""
     label_m = _SESSION_LABEL_RE.search(text)
     if label_m:
-        term, year = label_m.group(1).lower(), label_m.group(2)
+        if label_m.group(1):
+            term, year = label_m.group(1).lower(), label_m.group(2)
+        else:
+            year, term = label_m.group(3), label_m.group(4).lower()
         return f"{year}{_TERM_DIGIT[term]}"
     code_m = _SESSION_CODE_RE.search(text)
     return code_m.group(1) if code_m else ""
+
+
+def is_session_heading(line: str) -> bool:
+    """True if `line` is (almost) nothing but a session label -- a per-
+    session section heading in an ACORN Academic History PDF, rather than a
+    course/program row that happens to mention a term."""
+    return bool(_SESSION_HEADING_RE.match(line))
 
 
 # -------------------------------------------------------------------- PDF parsing
@@ -159,7 +237,8 @@ def extract_pdf_text(data: bytes) -> str:
             pages = [page.extract_text() or "" for page in pdf.pages]
     except Exception as exc:  # noqa: BLE001 - pdfplumber raises assorted exceptions for bad input
         raise DegreeExplorerParseError(
-            "That file doesn't look like a valid PDF. Try re-exporting it from Degree Explorer."
+            "That file doesn't look like a valid PDF. Try downloading it again from "
+            "ACORN (Academic History -> Print/PDF)."
         ) from exc
 
     text = "\n".join(pages).strip()
@@ -209,7 +288,7 @@ def _parse_program_line(line: str) -> DraftProgram | None:
     return DraftProgram(code=pc.raw, title=title, start_session=start_session)
 
 
-def _parse_course_line(line: str) -> DraftCourse | None:
+def _parse_course_line(line: str, *, default_session: str = "") -> DraftCourse | None:
     code_m = _COURSE_CODE_TOKEN_RE.search(line)
     if code_m is None:
         return None
@@ -218,7 +297,9 @@ def _parse_course_line(line: str) -> DraftCourse | None:
         return None
 
     before, after = line[: code_m.start()], line[code_m.end() :]
-    session = normalize_session(before) or normalize_session(after)
+    # Inline session mention on this row wins (Degree Explorer-style export);
+    # otherwise fall back to the current ACORN section heading, if any.
+    session = normalize_session(before) or normalize_session(after) or default_session
 
     is_extra = bool(_EXTRA_FLAG_RE.search(after))
     after_clean = _EXTRA_FLAG_RE.sub("", after)
@@ -268,7 +349,10 @@ def _parse_course_line(line: str) -> DraftCourse | None:
 
 def parse_pdf_text(text: str) -> StudentRecordDraft:
     """Pure line-scan over already-extracted PDF text. See module docstring
-    for the heuristic and why it's line-oriented rather than column-fixed."""
+    for the heuristic and why it's line-oriented rather than column-fixed,
+    and for how a per-session ACORN section heading ("2023 Fall") is tracked
+    as a fallback session for course rows underneath it that don't carry
+    their own inline session mention."""
     if not text or not text.strip():
         raise DegreeExplorerParseError("No text to parse.")
 
@@ -277,10 +361,15 @@ def parse_pdf_text(text: str) -> StudentRecordDraft:
     warnings: list[str] = []
     cgpa: float | None = None
     seen_program_codes: set[str] = set()
+    current_session = ""  # last-seen ACORN session-section heading, if any
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
+            continue
+
+        if is_session_heading(line):
+            current_session = normalize_session(line)
             continue
 
         cgpa_m = _CGPA_RE.search(line)
@@ -297,7 +386,7 @@ def parse_pdf_text(text: str) -> StudentRecordDraft:
                 programs.append(program)
             continue
 
-        course = _parse_course_line(line)
+        course = _parse_course_line(line, default_session=current_session)
         if course is not None:
             courses.append(course)
 

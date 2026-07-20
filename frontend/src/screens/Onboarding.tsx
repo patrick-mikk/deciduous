@@ -35,9 +35,9 @@ import "./Onboarding.css";
  *  2. "When did you start at UofT?" — a Select of Fall start terms built
  *     purely from today's date (see `fallSessionCode` below), no network
  *     call needed for past years.
- *  3. "Do you have existing credits?" — upload a Degree Explorer PDF
- *     (`POST /api/import/pdf`), say you'll enter courses by hand (routes to
- *     /transcript instead of /dashboard on finish), or skip for now.
+ *  3. "Do you have existing credits?" — upload your Academic History PDF
+ *     from ACORN (`POST /api/import/pdf`), say you'll enter courses by hand
+ *     (routes to /transcript instead of /dashboard on finish), or skip for now.
  *  4. A brief "how it works" tour of the dashboard you're about to land on,
  *     plus a soft/dismissible nudge to create an account to sync across
  *     devices — never a hard requirement.
@@ -448,11 +448,11 @@ export default function Onboarding() {
               marginBottom: "var(--space-2)",
             }}
           >
-            Upload a Degree Explorer PDF
+            Upload your Academic History PDF
           </div>
           <Dropzone
-            label="Drop your Degree Explorer PDF here"
-            hint="or click to browse — parsed and encrypted on import"
+            label="Drop your Academic History PDF here"
+            hint="from ACORN — parsed and encrypted on import"
             accept="application/pdf"
             onFile={(file: File) => void handleImportPdf(file)}
             progress={importStatus === "uploading" ? 60 : undefined}
