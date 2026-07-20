@@ -252,7 +252,14 @@ function qs(params: object | undefined): string {
 }
 
 export const httpClient: ApiClient = {
-  getSessions: () => http("/sessions"),
+  // `GET /api/sessions` returns `{sessions: [{code, term, termName, year,
+  // label}, ...], defaultSession}` (backend/api/courses.py), not the bare
+  // `SessionCode[]` this contract promises -- unwrap to codes, tolerating a
+  // bare array (the 404 fallback in `http()` yields `[]`).
+  getSessions: () =>
+    http<{ sessions: { code: SessionCode }[] } | SessionCode[]>("/sessions").then((res) =>
+      Array.isArray(res) ? res : res.sessions.map((s) => s.code),
+    ),
 
   // `GET /api/programs` and `/api/courses` return a paginated envelope
   // (`{programs: [...], page, total, ...}` / `{courses: [...], ...}`), not a
