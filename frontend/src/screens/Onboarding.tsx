@@ -53,6 +53,17 @@ import "./Onboarding.css";
 
 const STEP_LABELS = ["What are you studying?", "Start term", "Existing credits", "How it works"];
 
+/** Program-search grouping: the three degree-program types get their own
+ * sections (design/09 sec. 2's combination rules only involve these), and
+ * everything else — Focus clusters, Certificates, unrecognized types — sits
+ * under a collapsed "Other" so it doesn't bury the common choices. */
+const PROGRAM_TYPE_GROUPS: Record<string, string> = {
+  major: "Majors",
+  specialist: "Specialists",
+  minor: "Minors",
+};
+const PROGRAM_GROUP_ORDER = ["Majors", "Specialists", "Minors", "Other"];
+
 /**
  * Session code for the Fall term of a given calendar year, per AGENTS.md's
  * glossary: `20269`=Fall 2026, `20271`=Winter 2027, `20265`=Summer 2026. In
@@ -331,9 +342,17 @@ export default function Onboarding() {
   // ---- Render ---------------------------------------------------------------
 
   function renderProgramsStep() {
+    // Group the search results by program type so common choices lead and
+    // niche types (Focus clusters, Certificates, anything unrecognized) sit
+    // behind a collapsed "Other" section instead of burying the flat list.
     const addOptions = catalog
       .filter((p) => !myPrograms.some((mp) => mp.code === p.code))
-      .map((p) => ({ value: p.code, label: `${p.title} (${p.code})` }));
+      .map((p) => ({
+        value: p.code,
+        label: `${p.title} (${p.code})`,
+        group: PROGRAM_TYPE_GROUPS[p.programType] ?? "Other",
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
 
     return (
       <Card>
@@ -382,6 +401,8 @@ export default function Onboarding() {
         <Combobox
           label="Add a program"
           options={addOptions}
+          groupOrder={PROGRAM_GROUP_ORDER}
+          collapsedGroup="Other"
           value={addValue}
           onChange={handleAddProgram}
           placeholder={catalogLoading ? "Loading programs…" : "Search programs…"}
