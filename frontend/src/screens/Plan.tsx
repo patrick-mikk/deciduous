@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api";
 import type { Course, PlanCourse, PlanValidationIssue, Program, SessionCode, StudentRecord } from "@/api";
-import { creditFromCode } from "@/api";
+import { creditFromCode, shortenProgram, countsTowardPhrase, remainingRequirementMatches } from "@/api";
 import {
   AutoPlanPanel,
   Button,
@@ -76,6 +76,9 @@ interface ToastItem {
 
 const PLAN_STORAGE_KEY = "deciduous:plan:v1";
 const YEAR_OPTIONS = [2, 3, 4, 5];
+// How many ranked remaining-requirement courses the rail fetches for its
+// proactive default view (each is one live getCourse call).
+const RAIL_SUGGEST_LIMIT = 40;
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -109,27 +112,6 @@ function mapBreadthKeys(breadth: string[]): string[] {
     if (m) keys.push(`BR${m[1]}`);
   }
   return keys;
-}
-
-/**
- * "Economics Major (ASMAJ1478)" -> "Economics" for the plain-language
- * "Counts toward ..." line. Drops the trailing program-type word and any
- * parenthetical POSt code so the card reads like a person would say it.
- */
-function shortenProgram(title: string): string {
-  return title
-    .replace(/\s*\([A-Z0-9]+\)\s*$/i, "")
-    .replace(/\s+(Specialist|Major|Minor)\b.*$/i, "")
-    .trim();
-}
-
-/** "Counts toward" phrasing: one name, "A and B", or "N of your programs". */
-function countsTowardPhrase(names: string[]): string | undefined {
-  const unique = Array.from(new Set(names.filter(Boolean)));
-  if (unique.length === 0) return undefined;
-  if (unique.length === 1) return unique[0];
-  if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
-  return `${unique.length} of your programs`;
 }
 
 function anchorFallYear(sessions: SessionCode[]): number {
@@ -177,7 +159,10 @@ export default function Plan() {
   // ---- CourseRail ----
   const [railQuery, setRailQuery] = React.useState("");
   const [debouncedRailQuery, setDebouncedRailQuery] = React.useState("");
-  const [onlyRemaining, setOnlyRemaining] = React.useState(false);
+  // Default ON: the app already knows the student's programs and gaps, so the
+  // rail leads with courses that fill a remaining requirement. Unchecking is
+  // the opt-out to browse the full catalog.
+  const [onlyRemaining, setOnlyRemaining] = React.useState(true);
   const [railResults, setRailResults] = React.useState<Course[]>([]);
   const [railLoading, setRailLoading] = React.useState(true);
   const [railError, setRailError] = React.useState<string | null>(null);
@@ -416,6 +401,33 @@ export default function Plan() {
     }
     return out;
   }, [record, programDetails, planCourses]);
+
+  // Ranked remaining-requirement courses (multi-program first) -- the rail's
+  // proactive default when nothing is typed. Excludes what's completed,
+  // in progress, or already on the plan.
+  const remainingMatches = React.useMemo(() => {
+    if (!record) return [];
+    const taken = new Set<string>([
+      ...record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
+      ...planCourses.map((p) => p.code),
+    ]);
+    return remainingRequirementMatches(programDetails, record.requirementProgress, taken);
+  }, [record, programDetails, planCourses]);
+
+  // The top-ranked suggestions, in rank order, built from the course details
+  // that are already fetched below (no extra network call). Drives both the
+  // rail's default view and the "Add a course" dialog's default options.
+  const suggestionCodes = React.useMemo(
+    () => remainingMatches.slice(0, RAIL_SUGGEST_LIMIT).map((m) => m.code),
+    [remainingMatches],
+  );
+  const suggestionResults = React.useMemo(
+    () => suggestionCodes.map((code) => courseDetails.get(code)).filter((c): c is Course => Boolean(c)),
+    [suggestionCodes, courseDetails],
+  );
+  // Still resolving while any top code hasn't come back yet (present in the map
+  // means fetched, even if it resolved to null).
+  const suggestionLoading = suggestionCodes.length > 0 && suggestionCodes.some((code) => !courseDetails.has(code));
 
   // ---- On-demand course detail fetch for every code the plan/auto-plan needs to reason about ----
   const neededCodes = React.useMemo(() => {
@@ -738,8 +750,18 @@ export default function Plan() {
       ? "Add a program from Requirements to enable this filter."
       : "Load your programs' requirements first. No requirement data is available yet.";
 
+  // With nothing typed and the filter on, the rail leads with the ranked
+  // remaining-requirement suggestions (fetched by code). Typing searches the
+  // full catalog; with the filter on, that search is narrowed to remaining
+  // courses. Unchecking browses the whole catalog.
+  const suggestMode = onlyRemaining && !onlyRemainingDisabled && !debouncedRailQuery && remainingMatches.length > 0;
+
   const railCourses = React.useMemo(() => {
-    const list = onlyRemaining && !onlyRemainingDisabled ? railResults.filter((c) => remainingCodes.has(c.code)) : railResults;
+    let list: Course[];
+    if (suggestMode) list = suggestionResults;
+    else if (onlyRemaining && !onlyRemainingDisabled && debouncedRailQuery)
+      list = railResults.filter((c) => remainingCodes.has(c.code));
+    else list = railResults;
     return list.map((c) => ({
       code: c.code,
       title: c.title,
@@ -748,29 +770,48 @@ export default function Plan() {
       countsToward: computeCountsToward(c.code),
       status: railCourseStatus(c.code),
     }));
-  }, [railResults, onlyRemaining, onlyRemainingDisabled, remainingCodes, railCourseStatus, computeCountsToward]);
+  }, [suggestMode, suggestionResults, railResults, onlyRemaining, onlyRemainingDisabled, debouncedRailQuery, remainingCodes, railCourseStatus, computeCountsToward]);
 
-  // Issue 5/6: the rail's empty/helper copy should say *why* the list looks
-  // the way it does -- "no matches for this search" reads very differently
-  // from "browsing the catalog, nothing filtered yet".
+  const railBusy = suggestMode ? suggestionLoading : railLoading;
+
+  // The rail's empty/helper copy should say *why* the list looks the way it
+  // does -- suggestions vs a narrowed search vs browsing the whole catalog.
   const railEmptyMessage = debouncedRailQuery
     ? `No courses match "${debouncedRailQuery}".`
-    : onlyRemaining && !onlyRemainingDisabled
-      ? "No unplaced courses fill a remaining requirement."
+    : suggestMode
+      ? "Nothing left that fills a remaining requirement. Uncheck to browse the catalog."
       : "No courses available.";
-  const railHelperText =
-    !debouncedRailQuery && !(onlyRemaining && !onlyRemainingDisabled) ? "Browsing the catalog. Type to search." : undefined;
-  const railCountLabel = railLoading
+  const railHelperText = debouncedRailQuery
+    ? undefined
+    : suggestMode
+      ? "Courses that fill a remaining requirement, best picks first. Type to search everything."
+      : "Browsing the catalog. Type to search.";
+  const railCountLabel = railBusy
     ? undefined
     : `${railCourses.length} course${railCourses.length === 1 ? "" : "s"}`;
 
-  const addDialogOptions = React.useMemo(
-    () =>
-      addDialogResults
-        .filter((c) => !planCourses.some((p) => p.code === c.code))
-        .map((c) => ({ value: c.code, label: `${c.code} · ${c.title}` })),
-    [addDialogResults, planCourses],
-  );
+  // The dialog leads with the same ranked suggestions as the rail; typing
+  // switches to a full-catalog search (driven by the Combobox query).
+  const addDialogSuggesting = !addDialogQuery.trim();
+  const addDialogOptions = React.useMemo(() => {
+    const source = addDialogSuggesting ? suggestionResults : addDialogResults;
+    const list = source.filter((c) => !planCourses.some((p) => p.code === c.code));
+    // Keep the current pick resolvable even after the Combobox clears its query
+    // (e.g. you searched, picked a non-suggestion, and the options reverted).
+    if (addDialogChoice && !list.some((c) => c.code === addDialogChoice)) {
+      const chosen =
+        suggestionResults.find((c) => c.code === addDialogChoice) ??
+        addDialogResults.find((c) => c.code === addDialogChoice);
+      if (chosen) list.unshift(chosen);
+    }
+    return list.map((c) => {
+      const ct = addDialogSuggesting ? computeCountsToward(c.code) : undefined;
+      return {
+        value: c.code,
+        label: ct ? `${c.code} · ${c.title} (counts toward ${ct})` : `${c.code} · ${c.title}`,
+      };
+    });
+  }, [addDialogSuggesting, suggestionResults, addDialogResults, planCourses, computeCountsToward, addDialogChoice]);
 
   const activeCourse = activeCourseCode ? planCourses.find((p) => p.code === activeCourseCode) ?? null : null;
   const activeCourseDetail = activeCourseCode ? (courseDetails.get(activeCourseCode) ?? null) : null;
@@ -862,7 +903,7 @@ export default function Plan() {
               onlyRemaining={onlyRemaining}
               onToggleRemaining={setOnlyRemaining}
               onDragCourse={() => {}}
-              loading={railLoading}
+              loading={railBusy}
               onlyRemainingDisabled={onlyRemainingDisabled}
               onlyRemainingHint={onlyRemainingHint}
               emptyMessage={railEmptyMessage}
@@ -960,14 +1001,12 @@ export default function Plan() {
       >
         <Combobox
           label="Course"
-          placeholder="Search courses…"
+          placeholder="Pick a suggestion, or search all courses"
           options={addDialogOptions}
           value={addDialogChoice}
           onChange={(v: string | null) => setAddDialogChoice(v)}
           onQueryChange={(q: string) => setAddDialogQuery(q)}
-          loading={addDialogLoading}
-          searchToReveal
-          emptyHint="Type a course code or title to search."
+          loading={addDialogSuggesting ? suggestionLoading : addDialogLoading}
           clearable
         />
       </Dialog>

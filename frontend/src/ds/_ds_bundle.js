@@ -1884,7 +1884,13 @@ function CourseCard({
       marginTop: 2,
       lineHeight: 'var(--leading-heading)'
     }
-  }, title)), st && /*#__PURE__*/React.createElement("span", {
+  }, title), countsToward && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-body-sm)',
+      color: 'var(--accent)',
+      marginTop: 4
+    }
+  }, "Counts toward ", countsToward)), st && /*#__PURE__*/React.createElement("span", {
     style: {
       display: 'inline-flex',
       alignItems: 'center',

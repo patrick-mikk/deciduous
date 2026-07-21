@@ -14,8 +14,8 @@ import {
   Callout,
   Toast,
 } from "@/ds";
-import { api, courseLevel, BREADTH_KEYS, BREADTH_LABELS } from "@/api";
-import type { BreadthKey, Course, CourseSearchParams, SessionCode, StudentRecord } from "@/api";
+import { api, courseLevel, BREADTH_KEYS, BREADTH_LABELS, remainingRequirementMatches, countsTowardPhrase } from "@/api";
+import type { BreadthKey, Course, CourseSearchParams, Program, SessionCode, StudentRecord } from "@/api";
 
 /**
  * Course search — routed at "/courses" (design/screens/03-programs-and-courses.md
@@ -36,6 +36,11 @@ const LEVELS = [100, 200, 300, 400] as const;
 // search effect below), so a slow-but-eventually-successful call self-heals
 // instead of getting stuck on a stale error.
 const SEARCH_TIMEOUT_MS = 10_000;
+
+// How many proactive suggestions to fetch details for on the default view.
+// Ranked by how many programs each course advances, so the cap keeps the
+// highest-value picks; each entry is one live `getCourse` call.
+const SUGGEST_LIMIT = 24;
 
 // Session code = 4-digit year + 1 term digit (AGENTS.md glossary): 1=Winter, 5=Summer, 9=Fall.
 const TERM_DIGIT_LABEL: Record<string, string> = { "1": "Winter", "5": "Summer", "9": "Fall" };
@@ -91,6 +96,16 @@ export default function Courses() {
   const [toast, setToast] = React.useState<string | null>(null);
   const [retryNonce, setRetryNonce] = React.useState(0);
 
+  // ---- Proactive default: courses that fill still-open requirements --------
+  const [programDetails, setProgramDetails] = React.useState<Program[]>([]);
+  const [programsResolved, setProgramsResolved] = React.useState(false);
+  const [suggestions, setSuggestions] = React.useState<Course[]>([]);
+  const [suggestState, setSuggestState] = React.useState<LoadState>("loading");
+
+  // The default view (nothing typed, no filters) leads with suggestions rather
+  // than a catalog dump. Any query or filter switches to normal catalog search.
+  const browsingDefault = !q && !level && !breadth && !term && !hasSeats;
+
   // Debounce free-text search so every keystroke doesn't refetch.
   React.useEffect(() => {
     const t = setTimeout(() => setQ(qInput.trim()), 300);
@@ -112,7 +127,81 @@ export default function Courses() {
       .catch(() => {});
   }, []);
 
+  // Enrolled program requirements, to know what still counts toward the degree.
   React.useEffect(() => {
+    if (!record) return;
+    if (record.programs.length === 0) {
+      setProgramDetails([]);
+      setProgramsResolved(true);
+      return;
+    }
+    let cancelled = false;
+    setProgramsResolved(false);
+    Promise.all(record.programs.map((p) => api.getProgram(p.code).catch(() => null))).then((res) => {
+      if (cancelled) return;
+      setProgramDetails(res.filter((p): p is Program => p != null));
+      setProgramsResolved(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [record]);
+
+  // Ranked courses that fill a still-open requirement (multi-program first),
+  // and a per-code "counts toward ..." phrase for any course we display.
+  const remainingMatches = React.useMemo(() => {
+    if (!record) return [];
+    const taken = new Set(
+      record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
+    );
+    return remainingRequirementMatches(programDetails, record.requirementProgress, taken);
+  }, [record, programDetails]);
+
+  const countsTowardByCode = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of remainingMatches) {
+      const phrase = countsTowardPhrase(m.programs);
+      if (phrase) map[m.code] = phrase;
+    }
+    return map;
+  }, [remainingMatches]);
+
+  // Fetch details for the top-ranked suggestions, in rank order. Only runs on
+  // the default view; typing/filtering hands off to the catalog search below.
+  React.useEffect(() => {
+    if (!browsingDefault) return;
+    if (!record) return; // keep showing the loading state until we know the programs
+    if (record.programs.length > 0 && !programsResolved) return; // wait for requirement data
+    const top = remainingMatches.slice(0, SUGGEST_LIMIT);
+    if (top.length === 0) {
+      setSuggestions([]);
+      setSuggestState("ready");
+      return;
+    }
+    let cancelled = false;
+    setSuggestState("loading");
+    Promise.all(
+      top.map((m) =>
+        api
+          .getCourse(m.code)
+          .then((c) => [m.code, c] as const)
+          .catch(() => [m.code, null] as const),
+      ),
+    ).then((pairs) => {
+      if (cancelled) return;
+      const byCode = new Map(pairs);
+      setSuggestions(top.map((m) => byCode.get(m.code)).filter((c): c is Course => Boolean(c)));
+      setSuggestState("ready");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [browsingDefault, record, programsResolved, remainingMatches]);
+
+  React.useEffect(() => {
+    // The default view is driven by the suggestions effect above, not a
+    // catalog fetch -- skip it so we never fall back to the alphabetical dump.
+    if (browsingDefault) return;
     let cancelled = false;
     setState("loading");
     setError(null);
@@ -150,7 +239,7 @@ export default function Courses() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [q, breadth, term, hasSeats, retryNonce]);
+  }, [q, breadth, term, hasSeats, retryNonce, browsingDefault]);
 
   // Level isn't a mock/backend filter param — applied client-side (idempotent
   // if a real backend already filtered it, since courseLevel() is deterministic).
@@ -179,16 +268,23 @@ export default function Courses() {
     return "available";
   };
 
+  const activeState: LoadState = browsingDefault ? suggestState : state;
+  const activeList = browsingDefault ? suggestions : filtered;
+  const searchError = browsingDefault ? null : error; // catalog-search errors don't apply to the suggestions view
+  const hasPrograms = (record?.programs.length ?? 0) > 0;
+  const subtitle = browsingDefault
+    ? activeState === "loading"
+      ? "Finding courses for you…"
+      : suggestions.length > 0
+        ? "Suggested for your programs, best picks first"
+        : "Search by code or title to explore the catalog"
+    : state === "loading"
+      ? "Searching…"
+      : `${filtered.length} course${filtered.length === 1 ? "" : "s"} found`;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <PageHeader
-        title="Courses"
-        subtitle={
-          state === "loading"
-            ? "Searching…"
-            : `${filtered.length} course${filtered.length === 1 ? "" : "s"} found`
-        }
-      />
+      <PageHeader title="Courses" subtitle={subtitle} />
 
       <FilterBar onClear={hasFilters ? clearAll : undefined}>
         <div style={{ minWidth: 220, flex: "1 1 220px" }}>
@@ -238,7 +334,7 @@ export default function Courses() {
         </div>
       </FilterBar>
 
-      {error && (
+      {searchError && (
         <Callout tone="danger" title="Couldn't load courses">
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {error}
@@ -249,7 +345,7 @@ export default function Courses() {
         </Callout>
       )}
 
-      {state === "loading" && (
+      {activeState === "loading" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }} aria-busy="true">
           {Array.from({ length: 5 }).map((_, i) => (
             <div
@@ -268,7 +364,28 @@ export default function Courses() {
         </div>
       )}
 
-      {state !== "loading" && !error && filtered.length === 0 && (
+      {/* Default view has suggestions but nothing to suggest: guide the student
+          to the action that would produce some, rather than an empty prompt. */}
+      {browsingDefault && activeState !== "loading" && activeList.length === 0 && (
+        <EmptyState
+          title={hasPrograms ? "Nothing left to suggest right now" : "Add a program for tailored suggestions"}
+          description={
+            hasPrograms
+              ? "Your enrolled programs' listed courses are all accounted for. Search by code or title above to explore the full catalog."
+              : "Once you add a program from Requirements, this page leads with the courses that count toward what you still need. For now, search by code or title above."
+          }
+          icon={hasPrograms ? "circle-check" : "graduation-cap"}
+          action={
+            hasPrograms ? undefined : (
+              <Button variant="primary" onClick={() => navigate("/requirements")}>
+                Go to Requirements
+              </Button>
+            )
+          }
+        />
+      )}
+
+      {!browsingDefault && state !== "loading" && !searchError && filtered.length === 0 && (
         <EmptyState
           title="No courses match your filters"
           description="Try widening the search: clear a filter or search a different code or title."
@@ -283,9 +400,9 @@ export default function Courses() {
         />
       )}
 
-      {state !== "loading" && !error && filtered.length > 0 && (
+      {activeState !== "loading" && !searchError && activeList.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {filtered.map((course) => {
+          {activeList.map((course) => {
             const { meetTime, location, instructor } = meetingSummary(course);
             return (
               <CourseCard
@@ -294,6 +411,7 @@ export default function Courses() {
                 title={course.title}
                 credit={course.credit}
                 breadth={course.breadth.map(breadthKeyFromLabel).filter((b): b is BreadthKey => Boolean(b))}
+                countsToward={countsTowardByCode[course.code]}
                 fall={course.sectionCode === "F" || course.sectionCode === "Y"}
                 winter={course.sectionCode === "S" || course.sectionCode === "Y"}
                 status={statusFor(course)}

@@ -10,7 +10,69 @@
  * checks) belong in the backend; these are the lightweight client-side
  * versions used to render progress/audit UI from a StudentRecord.
  */
-import { BREADTH_KEYS, type BreadthData, type DegreeAuditData } from "./types";
+import { BREADTH_KEYS, type BreadthData, type DegreeAuditData, type Program, type RequirementProgress } from "./types";
+
+/**
+ * "Economics Major (ASMAJ1478)" -> "Economics" for plain-language
+ * "Counts toward ..." copy. Drops the trailing program-type word and any
+ * parenthetical POSt code so the label reads like a person would say it.
+ */
+export function shortenProgram(title: string): string {
+  return title
+    .replace(/\s*\([A-Z0-9]+\)\s*$/i, "")
+    .replace(/\s+(Specialist|Major|Minor)\b.*$/i, "")
+    .trim();
+}
+
+/** "Counts toward" phrasing: one name, "A and B", or "N of your programs". */
+export function countsTowardPhrase(names: string[]): string | undefined {
+  const unique = Array.from(new Set(names.filter(Boolean)));
+  if (unique.length === 0) return undefined;
+  if (unique.length === 1) return unique[0];
+  if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
+  return `${unique.length} of your programs`;
+}
+
+/** One course that helps fill still-open requirements, with the enrolled
+ * programs it counts toward and how many (higher `count` = higher value). */
+export interface RemainingMatch {
+  code: string;
+  programs: string[]; // shortened enrolled-program names, deduped
+  count: number; // distinct enrolled programs this course still counts toward
+}
+
+/**
+ * The heart of the app's proactive suggestions: across the student's enrolled
+ * programs, which courses would fill a *still-open* requirement group, ranked
+ * by how many programs they advance at once (multi-program picks first). A
+ * group counts as open when its earned credits are below what it requires; a
+ * program with no parsed progress row is treated as fully open. Courses the
+ * student has already taken (`takenCodes`) are excluded.
+ */
+export function remainingRequirementMatches(
+  programs: Program[],
+  progressByProgram: Record<string, RequirementProgress[]>,
+  takenCodes: Set<string>,
+): RemainingMatch[] {
+  const byCode = new Map<string, Set<string>>();
+  for (const prog of programs) {
+    const progress = progressByProgram[prog.code] ?? [];
+    for (const group of prog.completionRequirements) {
+      if (group.isNote) continue;
+      const gp = progress.find((p) => p.label === group.heading);
+      const open = gp ? gp.earned < gp.required : true;
+      if (!open) continue;
+      for (const code of group.courseCodes) {
+        if (takenCodes.has(code)) continue;
+        if (!byCode.has(code)) byCode.set(code, new Set());
+        byCode.get(code)!.add(shortenProgram(prog.title));
+      }
+    }
+  }
+  return Array.from(byCode.entries())
+    .map(([code, set]) => ({ code, programs: Array.from(set), count: set.size }))
+    .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+}
 
 export interface BreadthEvaluation {
   satisfied: boolean;

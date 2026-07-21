@@ -1,8 +1,8 @@
 import * as React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { api } from "@/api";
-import type { Course, SessionCode, StudentRecord } from "@/api";
+import { api, remainingRequirementMatches, countsTowardPhrase } from "@/api";
+import type { Course, Program, SessionCode, StudentRecord } from "@/api";
 import {
   Button,
   Callout,
@@ -320,6 +320,58 @@ export default function Timetable() {
     };
   }, [reloadKey]);
 
+  // ---- Enrolled program requirements + ranked remaining suggestions --------
+  const [programDetails, setProgramDetails] = React.useState<Program[]>([]);
+  const [suggestionCourses, setSuggestionCourses] = React.useState<Course[]>([]);
+  React.useEffect(() => {
+    if (!record || record.programs.length === 0) {
+      setProgramDetails([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(record.programs.map((p) => api.getProgram(p.code).catch(() => null))).then((res) => {
+      if (!cancelled) setProgramDetails(res.filter((p): p is Program => p != null));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [record]);
+
+  const remainingMatches = React.useMemo(() => {
+    if (!record) return [];
+    const taken = new Set(
+      record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
+    );
+    return remainingRequirementMatches(programDetails, record.requirementProgress, taken);
+  }, [record, programDetails]);
+
+  // Fetch details for the top suggestions so the "add a course" dialog can lead
+  // with courses that fill a remaining requirement (later narrowed to the ones
+  // actually offered in the selected term).
+  React.useEffect(() => {
+    const top = remainingMatches.slice(0, 40).map((m) => m.code);
+    if (top.length === 0) {
+      setSuggestionCourses([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      top.map((code) =>
+        api
+          .getCourse(code)
+          .then((c) => [code, c] as const)
+          .catch(() => [code, null] as const),
+      ),
+    ).then((pairs) => {
+      if (cancelled) return;
+      const byCode = new Map(pairs);
+      setSuggestionCourses(top.map((code) => byCode.get(code)).filter((c): c is Course => Boolean(c)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [remainingMatches]);
+
   // ---- Load stored scenarios once ----
   React.useEffect(() => {
     setStored(loadStoredTimetable());
@@ -581,14 +633,42 @@ export default function Timetable() {
   const gridBlocks = React.useMemo(() => blocks.map((b) => ({ ...b, room: b.building })), [blocks]);
   const conflicts = React.useMemo(() => conflictMessages(blocks), [blocks]);
 
+  const countsTowardByCode = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of remainingMatches) {
+      const phrase = countsTowardPhrase(m.programs);
+      if (phrase) map[m.code] = phrase;
+    }
+    return map;
+  }, [remainingMatches]);
+
+  // Default (nothing typed): lead with ranked remaining-requirement courses
+  // that are actually offered in this term. Typing switches to catalog search.
+  const addSuggesting = !addQuery.trim();
   const addOptions = React.useMemo(() => {
     if (!scenario || !term) return [];
     const season = seasonOf(term);
-    return catalog
-      .filter((c) => !scenario.courseCodes.includes(c.code))
-      .filter((c) => c.sectionCode === "Y" || season === "Summer" || (season === "Fall" && c.sectionCode === "F") || (season === "Winter" && c.sectionCode === "S"))
-      .map((c) => ({ value: c.code, label: `${c.code} · ${c.title}` }));
-  }, [catalog, scenario, term]);
+    const offeredInTerm = (c: Course) =>
+      c.sectionCode === "Y" ||
+      season === "Summer" ||
+      (season === "Fall" && c.sectionCode === "F") ||
+      (season === "Winter" && c.sectionCode === "S");
+    const source = addSuggesting ? suggestionCourses : catalog;
+    const list = source.filter((c) => !scenario.courseCodes.includes(c.code)).filter(offeredInTerm);
+    // Keep the current pick resolvable even after the Combobox clears its query.
+    if (addChoice && !list.some((c) => c.code === addChoice)) {
+      const chosen =
+        suggestionCourses.find((c) => c.code === addChoice) ?? catalog.find((c) => c.code === addChoice);
+      if (chosen) list.unshift(chosen);
+    }
+    return list.map((c) => {
+      const ct = addSuggesting ? countsTowardByCode[c.code] : undefined;
+      return {
+        value: c.code,
+        label: ct ? `${c.code} · ${c.title} (counts toward ${ct})` : `${c.code} · ${c.title}`,
+      };
+    });
+  }, [addSuggesting, suggestionCourses, catalog, scenario, term, addChoice, countsTowardByCode]);
 
   const swapCourse = swapCode ? (courseDetails.get(swapCode) ?? null) : null;
   const ready = !loading && !loadError && !!scenario;
@@ -758,14 +838,12 @@ export default function Timetable() {
           )}
           <Combobox
             label="Course"
-            placeholder="Search courses…"
+            placeholder={addSuggesting ? "Pick a suggestion, or search all courses" : "Search courses…"}
             options={addOptions}
             value={addChoice}
             onChange={(v: string | null) => setAddChoice(v)}
             onQueryChange={(q: string) => setAddQuery(q)}
-            loading={catalogLoading}
-            searchToReveal
-            emptyHint="Type a course code or title to search."
+            loading={addSuggesting ? false : catalogLoading}
             clearable
           />
         </div>
