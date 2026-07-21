@@ -3,16 +3,18 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api";
 import type { Course, PlanCourse, PlanValidationIssue, Program, SessionCode, StudentRecord } from "@/api";
-import { creditFromCode } from "@/api";
+import { creditFromCode, shortenProgram, countsTowardPhrase, remainingRequirementMatches } from "@/api";
 import {
   AutoPlanPanel,
   Button,
   Callout,
+  Checkbox,
+  Chip,
   Combobox,
-  CourseRail,
   Dialog,
   Drawer,
   EmptyState,
+  Input,
   PageHeader,
   PlanBoard,
   Select,
@@ -53,7 +55,8 @@ interface PlanCardVM {
   credit: number;
   status: "planned" | "completed";
   issues: string[]; // "prereq" | "exclusion" | "not-offered"
-  satisfies: { breadth?: string; label: string }[];
+  satisfies: { breadth?: string; label: string }[]; // breadth chips only
+  countsToward?: string; // plain-language "Counts toward X" line
   draggable: boolean;
   locked: boolean;
 }
@@ -75,6 +78,9 @@ interface ToastItem {
 
 const PLAN_STORAGE_KEY = "deciduous:plan:v1";
 const YEAR_OPTIONS = [2, 3, 4, 5];
+// How many ranked remaining-requirement courses the rail fetches for its
+// proactive default view (each is one live getCourse call).
+const RAIL_SUGGEST_LIMIT = 40;
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -155,7 +161,10 @@ export default function Plan() {
   // ---- CourseRail ----
   const [railQuery, setRailQuery] = React.useState("");
   const [debouncedRailQuery, setDebouncedRailQuery] = React.useState("");
-  const [onlyRemaining, setOnlyRemaining] = React.useState(false);
+  // Default ON: the app already knows the student's programs and gaps, so the
+  // rail leads with courses that fill a remaining requirement. Unchecking is
+  // the opt-out to browse the full catalog.
+  const [onlyRemaining, setOnlyRemaining] = React.useState(true);
   const [railResults, setRailResults] = React.useState<Course[]>([]);
   const [railLoading, setRailLoading] = React.useState(true);
   const [railError, setRailError] = React.useState<string | null>(null);
@@ -177,6 +186,14 @@ export default function Plan() {
   // ---- Add-course dialog (keyboard/click alternative to dragging) ----
   const [addDialogTermId, setAddDialogTermId] = React.useState<string | null>(null);
   const [addDialogChoice, setAddDialogChoice] = React.useState<string | null>(null);
+  // The dialog runs its own server-backed search rather than reusing the
+  // rail's first page of results: `/api/courses` is paged, so client-side
+  // filtering a single page can neither offer a useful default (it would dump
+  // the alphabetically-first courses) nor find a course past page one. This
+  // query is fed from the Combobox's own text input via `onQueryChange`.
+  const [addDialogQuery, setAddDialogQuery] = React.useState("");
+  const [addDialogResults, setAddDialogResults] = React.useState<Course[]>([]);
+  const [addDialogLoading, setAddDialogLoading] = React.useState(false);
 
   // ---- Course options dialog (move / lock / remove — also the drag alternative) ----
   const [activeCourseCode, setActiveCourseCode] = React.useState<string | null>(null);
@@ -293,6 +310,44 @@ export default function Plan() {
       });
   }, [debouncedRailQuery, railRetryKey]);
 
+  // ---- Add-dialog debounced server search ----
+  // Only fires while the dialog is open and there's a query; an empty query
+  // stays in the Combobox's "type to search" state, so we never fetch (or
+  // show) the arbitrary first-page dump.
+  const addDialogRequestId = React.useRef(0);
+  React.useEffect(() => {
+    const q = addDialogQuery.trim();
+    if (addDialogTermId == null) {
+      setAddDialogResults([]);
+      setAddDialogLoading(false);
+      return;
+    }
+    if (!q) {
+      // Selecting an option resets the Combobox's own query to empty. Keep the
+      // last results so the chosen course's label still resolves in the
+      // trigger; the dropdown itself stays in the "type to search" state.
+      setAddDialogLoading(false);
+      return;
+    }
+    const id = ++addDialogRequestId.current;
+    setAddDialogLoading(true);
+    const t = window.setTimeout(() => {
+      api
+        .getCourses({ q })
+        .then((cs) => {
+          if (addDialogRequestId.current !== id) return;
+          setAddDialogResults(cs);
+          setAddDialogLoading(false);
+        })
+        .catch(() => {
+          if (addDialogRequestId.current !== id) return;
+          setAddDialogResults([]);
+          setAddDialogLoading(false);
+        });
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [addDialogQuery, addDialogTermId]);
+
   // ---- Debounced server validation, re-run whenever the plan changes ----
   const [debouncedPlanForValidation, setDebouncedPlanForValidation] = React.useState<PlanCourse[]>([]);
   React.useEffect(() => {
@@ -349,6 +404,33 @@ export default function Plan() {
     return out;
   }, [record, programDetails, planCourses]);
 
+  // Ranked remaining-requirement courses (multi-program first) -- the rail's
+  // proactive default when nothing is typed. Excludes what's completed,
+  // in progress, or already on the plan.
+  const remainingMatches = React.useMemo(() => {
+    if (!record) return [];
+    const taken = new Set<string>([
+      ...record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
+      ...planCourses.map((p) => p.code),
+    ]);
+    return remainingRequirementMatches(programDetails, record.requirementProgress, taken);
+  }, [record, programDetails, planCourses]);
+
+  // The top-ranked suggestions, in rank order, built from the course details
+  // that are already fetched below (no extra network call). Drives both the
+  // rail's default view and the "Add a course" dialog's default options.
+  const suggestionCodes = React.useMemo(
+    () => remainingMatches.slice(0, RAIL_SUGGEST_LIMIT).map((m) => m.code),
+    [remainingMatches],
+  );
+  const suggestionResults = React.useMemo(
+    () => suggestionCodes.map((code) => courseDetails.get(code)).filter((c): c is Course => Boolean(c)),
+    [suggestionCodes, courseDetails],
+  );
+  // Still resolving while any top code hasn't come back yet (present in the map
+  // means fetched, even if it resolved to null).
+  const suggestionLoading = suggestionCodes.length > 0 && suggestionCodes.some((code) => !courseDetails.has(code));
+
   // ---- On-demand course detail fetch for every code the plan/auto-plan needs to reason about ----
   const neededCodes = React.useMemo(() => {
     const s = new Set<string>(planCourses.map((p) => p.code));
@@ -360,8 +442,12 @@ export default function Plan() {
   React.useEffect(() => {
     const missing = Array.from(neededCodes).filter((c) => !fetchedCodesRef.current.has(c));
     if (missing.length === 0) return;
-    missing.forEach((c) => fetchedCodesRef.current.add(c));
-    let cancelled = false;
+    // Mark a code fetched only once its request resolves (not up front): when
+    // `neededCodes` recomputes as record/programDetails load, this effect
+    // re-runs and its cleanup cancels the prior in-flight batch. If we marked
+    // up front, those cancelled codes would be skipped forever and their
+    // titles would never populate (the card would show the code twice).
+    let active = true;
     Promise.all(
       missing.map((code) =>
         api
@@ -370,7 +456,8 @@ export default function Plan() {
           .catch(() => [code, null] as const),
       ),
     ).then((pairs) => {
-      if (cancelled) return;
+      if (!active) return;
+      pairs.forEach(([code]) => fetchedCodesRef.current.add(code));
       setCourseDetails((prev) => {
         const next = new Map(prev);
         for (const [code, c] of pairs) next.set(code, c);
@@ -378,7 +465,7 @@ export default function Plan() {
       });
     });
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, [neededCodes]);
 
@@ -425,18 +512,28 @@ export default function Plan() {
     [record, planCourses, courseDetails],
   );
 
+  // Breadth chips only. The requirement-group heading (raw jargon like
+  // "Program Course Requirements") is deliberately no longer surfaced as a
+  // chip -- it's replaced by the plain-language "Counts toward ..." line below.
   const computeSatisfies = React.useCallback(
-    (code: string, course: Course | null): { breadth?: string; label: string }[] => {
-      const tags: { breadth?: string; label: string }[] = [];
-      if (course) {
-        for (const key of mapBreadthKeys(course.breadth)) tags.push({ breadth: key, label: key });
-      }
+    (_code: string, course: Course | null): { breadth?: string; label: string }[] => {
+      if (!course) return [];
+      return mapBreadthKeys(course.breadth).map((key) => ({ breadth: key, label: key }));
+    },
+    [],
+  );
+
+  // Which of the student's enrolled programs a course actually counts toward,
+  // as a plain-language phrase ("Economics and Public Policy"). Replaces the
+  // requirement-group jargon a student wouldn't recognize.
+  const computeCountsToward = React.useCallback(
+    (code: string): string | undefined => {
+      const names: string[] = [];
       for (const prog of programDetails) {
-        for (const group of prog.completionRequirements) {
-          if (group.courseCodes.includes(code)) tags.push({ label: group.heading || prog.title });
-        }
+        const inProgram = prog.completionRequirements.some((group) => group.courseCodes.includes(code));
+        if (inProgram) names.push(shortenProgram(prog.title));
       }
-      return tags;
+      return countsTowardPhrase(names);
     },
     [programDetails],
   );
@@ -466,6 +563,7 @@ export default function Plan() {
               status: completed ? "completed" : "planned",
               issues: course ? computeIssues(pc.code, course, id) : [],
               satisfies: computeSatisfies(pc.code, course),
+              countsToward: computeCountsToward(pc.code),
               draggable: !pc.locked,
               locked: !!pc.locked,
             };
@@ -505,13 +603,29 @@ export default function Plan() {
       const existing = prev.find((p) => p.code === code);
       if (!existing) return prev;
       if (existing.locked) {
-        pushToast("warning", `${code} is locked — unlock it before moving.`);
+        pushToast("warning", `${code} is locked. Unlock it before moving.`);
         return prev;
       }
       if (existing.term === toTermId) return prev;
       pushToast("success", `Moved ${code} to ${termLabel(toTermId)}.`);
       return prev.map((p) => (p.code === code ? { ...p, term: toTermId } : p));
     });
+  }
+
+  // Quick-add from the search list: drop the course into the earliest term
+  // where it's actually offered (F -> earliest Fall, S -> earliest Winter,
+  // Y/unknown -> earliest term). Precise placement is still available by
+  // dragging onto a specific column.
+  function handleQuickAdd(code: string) {
+    const course =
+      courseDetails.get(code) ??
+      railResults.find((c) => c.code === code) ??
+      suggestionResults.find((c) => c.code === code) ??
+      null;
+    const sc = course?.sectionCode;
+    const wantsSeason: "Fall" | "Winter" | null = sc === "F" ? "Fall" : sc === "S" ? "Winter" : null;
+    const target = terms.find((t) => !wantsSeason || t.season === wantsSeason) ?? terms[0];
+    if (target) addCourseToTerm(code, target.id);
   }
 
   function handleDropCourse(termId: string, code: string) {
@@ -523,7 +637,7 @@ export default function Plan() {
   function handleRemoveCourse(_termId: string, code: string) {
     const existing = planCourses.find((p) => p.code === code);
     if (existing?.locked) {
-      pushToast("warning", `${code} is locked — unlock it before removing.`);
+      pushToast("warning", `${code} is locked. Unlock it before removing.`);
       return;
     }
     setPlanCourses((prev) => prev.filter((p) => p.code !== code));
@@ -611,18 +725,22 @@ export default function Plan() {
   function handleValidateClick() {
     if (validationStatus === "loading") return;
     if (validationStatus === "error") {
-      pushToast("danger", validationError ?? "Couldn't validate your plan.");
+      pushToast("danger", validationError ?? "We couldn't check your plan just now.");
     } else if (validationIssues.length === 0) {
-      pushToast("success", "Plan validates — no issues found.");
+      pushToast("success", "Your plan looks good.");
     } else if (validationErrorCount === 0) {
       pushToast(
         "warning",
-        `Validates with ${validationWarningCount} warning${validationWarningCount === 1 ? "" : "s"} — see below.`,
+        validationWarningCount === 1
+          ? "Your plan works. There's one thing worth a look below."
+          : `Your plan works. There are ${validationWarningCount} things worth a look below.`,
       );
     } else {
       pushToast(
         "warning",
-        `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"} found — see below.`,
+        validationErrorCount === 1
+          ? "There's one thing to fix. See the details below."
+          : `There are ${validationErrorCount} things to fix. See the details below.`,
       );
     }
     validationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -648,40 +766,70 @@ export default function Plan() {
     ? undefined
     : !record || record.programs.length === 0
       ? "Add a program from Requirements to enable this filter."
-      : "Load your programs' requirements first — no requirement data available yet.";
+      : "Load your programs' requirements first. No requirement data is available yet.";
+
+  // With nothing typed and the filter on, the rail leads with the ranked
+  // remaining-requirement suggestions (fetched by code). Typing searches the
+  // full catalog; with the filter on, that search is narrowed to remaining
+  // courses. Unchecking browses the whole catalog.
+  const suggestMode = onlyRemaining && !onlyRemainingDisabled && !debouncedRailQuery && remainingMatches.length > 0;
 
   const railCourses = React.useMemo(() => {
-    const list = onlyRemaining && !onlyRemainingDisabled ? railResults.filter((c) => remainingCodes.has(c.code)) : railResults;
+    let list: Course[];
+    if (suggestMode) list = suggestionResults;
+    else if (onlyRemaining && !onlyRemainingDisabled && debouncedRailQuery)
+      list = railResults.filter((c) => remainingCodes.has(c.code));
+    else list = railResults;
     return list.map((c) => ({
       code: c.code,
       title: c.title,
       credit: c.credit,
       breadth: mapBreadthKeys(c.breadth),
+      countsToward: computeCountsToward(c.code),
       status: railCourseStatus(c.code),
     }));
-  }, [railResults, onlyRemaining, onlyRemainingDisabled, remainingCodes, railCourseStatus]);
+  }, [suggestMode, suggestionResults, railResults, onlyRemaining, onlyRemainingDisabled, debouncedRailQuery, remainingCodes, railCourseStatus, computeCountsToward]);
 
-  // Issue 5/6: the rail's empty/helper copy should say *why* the list looks
-  // the way it does -- "no matches for this search" reads very differently
-  // from "browsing the catalog, nothing filtered yet".
+  const railBusy = suggestMode ? suggestionLoading : railLoading;
+
+  // The rail's empty/helper copy should say *why* the list looks the way it
+  // does -- suggestions vs a narrowed search vs browsing the whole catalog.
   const railEmptyMessage = debouncedRailQuery
     ? `No courses match "${debouncedRailQuery}".`
-    : onlyRemaining && !onlyRemainingDisabled
-      ? "No unplaced courses fill a remaining requirement."
+    : suggestMode
+      ? "Nothing left that fills a remaining requirement. Uncheck to browse the catalog."
       : "No courses available.";
-  const railHelperText =
-    !debouncedRailQuery && !(onlyRemaining && !onlyRemainingDisabled) ? "Browsing the catalog — type to search." : undefined;
-  const railCountLabel = railLoading
+  const railHelperText = debouncedRailQuery
+    ? undefined
+    : suggestMode
+      ? "Courses that fill a remaining requirement, best picks first. Type to search everything."
+      : "Browsing the catalog. Type to search.";
+  const railCountLabel = railBusy
     ? undefined
     : `${railCourses.length} course${railCourses.length === 1 ? "" : "s"}`;
 
-  const addDialogOptions = React.useMemo(
-    () =>
-      railResults
-        .filter((c) => !planCourses.some((p) => p.code === c.code))
-        .map((c) => ({ value: c.code, label: `${c.code} — ${c.title}` })),
-    [railResults, planCourses],
-  );
+  // The dialog leads with the same ranked suggestions as the rail; typing
+  // switches to a full-catalog search (driven by the Combobox query).
+  const addDialogSuggesting = !addDialogQuery.trim();
+  const addDialogOptions = React.useMemo(() => {
+    const source = addDialogSuggesting ? suggestionResults : addDialogResults;
+    const list = source.filter((c) => !planCourses.some((p) => p.code === c.code));
+    // Keep the current pick resolvable even after the Combobox clears its query
+    // (e.g. you searched, picked a non-suggestion, and the options reverted).
+    if (addDialogChoice && !list.some((c) => c.code === addDialogChoice)) {
+      const chosen =
+        suggestionResults.find((c) => c.code === addDialogChoice) ??
+        addDialogResults.find((c) => c.code === addDialogChoice);
+      if (chosen) list.unshift(chosen);
+    }
+    return list.map((c) => {
+      const ct = addDialogSuggesting ? computeCountsToward(c.code) : undefined;
+      return {
+        value: c.code,
+        label: ct ? `${c.code} · ${c.title} (counts toward ${ct})` : `${c.code} · ${c.title}`,
+      };
+    });
+  }, [addDialogSuggesting, suggestionResults, addDialogResults, planCourses, computeCountsToward, addDialogChoice]);
 
   const activeCourse = activeCourseCode ? planCourses.find((p) => p.code === activeCourseCode) ?? null : null;
   const activeCourseDetail = activeCourseCode ? (courseDetails.get(activeCourseCode) ?? null) : null;
@@ -693,8 +841,8 @@ export default function Plan() {
   return (
     <div>
       <PageHeader
-        title="Plan"
-        subtitle="Drag courses from the rail onto a term, or use the + / course menu to place them by keyboard."
+        title="Your plan"
+        subtitle="Drag a course onto a term, or search below to add one."
         actions={
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ width: 128 }}>
@@ -705,32 +853,13 @@ export default function Plan() {
                 options={YEAR_OPTIONS.map((n) => ({ value: String(n), label: `${n} years` }))}
               />
             </div>
-            <Button variant="secondary" icon="check-circle" onClick={handleValidateClick}>
-              Validate
-            </Button>
             <Button
-              variant={validationStatus === "error" || validationErrorCount > 0 ? "danger" : "secondary"}
-              icon={
-                validationStatus === "loading"
-                  ? "loader-circle"
-                  : validationStatus === "error"
-                    ? "circle-alert"
-                    : validationErrorCount > 0 || validationWarningCount > 0
-                      ? "triangle-alert"
-                      : "circle-check"
-              }
+              variant="secondary"
+              icon={validationStatus === "loading" ? "loader-circle" : "check-circle"}
               disabled={validationStatus === "loading"}
               onClick={validationStatus === "error" ? () => setValidationRetryKey((k) => k + 1) : handleValidateClick}
             >
-              {validationStatus === "loading"
-                ? "Validating…"
-                : validationStatus === "error"
-                  ? "Couldn't validate"
-                  : validationErrorCount > 0
-                    ? `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"}`
-                    : validationWarningCount > 0
-                      ? `${validationWarningCount} warning${validationWarningCount === 1 ? "" : "s"}`
-                      : "0 issues"}
+              {validationStatus === "loading" ? "Checking…" : "Check my plan"}
             </Button>
             <Button variant="primary" icon="sparkles" onClick={() => setAutoPlanOpen(true)}>
               Auto-plan
@@ -761,7 +890,7 @@ export default function Plan() {
         <EmptyState
           icon="git-branch"
           title="Nothing planned yet"
-          description="Add a program from Requirements, then drag courses from the rail onto a term to start building your plan."
+          description="Add a program from Requirements, then search for courses and drag them onto a term to start building your plan."
           action={
             <Button variant="primary" onClick={() => navigate("/programs")}>
               Browse programs
@@ -769,9 +898,100 @@ export default function Plan() {
           }
         />
       ) : (
-        <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-          {railError ? (
-            <div style={{ width: 260, flexShrink: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div ref={validationRef}>
+            {validationStatus === "error" ? (
+              <Callout
+                tone="danger"
+                title="Couldn't validate your plan"
+                action={
+                  <Button variant="secondary" size="sm" onClick={() => setValidationRetryKey((k) => k + 1)}>
+                    Retry
+                  </Button>
+                }
+              >
+                {validationError}
+              </Callout>
+            ) : validationStatus === "loading" && validationIssues.length === 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "var(--text-secondary)",
+                  fontSize: "var(--text-body-sm)",
+                }}
+              >
+                <Spinner size={16} />
+                Validating your plan…
+              </div>
+            ) : (
+              <ValidationSummary
+                issues={validationIssues}
+                onJump={(iss: PlanValidationIssue) => iss.code && navigate(`/courses/${iss.code}`)}
+              />
+            )}
+          </div>
+
+          <PlanBoard
+            terms={terms}
+            onDropCourse={(termId: string, code: string) => handleDropCourse(termId, code)}
+            onAddCourse={(termId: string) => {
+              setAddDialogTermId(termId);
+              setAddDialogChoice(null);
+            }}
+            onRemoveCourse={handleRemoveCourse}
+            onCourseClick={(c: PlanCardVM) => setActiveCourseCode(c.code)}
+          />
+
+          {/* Full-width course search below the board (drag a card onto a term,
+              or use its Add button). */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              borderTop: "1px solid var(--border)",
+              paddingTop: 20,
+              marginTop: 4,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--font-serif)",
+                fontSize: "var(--text-h3)",
+                fontWeight: "var(--weight-semibold)",
+              }}
+            >
+              Add a course
+            </div>
+            <Input
+              placeholder="Search by course code or title"
+              icon="search"
+              value={railQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRailQuery(e.target.value)}
+            />
+            <div>
+              <Checkbox
+                label="Only show courses that count toward what I still need"
+                checked={onlyRemaining}
+                onChange={setOnlyRemaining}
+                disabled={onlyRemainingDisabled}
+              />
+              {onlyRemainingDisabled && onlyRemainingHint && (
+                <div style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", marginTop: 4 }}>
+                  {onlyRemainingHint}
+                </div>
+              )}
+            </div>
+            {(railCountLabel || railHelperText) && !railBusy && (
+              <div style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
+                {railCountLabel}
+                {railCountLabel && railHelperText ? " · " : null}
+                {railHelperText}
+              </div>
+            )}
+            {railError ? (
               <Callout
                 tone="danger"
                 title="Couldn't search courses"
@@ -783,74 +1003,85 @@ export default function Plan() {
               >
                 {railError}
               </Callout>
-            </div>
-          ) : (
-            <CourseRail
-              courses={railCourses}
-              query={railQuery}
-              onQuery={setRailQuery}
-              onlyRemaining={onlyRemaining}
-              onToggleRemaining={setOnlyRemaining}
-              onDragCourse={() => {}}
-              loading={railLoading}
-              onlyRemainingDisabled={onlyRemainingDisabled}
-              onlyRemainingHint={onlyRemainingHint}
-              emptyMessage={railEmptyMessage}
-              helperText={railHelperText}
-              countLabel={railCountLabel}
-            />
-          )}
-
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
-            <div ref={validationRef}>
-              {validationStatus === "error" ? (
-                <Callout
-                  tone="danger"
-                  title="Couldn't validate your plan"
-                  action={
-                    <Button variant="secondary" size="sm" onClick={() => setValidationRetryKey((k) => k + 1)}>
-                      Retry
-                    </Button>
-                  }
-                >
-                  {validationError}
-                </Callout>
-              ) : validationStatus === "loading" && validationIssues.length === 0 ? (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    color: "var(--text-secondary)",
-                    fontSize: "var(--text-body-sm)",
-                  }}
-                >
-                  <Spinner size={16} />
-                  Validating your plan…
-                </div>
-              ) : (
-                <ValidationSummary
-                  issues={validationIssues}
-                  onJump={(iss: PlanValidationIssue) => iss.code && navigate(`/courses/${iss.code}`)}
-                />
-              )}
-            </div>
-
-            <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
-              {planCourses.length} course{planCourses.length === 1 ? "" : "s"} planned across {terms.length} terms
-              shown.
-            </div>
-
-            <PlanBoard
-              terms={terms}
-              onDropCourse={(termId: string, code: string) => handleDropCourse(termId, code)}
-              onAddCourse={(termId: string) => {
-                setAddDialogTermId(termId);
-                setAddDialogChoice(null);
-              }}
-              onRemoveCourse={handleRemoveCourse}
-              onCourseClick={(c: PlanCardVM) => setActiveCourseCode(c.code)}
-            />
+            ) : railBusy ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }} aria-busy="true">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} height={64} radius="var(--radius-lg)" />
+                ))}
+              </div>
+            ) : railCourses.length === 0 ? (
+              <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)", padding: "12px 2px" }}>
+                {railEmptyMessage}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {railCourses.map((c) => (
+                  <div
+                    key={c.code}
+                    draggable
+                    onDragStart={(e: React.DragEvent) => e.dataTransfer.setData("text/plain", c.code)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-lg)",
+                      background: "var(--surface)",
+                      cursor: "grab",
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: "var(--text-code)",
+                            fontWeight: "var(--weight-medium)",
+                            color: "var(--accent)",
+                          }}
+                        >
+                          {c.code}
+                        </span>
+                        {c.breadth.map((b) => (
+                          <Chip key={b} breadth={b} dot>
+                            {b}
+                          </Chip>
+                        ))}
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: "var(--text-caption)",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          {c.credit.toFixed(1)} FCE
+                        </span>
+                      </div>
+                      <div style={{ fontWeight: "var(--weight-semibold)", marginTop: 3 }}>{c.title}</div>
+                      {c.countsToward && (
+                        <div style={{ fontSize: "var(--text-caption)", color: "var(--accent)", marginTop: 2 }}>
+                          Counts toward {c.countsToward}
+                        </div>
+                      )}
+                    </div>
+                    {c.status === "planned" ? (
+                      <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)", flexShrink: 0 }}>
+                        On your plan
+                      </span>
+                    ) : c.status === "completed" ? (
+                      <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)", flexShrink: 0 }}>
+                        Completed
+                      </span>
+                    ) : (
+                      <Button variant="secondary" size="sm" icon="plus" onClick={() => handleQuickAdd(c.code)}>
+                        Add
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -858,11 +1089,20 @@ export default function Plan() {
       {/* ---- Add course (keyboard/click alternative to dragging) ---- */}
       <Dialog
         open={addDialogTermId != null}
-        title={addDialogTermId ? `Add a course — ${termLabel(addDialogTermId)}` : "Add a course"}
-        onClose={() => setAddDialogTermId(null)}
+        title={addDialogTermId ? `Add a course to ${termLabel(addDialogTermId)}` : "Add a course"}
+        onClose={() => {
+          setAddDialogTermId(null);
+          setAddDialogQuery("");
+        }}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setAddDialogTermId(null)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAddDialogTermId(null);
+                setAddDialogQuery("");
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -871,6 +1111,7 @@ export default function Plan() {
               onClick={() => {
                 if (addDialogTermId && addDialogChoice) addCourseToTerm(addDialogChoice, addDialogTermId);
                 setAddDialogTermId(null);
+                setAddDialogQuery("");
               }}
             >
               Add
@@ -880,10 +1121,12 @@ export default function Plan() {
       >
         <Combobox
           label="Course"
-          placeholder="Search courses…"
+          placeholder="Pick a suggestion, or search all courses"
           options={addDialogOptions}
           value={addDialogChoice}
           onChange={(v: string | null) => setAddDialogChoice(v)}
+          onQueryChange={(q: string) => setAddDialogQuery(q)}
+          loading={addDialogSuggesting ? suggestionLoading : addDialogLoading}
           clearable
         />
       </Dialog>

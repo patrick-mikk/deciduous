@@ -44,6 +44,7 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from backend.api import current_user, db_session, json_error, require_auth
+from backend.api._audit import effective_total_credits
 from backend.data_sources.cache import PROGRAMS_CATALOG_FULL_AT
 from backend.data_sources.llm_grouper import GeminiGrouper, LLMGroupingError
 from backend.data_sources.models import Program, RequirementGroup
@@ -115,7 +116,7 @@ def _program_json(program: Program) -> dict:
         "department": program.department,
         "departmentUrl": program.department_url,
         "enrolmentRequirements": program.enrolment_requirements,
-        "totalCredits": program.total_credits,
+        "totalCredits": effective_total_credits(program),
     }
 
 
@@ -139,7 +140,7 @@ def _requirement_group_json(group: RequirementGroup) -> dict:
 def _requirements_json(program: Program) -> dict:
     return {
         "code": program.code,
-        "totalCredits": program.total_credits,
+        "totalCredits": effective_total_credits(program),
         # True once a course under any group carries per-course detail - only
         # the Gemini grouper populates `courses` (design/06: "Per-course
         # credits + notes only appear after LLM grouping").

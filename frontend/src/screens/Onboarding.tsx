@@ -151,7 +151,7 @@ function validateCombination(programs: Program[]): ComboResult {
         .filter((p) => subjectKey(p.code) === key)
         .map((p) => p.title)
         .join(" & ");
-      subjectConflicts.push(`${names} share subject area ${key} — only one Specialist/Major/Minor per subject is allowed.`);
+      subjectConflicts.push(`${names} share subject area ${key}. Only one Specialist/Major/Minor per subject is allowed.`);
     }
   }
 
@@ -166,7 +166,7 @@ function validateCombination(programs: Program[]): ComboResult {
   if (counts.minor) parts.push(`${counts.minor} Minor${counts.minor > 1 ? "s" : ""}`);
   const summary = parts.join(" + ") || "No programs yet";
   const message = valid
-    ? `Valid combination — ${summary}.`
+    ? `Valid combination: ${summary}.`
     : comboOk
       ? "Subject conflict in this combination."
       : `${summary} isn't a complete combination yet.`;
@@ -253,7 +253,7 @@ async function syncProgramsToServer(programs: Program[]): Promise<string | null>
   const names = realFailures.map((f) => f.program.title).join(", ");
   return (
     `Couldn't save ${realFailures.length === 1 ? "one program" : `${realFailures.length} programs`} ` +
-    `(${names}) to your account. They're still saved on this device — you can retry from My Programs.`
+    `(${names}) to your account. They're still saved on this device. You can retry from My Programs.`
   );
 }
 
@@ -539,7 +539,7 @@ export default function Onboarding() {
       <Card>
         <h2 style={sectionTitleStyle}>Do you have existing credits?</h2>
         <p style={mutedStyle}>
-          Bring in what you've already completed, or skip this for now — you can always import later from Settings.
+          Bring in what you've already completed, or skip this for now. You can always import later from Settings.
         </p>
 
         <div style={{ marginTop: "var(--space-4)" }}>
@@ -555,7 +555,7 @@ export default function Onboarding() {
           </div>
           <Dropzone
             label="Drop your Academic History PDF here"
-            hint="from ACORN — parsed and encrypted on import"
+            hint="from ACORN, parsed and encrypted on import"
             accept="application/pdf"
             onFile={(file: File) => void handleImportPdf(file)}
             progress={importStatus === "uploading" ? 60 : undefined}
@@ -687,7 +687,7 @@ export default function Onboarding() {
             }
           >
             Your programs and term are saved on this device only. Creating a free account keeps them
-            backed up and synced everywhere you sign in — entirely optional.
+            backed up and synced everywhere you sign in, entirely optional.
           </Callout>
         )}
 

@@ -311,6 +311,10 @@ export const mockClient: ApiClient = {
       code,
       name: catalog?.title ?? code,
       startSession: "",
+      earnedCredits: 0,
+      totalCredits: catalog?.totalCredits ?? 0,
+      percent: 0,
+      requirementsLoaded: Boolean(catalog),
     });
   },
   removeMyProgram: async (code) => {
@@ -640,6 +644,10 @@ interface RawEnrolledProgramRef {
   code?: string;
   name?: string;
   startSession?: string;
+  earnedCredits?: number;
+  totalCredits?: number;
+  percent?: number;
+  requirementsLoaded?: boolean;
 }
 
 /** `GET /api/me` (backend/api/me.py `student_record`). */
@@ -901,7 +909,15 @@ function normalizeRequirementProgressMap(
 
 function normalizeEnrolledProgramRef(raw: RawEnrolledProgramRef | null | undefined): EnrolledProgramRef {
   const code = asStr(raw?.code);
-  return { code, name: asStr(raw?.name, code), startSession: asStr(raw?.startSession) };
+  return {
+    code,
+    name: asStr(raw?.name, code),
+    startSession: asStr(raw?.startSession),
+    earnedCredits: asNum(raw?.earnedCredits, 0),
+    totalCredits: asNum(raw?.totalCredits, 0),
+    percent: asNum(raw?.percent, 0),
+    requirementsLoaded: raw?.requirementsLoaded === true,
+  };
 }
 
 function normalizeStudentRecord(raw: RawMeResponse | null | undefined): StudentRecord {
@@ -1014,6 +1030,10 @@ function normalizeSharedRecord(raw: RawShareResponse | null | undefined): Partia
       code: asStr(p?.code),
       name: asStr(p?.title ?? undefined, asStr(p?.code)),
       startSession: "",
+      earnedCredits: 0,
+      totalCredits: 0,
+      percent: 0,
+      requirementsLoaded: false,
     })),
   };
 }
@@ -1132,12 +1152,20 @@ export const httpClient: ApiClient = {
       (Array.isArray(res) ? res : asArray<RawIssue>(res?.alerts)).map(normalizeAlertFromIssue),
     ),
 
+  // `/api/me/programs` (the reorderable enrolled list) carries no completion
+  // summary -- that's authoritative only on `GET /api/me`'s `programs[]`
+  // (getMyRecord). These defaults keep the type total; screens that need real
+  // completion (Programs.tsx) read it from getMyRecord, not from here.
   getMyPrograms: () =>
     http<RawMyProgramsResponse>("/me/programs").then((res) =>
       asArray<{ code?: string; title?: string | null; startSession?: string | null }>(res?.programs).map((p) => ({
         code: asStr(p?.code),
         name: asStr(p?.title ?? undefined, asStr(p?.code)),
         startSession: asStr(p?.startSession ?? undefined),
+        earnedCredits: 0,
+        totalCredits: 0,
+        percent: 0,
+        requirementsLoaded: false,
       })),
     ),
   // These three mutations previously defaulted to the list endpoints'

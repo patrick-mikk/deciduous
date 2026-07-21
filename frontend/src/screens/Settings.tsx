@@ -197,7 +197,7 @@ export default function Settings() {
                 />
                 <StrengthMeter password={newPassword} />
                 <Callout tone="info">
-                  Changing your password re-encrypts your academic data with your recovery code — keep it somewhere safe first.
+                  Changing your password re-encrypts your academic data with your recovery code. Keep it somewhere safe first.
                 </Callout>
                 <div>
                   <Button
@@ -219,7 +219,7 @@ export default function Settings() {
               onCopy={() => setToast("Recovery code copied.")}
               onRegenerate={() => {
                 setRecoveryCode(randomRecoveryCode());
-                setToast("Recovery code regenerated — the old code no longer works.");
+                setToast("Recovery code regenerated. The old code no longer works.");
               }}
             />
 
@@ -250,7 +250,7 @@ export default function Settings() {
                 <Button variant="secondary" icon="upload" onClick={() => navigate("/onboarding")}>
                   Re-import record
                 </Button>
-                <DataExportMenu onExport={(kind: string) => setToast(`Exported as ${kind.toUpperCase()} (demo — no backend export yet).`)} />
+                <DataExportMenu onExport={(kind: string) => setToast(`Exported as ${kind.toUpperCase()} (demo, no backend export yet).`)} />
                 <Button variant="secondary" icon="link" onClick={openShare}>
                   Share plan
                 </Button>

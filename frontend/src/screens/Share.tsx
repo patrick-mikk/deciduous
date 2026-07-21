@@ -155,7 +155,7 @@ export default function Share() {
 
             {(!data.transcript || data.transcript.length === 0) && (
               <Callout tone="info">
-                The plan owner didn't include a term-by-term timetable or breadth breakdown in this share link — just program
+                The plan owner didn't include a term-by-term timetable or breadth breakdown in this share link, just program
                 progress and GPA.
               </Callout>
             )}

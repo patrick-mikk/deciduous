@@ -8,6 +8,8 @@ export interface CourseCardProps {
   credit?: number | string;
   /** Breadth categories, e.g. ["BR3"]. */
   breadth?: ('BR1' | 'BR2' | 'BR3' | 'BR4' | 'BR5')[];
+  /** Plain-language "Counts toward X" line (e.g. "Economics and Public Policy"). */
+  countsToward?: string;
   /** Term availability dots. */
   fall?: boolean;
   winter?: boolean;
