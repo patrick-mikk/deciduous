@@ -236,21 +236,27 @@ const publicPolicyGroups: RequirementGroup[] = [
     isNote: false,
     courseCodes: ["STA220H1", "STA257H1", "POL222H1", "POL232H1"],
     rules: [
-      // Line 1: STA220H1 or STA257H1 -- satisfied by the completed STA220H1
-      // below, so STA257H1 must not be suggested (rule-satisfaction
-      // mechanism), even though it's also formally excluded by STA220H1
-      // (exclusion mechanism) -- see mockCourses' STA257H1 entry.
-      { credits: 0.5, description: "STA220H1 / STA257H1", courseCodes: ["STA220H1", "STA257H1"] },
+      // Line 1: the intro stats requirement. STA257H1 is deliberately NOT in
+      // this rule's courseCodes: covered by no rule, it falls back to the
+      // group-level "still open" check and so remains a *candidate* from the
+      // engine -- what actually removes it is the exclusion filter
+      // (isExcludedByTaken), because its Calendar exclusion text names the
+      // completed STA220H1 (see mockCourses' STA257H1 entry). This is the one
+      // fixture that exercises the exclusion mechanism end to end; putting
+      // STA257H1 in this (already satisfied) rule would let rule-satisfaction
+      // pre-empt the exclusion filter and leave mechanism 2 untested.
+      { credits: 0.5, description: "STA220H1", courseCodes: ["STA220H1"] },
       // Line 2: one further methods course. The mock transcript below also
       // happens to already have POL222H1 completed, so this line is
-      // *already* satisfied too -- by the same rule-satisfaction mechanism,
-      // POL232H1 correctly stops being suggested (the identical pattern as
-      // the real ECO200Y1-completed/ECO204Y1+ECO206Y1-suggested bug this fix
-      // targets). Nothing from "Methods" is suggestible once both lines are
-      // met, even though the group total (1.0 required) isn't reflected in
-      // the hand-authored progress row below (kept at 0.5/1.0 so the group
-      // stays "open" for other UI states) -- rule-level checks operate
-      // independently of that row.
+      // *already* satisfied -- by the rule-satisfaction mechanism, POL232H1
+      // correctly stops being suggested (the identical pattern as the real
+      // ECO200Y1-completed/ECO204Y1+ECO206Y1-suggested bug this fix targets).
+      // Net effect for this student: the engine still emits STA257H1 as a
+      // candidate (group open, no covering rule) and the exclusion filter
+      // then drops it, while POL232H1 never leaves the engine at all. The
+      // group total (1.0 required) is deliberately not reflected in the
+      // hand-authored progress row below (kept at 0.5/1.0 so the group stays
+      // "open") -- rule-level checks operate independently of that row.
       { credits: 0.5, description: "One methods course beyond STA220H1", courseCodes: ["POL222H1", "POL232H1"] },
     ],
     courses: [
