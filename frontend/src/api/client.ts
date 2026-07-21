@@ -13,9 +13,11 @@
  *    artificial delay, so loading states are exercisable too.
  */
 import * as mock from "./mock";
-import { evaluateBreadth } from "./degreeAudit";
+import { DEGREE_MINIMUMS, evaluateBreadth } from "./degreeAudit";
+import { BREADTH_KEYS } from "./types";
 import type {
   Alert,
+  AlertKind,
   BreadthData,
   Course,
   DegreeAuditData,
@@ -251,6 +253,80 @@ function qs(params: object | undefined): string {
   return `?${new URLSearchParams(entries as [string, string][]).toString()}`;
 }
 
+// `GET /api/me/summary` (backend/api/me.py `summary()`) is the one endpoint
+// that actually computes degree-credit / breadth / GPA numbers server-side —
+// there is no separate `/me/degree-audit` or `/me/breadth` route (backend/
+// api/_audit.py's `degree_progress`/`breadth_progress` helpers that would
+// back such routes exist but were never wired to a blueprint route). Rather
+// than invent backend endpoints, `getMyDegreeAudit`/`getMyBreadth`/
+// `getMySummary` below all read this one envelope and reshape it client-side
+// into the three separate contracts screens expect (mirrors what
+// `mockClient` does from its own static fixtures).
+interface RawMeSummary {
+  credits: {
+    total_credits: number;
+    artsci_credits: number;
+    level_200_plus_credits: number;
+    level_300_plus_credits: number;
+    credits_by_subject: Record<string, number>;
+    same_subject_over_cap: Record<string, number>;
+  };
+  breadth: {
+    earned_by_category: Record<string, number>;
+    satisfied: boolean;
+  };
+  gpa: {
+    cgpa: number | null;
+    creditsCounted: number;
+    recent: number | null;
+  };
+}
+
+function fetchMeSummary(): Promise<RawMeSummary> {
+  return http<RawMeSummary>("/me/summary");
+}
+
+/** The subject with the most credits (design/09 same-subject <=15.0 cap), or
+ * `null` if the student has no credited courses yet. */
+function topDesignatorFrom(creditsBySubject: Record<string, number>): { code: string; credits: number } | null {
+  const entries = Object.entries(creditsBySubject);
+  if (entries.length === 0) return null;
+  const [code, credits] = entries.reduce((max, entry) => (entry[1] > max[1] ? entry : max));
+  return { code, credits };
+}
+
+function breadthDataFrom(earnedByCategory: Record<string, number>): BreadthData {
+  const out = {} as BreadthData;
+  BREADTH_KEYS.forEach((key, i) => {
+    out[key] = earnedByCategory[String(i + 1)] ?? 0;
+  });
+  return out;
+}
+
+// `GET /api/me/alerts` (backend/api/me.py `alerts()`) returns
+// `{"alerts": [...]}, `, each item shaped as a validator `Issue`
+// (`{severity, code, message, course_code}` — backend/planner/types.py) —
+// neither the envelope nor the item shape matches this contract's bare
+// `Alert[]` (`{id, kind, title, time?, read?}`, frontend/src/api/types.ts).
+// Unwrap and remap both. There's no persisted "read" state server-side (no
+// mark-as-read endpoint), so every alert starts unread, same as the mock's
+// no-`read`-key entries.
+interface RawAlert {
+  severity: "error" | "warning" | "info";
+  code: string;
+  message: string;
+  course_code: string | null;
+}
+
+function alertFrom(raw: RawAlert, index: number): Alert {
+  const kind: AlertKind = raw.code === "distinct-credits" || raw.code === "one-type-per-subject" ? "prereq" : "info";
+  return {
+    id: `${raw.code || "alert"}-${index}`,
+    kind,
+    title: raw.message,
+  };
+}
+
 export const httpClient: ApiClient = {
   // `GET /api/sessions` returns `{sessions: [{code, term, termName, year,
   // label}, ...], defaultSession}` (backend/api/courses.py), not the bare
@@ -283,9 +359,23 @@ export const httpClient: ApiClient = {
     return all;
   },
   getProgram: (code) => http(`/programs/${encodeURIComponent(code)}`),
-  getProgramRequirements: (code) => http(`/programs/${encodeURIComponent(code)}/requirements`),
+  // `GET /api/programs/:code/requirements` returns the whole `Program`-
+  // requirements envelope (`{code, totalCredits, requirementsLoaded,
+  // completionRequirements, rawCompletionText}`, backend/api/programs.py
+  // `_requirements_json`), not the bare `RequirementGroup[]` this contract
+  // promises -- unwrap, same as `getPrograms`/`getCourses` above.
+  getProgramRequirements: (code) =>
+    http<{ completionRequirements: Program["completionRequirements"] }>(
+      `/programs/${encodeURIComponent(code)}/requirements`,
+    ).then((res) => res.completionRequirements),
+  // `POST /api/programs/:code/requirements/reparse` returns the full
+  // `Program` detail body (+ `parseReport`), not the bare
+  // `RequirementGroup[]` this contract promises -- same unwrap.
   reparseProgramRequirements: (code) =>
-    http(`/programs/${encodeURIComponent(code)}/requirements/reparse`, { method: "POST" }),
+    http<{ completionRequirements: Program["completionRequirements"] }>(
+      `/programs/${encodeURIComponent(code)}/requirements/reparse`,
+      { method: "POST" },
+    ).then((res) => res.completionRequirements),
 
   getCourses: (params) =>
     http<{ courses: Course[] } | Course[]>(`/courses${qs(params)}`).then((res) =>
@@ -294,11 +384,55 @@ export const httpClient: ApiClient = {
   getCourse: (code) => http(`/courses/${encodeURIComponent(code)}`),
 
   getMyRecord: () => http("/me"),
-  getMyRequirementProgress: () => http("/me/requirements"),
-  getMyDegreeAudit: () => http("/me/degree-audit"),
-  getMyBreadth: () => http("/me/breadth"),
-  getMySummary: () => http("/me/summary"),
-  getMyAlerts: () => http("/me/alerts"),
+  // `GET /api/me/requirements` (backend/api/me.py `requirements()`) is the
+  // program-*combination* check (`{combination, issues}`), not per-program
+  // `RequirementProgress[]` -- that data already exists, computed correctly,
+  // as the `requirementProgress` field of `GET /api/me` (backend/api/me.py
+  // `student_record()` via `_requirement_progress_by_program`). Read it from
+  // there instead of the wrong endpoint.
+  getMyRequirementProgress: () =>
+    http<StudentRecord>("/me").then((res) => res.requirementProgress),
+  // No dedicated `/me/degree-audit` or `/me/breadth` route exists server-side
+  // (see `fetchMeSummary` above) -- derive both from `/me/summary`.
+  getMyDegreeAudit: () =>
+    fetchMeSummary().then((res) => ({
+      totalEarned: res.credits.total_credits,
+      artsciEarned: res.credits.artsci_credits,
+      level200: res.credits.level_200_plus_credits,
+      level300: res.credits.level_300_plus_credits,
+      topDesignator: topDesignatorFrom(res.credits.credits_by_subject),
+      cgpa: res.gpa.cgpa ?? 0,
+    })),
+  getMyBreadth: () =>
+    fetchMeSummary().then((res) => {
+      const data = breadthDataFrom(res.breadth.earned_by_category);
+      return { data, evaluation: evaluateBreadth(data) };
+    }),
+  // `GET /api/me/summary`'s actual body (`{credits, degreeIssues, breadth,
+  // gpa, standing, probationCap, graduation}`) doesn't match this contract's
+  // flat `Summary` (`{creditsEarned, creditsTotal, breadthSatisfied, cgpa,
+  // degreePct}`) at all -- map the fields this screen needs out of it.
+  getMySummary: () =>
+    fetchMeSummary().then((res) => {
+      const creditsEarned = res.credits.total_credits;
+      const creditsTotal = DEGREE_MINIMUMS.total;
+      return {
+        creditsEarned,
+        creditsTotal,
+        breadthSatisfied: res.breadth.satisfied,
+        cgpa: res.gpa.cgpa ?? 0,
+        degreePct: creditsTotal > 0 ? Math.round((creditsEarned / creditsTotal) * 100) : 0,
+      };
+    }),
+  // `GET /api/me/alerts` returns `{"alerts": [...]}`, each item a validator
+  // `Issue` (`{severity, code, message, course_code}`), not the bare
+  // `Alert[]` (`{id, kind, title, ...}`) this contract promises -- unwrap
+  // AND remap (see `alertFrom` above). This was the confirmed crash: Dashboard
+  // called `.filter` directly on the `{alerts: [...]}` envelope object.
+  getMyAlerts: () =>
+    http<{ alerts: RawAlert[] } | Alert[]>("/me/alerts").then((res) =>
+      Array.isArray(res) ? res : res.alerts.map(alertFrom),
+    ),
 
   getMyPrograms: () =>
     http<{ programs: { code: string; title: string | null; startSession: string | null }[] }>(
@@ -311,7 +445,15 @@ export const httpClient: ApiClient = {
   reorderMyPrograms: (codes) =>
     http("/me/programs/order", { method: "PUT", body: JSON.stringify({ codes }) }).then(() => undefined),
 
-  createShareLink: () => http("/share", { method: "POST" }),
+  // `POST /api/share` (backend/api/share.py `create_share`) returns
+  // `{token, path}` (`path` a site-relative path, e.g. "/share/abc123"), not
+  // the `{token, url}` this contract promises -- build the absolute url
+  // client-side, same as `mockClient` does with `window.location.origin`.
+  createShareLink: () =>
+    http<{ token: string; path: string }>("/share", { method: "POST" }).then((res) => ({
+      token: res.token,
+      url: `${window.location.origin}${res.path}`,
+    })),
   getShared: (token) => http(`/share/${encodeURIComponent(token)}`),
 };
 
