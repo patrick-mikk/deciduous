@@ -2833,16 +2833,25 @@ function Input({
       display: 'flex',
       alignItems: 'center'
     }
-  }, icon && /*#__PURE__*/React.createElement("i", {
-    "data-lucide": icon,
+  }, icon && /*#__PURE__*/React.createElement("span", {
     style: {
       position: 'absolute',
       left: 10,
       width: 16,
       height: 16,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      pointerEvents: 'none'
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    "data-lucide": icon,
+    style: {
+      width: 16,
+      height: 16,
       color: 'var(--text-muted)'
     }
-  }), /*#__PURE__*/React.createElement("input", {
+  })), /*#__PURE__*/React.createElement("input", {
     type: type,
     placeholder: placeholder,
     value: value,
