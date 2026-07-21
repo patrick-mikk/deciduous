@@ -86,10 +86,14 @@ _BREADTH_SUFFIX_RE = re.compile(r"\((\d)\)\s*$")
 @dataclass(frozen=True)
 class TranscriptRow:
     """One transcript course, decoupled from the `TranscriptEntry` DB model
-    so this module never imports SQLAlchemy. `is_artsci` defaults to True --
-    every course offered through this planner is an Arts & Science course
-    unless the caller has real `Course.distribution` data saying otherwise
-    (see `design/09-uoft-degree-rules.md` section 5)."""
+    so this module never imports SQLAlchemy. `is_artsci` is NOT computed
+    here -- `backend.planner.types.CourseRecord.is_artsci` is the single
+    classification rule (real `Course.distribution` data when available,
+    else a campus-digit-"1" course-code fallback), and every production
+    caller (`backend.api.me._transcript_rows`) passes that value straight
+    through so this module and `backend/planner/validators.py` can never
+    disagree about the same course. The `True` default here only applies to
+    ad-hoc/test construction that doesn't go through that path."""
 
     code: str
     credits: float
