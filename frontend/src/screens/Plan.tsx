@@ -8,11 +8,13 @@ import {
   AutoPlanPanel,
   Button,
   Callout,
+  Checkbox,
+  Chip,
   Combobox,
-  CourseRail,
   Dialog,
   Drawer,
   EmptyState,
+  Input,
   PageHeader,
   PlanBoard,
   Select,
@@ -610,6 +612,22 @@ export default function Plan() {
     });
   }
 
+  // Quick-add from the search list: drop the course into the earliest term
+  // where it's actually offered (F -> earliest Fall, S -> earliest Winter,
+  // Y/unknown -> earliest term). Precise placement is still available by
+  // dragging onto a specific column.
+  function handleQuickAdd(code: string) {
+    const course =
+      courseDetails.get(code) ??
+      railResults.find((c) => c.code === code) ??
+      suggestionResults.find((c) => c.code === code) ??
+      null;
+    const sc = course?.sectionCode;
+    const wantsSeason: "Fall" | "Winter" | null = sc === "F" ? "Fall" : sc === "S" ? "Winter" : null;
+    const target = terms.find((t) => !wantsSeason || t.season === wantsSeason) ?? terms[0];
+    if (target) addCourseToTerm(code, target.id);
+  }
+
   function handleDropCourse(termId: string, code: string) {
     if (!code) return;
     if (planCourses.some((p) => p.code === code)) moveCourse(code, termId);
@@ -880,9 +898,100 @@ export default function Plan() {
           }
         />
       ) : (
-        <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-          {railError ? (
-            <div style={{ width: 260, flexShrink: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div ref={validationRef}>
+            {validationStatus === "error" ? (
+              <Callout
+                tone="danger"
+                title="Couldn't validate your plan"
+                action={
+                  <Button variant="secondary" size="sm" onClick={() => setValidationRetryKey((k) => k + 1)}>
+                    Retry
+                  </Button>
+                }
+              >
+                {validationError}
+              </Callout>
+            ) : validationStatus === "loading" && validationIssues.length === 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "var(--text-secondary)",
+                  fontSize: "var(--text-body-sm)",
+                }}
+              >
+                <Spinner size={16} />
+                Validating your plan…
+              </div>
+            ) : (
+              <ValidationSummary
+                issues={validationIssues}
+                onJump={(iss: PlanValidationIssue) => iss.code && navigate(`/courses/${iss.code}`)}
+              />
+            )}
+          </div>
+
+          <PlanBoard
+            terms={terms}
+            onDropCourse={(termId: string, code: string) => handleDropCourse(termId, code)}
+            onAddCourse={(termId: string) => {
+              setAddDialogTermId(termId);
+              setAddDialogChoice(null);
+            }}
+            onRemoveCourse={handleRemoveCourse}
+            onCourseClick={(c: PlanCardVM) => setActiveCourseCode(c.code)}
+          />
+
+          {/* Full-width course search below the board (drag a card onto a term,
+              or use its Add button). */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              borderTop: "1px solid var(--border)",
+              paddingTop: 20,
+              marginTop: 4,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--font-serif)",
+                fontSize: "var(--text-h3)",
+                fontWeight: "var(--weight-semibold)",
+              }}
+            >
+              Add a course
+            </div>
+            <Input
+              placeholder="Search by course code or title"
+              icon="search"
+              value={railQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRailQuery(e.target.value)}
+            />
+            <div>
+              <Checkbox
+                label="Only show courses that count toward what I still need"
+                checked={onlyRemaining}
+                onChange={setOnlyRemaining}
+                disabled={onlyRemainingDisabled}
+              />
+              {onlyRemainingDisabled && onlyRemainingHint && (
+                <div style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", marginTop: 4 }}>
+                  {onlyRemainingHint}
+                </div>
+              )}
+            </div>
+            {(railCountLabel || railHelperText) && !railBusy && (
+              <div style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
+                {railCountLabel}
+                {railCountLabel && railHelperText ? " · " : null}
+                {railHelperText}
+              </div>
+            )}
+            {railError ? (
               <Callout
                 tone="danger"
                 title="Couldn't search courses"
@@ -894,74 +1003,85 @@ export default function Plan() {
               >
                 {railError}
               </Callout>
-            </div>
-          ) : (
-            <CourseRail
-              courses={railCourses}
-              query={railQuery}
-              onQuery={setRailQuery}
-              onlyRemaining={onlyRemaining}
-              onToggleRemaining={setOnlyRemaining}
-              onDragCourse={() => {}}
-              loading={railBusy}
-              onlyRemainingDisabled={onlyRemainingDisabled}
-              onlyRemainingHint={onlyRemainingHint}
-              emptyMessage={railEmptyMessage}
-              helperText={railHelperText}
-              countLabel={railCountLabel}
-            />
-          )}
-
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
-            <div ref={validationRef}>
-              {validationStatus === "error" ? (
-                <Callout
-                  tone="danger"
-                  title="Couldn't validate your plan"
-                  action={
-                    <Button variant="secondary" size="sm" onClick={() => setValidationRetryKey((k) => k + 1)}>
-                      Retry
-                    </Button>
-                  }
-                >
-                  {validationError}
-                </Callout>
-              ) : validationStatus === "loading" && validationIssues.length === 0 ? (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    color: "var(--text-secondary)",
-                    fontSize: "var(--text-body-sm)",
-                  }}
-                >
-                  <Spinner size={16} />
-                  Validating your plan…
-                </div>
-              ) : (
-                <ValidationSummary
-                  issues={validationIssues}
-                  onJump={(iss: PlanValidationIssue) => iss.code && navigate(`/courses/${iss.code}`)}
-                />
-              )}
-            </div>
-
-            <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
-              {planCourses.length} course{planCourses.length === 1 ? "" : "s"} planned across {terms.length} terms
-              shown.
-            </div>
-
-            <PlanBoard
-              terms={terms}
-              onDropCourse={(termId: string, code: string) => handleDropCourse(termId, code)}
-              onAddCourse={(termId: string) => {
-                setAddDialogTermId(termId);
-                setAddDialogChoice(null);
-              }}
-              onRemoveCourse={handleRemoveCourse}
-              onCourseClick={(c: PlanCardVM) => setActiveCourseCode(c.code)}
-            />
+            ) : railBusy ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }} aria-busy="true">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} height={64} radius="var(--radius-lg)" />
+                ))}
+              </div>
+            ) : railCourses.length === 0 ? (
+              <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)", padding: "12px 2px" }}>
+                {railEmptyMessage}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {railCourses.map((c) => (
+                  <div
+                    key={c.code}
+                    draggable
+                    onDragStart={(e: React.DragEvent) => e.dataTransfer.setData("text/plain", c.code)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-lg)",
+                      background: "var(--surface)",
+                      cursor: "grab",
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: "var(--text-code)",
+                            fontWeight: "var(--weight-medium)",
+                            color: "var(--accent)",
+                          }}
+                        >
+                          {c.code}
+                        </span>
+                        {c.breadth.map((b) => (
+                          <Chip key={b} breadth={b} dot>
+                            {b}
+                          </Chip>
+                        ))}
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: "var(--text-caption)",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          {c.credit.toFixed(1)} FCE
+                        </span>
+                      </div>
+                      <div style={{ fontWeight: "var(--weight-semibold)", marginTop: 3 }}>{c.title}</div>
+                      {c.countsToward && (
+                        <div style={{ fontSize: "var(--text-caption)", color: "var(--accent)", marginTop: 2 }}>
+                          Counts toward {c.countsToward}
+                        </div>
+                      )}
+                    </div>
+                    {c.status === "planned" ? (
+                      <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)", flexShrink: 0 }}>
+                        On your plan
+                      </span>
+                    ) : c.status === "completed" ? (
+                      <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)", flexShrink: 0 }}>
+                        Completed
+                      </span>
+                    ) : (
+                      <Button variant="secondary" size="sm" icon="plus" onClick={() => handleQuickAdd(c.code)}>
+                        Add
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
