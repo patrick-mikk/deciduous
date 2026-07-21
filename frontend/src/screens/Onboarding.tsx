@@ -44,11 +44,23 @@ import "./Onboarding.css";
  *
  * Finish always saves to `guestProfile` (localStorage, see api/guestProfile.ts)
  * and lands on /dashboard (or /transcript, for the "enter manually" choice
- * above) — saving is optional by default; SignUp.tsx picks up this same guest
- * profile and best-effort syncs it into a new account via the existing
- * `api.addMyProgram()` if the visitor later decides to create one from the
- * soft nudge here (or from the "Sign in" link below, for a *returning*
- * visitor who already has an account).
+ * above) — saving there is unconditional and never fails silently caused by
+ * storage errors (see `saveGuestProfile`'s own try/catch).
+ *
+ * On top of that, finish also best-effort syncs the selected programs to the
+ * server via `api.addMyProgram()` (see `syncProgramsToServer` below) — this
+ * screen is reachable by a visitor who already has a live, authenticated
+ * session (a returning signed-in user landing here again, or the dev-only
+ * auth bypass in `backend/dev_auth.py` which auto-authenticates *every*
+ * `/api/*` request outside production, including the plain `GET /api/programs`
+ * catalog search this screen issues on mount). For that visitor, saving only
+ * to `guestProfile` would silently never reach `ProgramEnrolment` — "My
+ * Programs" would read back empty even though onboarding "finished" — so
+ * finish also POSTs each program to `/api/me/programs`. A 401 there means
+ * there really is no session (the common case: a fresh, unauthenticated
+ * visitor), and is treated as the normal guest flow with no error shown;
+ * `guestProfile` stays the source of truth until `SignUp.tsx` syncs it into a
+ * new account the same way, via the same `api.addMyProgram()` call.
  */
 
 const STEP_LABELS = ["What are you studying?", "Start term", "Existing credits", "How it works"];
@@ -196,6 +208,55 @@ async function importDegreeExplorerPdf(file: File): Promise<ImportPdfResult> {
   return res.json();
 }
 
+/**
+ * Best-effort push `programs` into the signed-in visitor's account via the
+ * existing `POST /api/me/programs` (same call `SignUp.tsx` and `Programs.tsx`
+ * already use), so onboarding's selections reach `ProgramEnrolment` whenever
+ * there's a live session to attach them to — not just `guestProfile`. Returns
+ * a message to surface (non-blocking) if something genuinely failed, or
+ * `null` if there's nothing to report (nothing to sync, everything synced,
+ * or — the common case — the visitor is a guest with no session at all).
+ *
+ * `http()` (src/api/client.ts) throws `Error("API error <status>: ...")` on a
+ * non-2xx response, so the status is recovered from the message text here
+ * rather than needing a client.ts change (out of scope for this fix):
+ *  - 401: no session to sync to — this is the normal, account-optional guest
+ *    flow (see this module's header comment), not an error.
+ *  - 409: already enrolled, or a one-type-per-subject conflict the backend
+ *    caught — `validateCombination` above should keep the latter from
+ *    happening, and the former is harmless (the program is already there).
+ *  - anything else (422 malformed code, 5xx, network failure): a real sync
+ *    failure worth telling the signed-in visitor about.
+ */
+async function syncProgramsToServer(programs: Program[]): Promise<string | null> {
+  if (programs.length === 0) return null;
+
+  const results = await Promise.allSettled(programs.map((p) => api.addMyProgram(p.code)));
+  const failures = programs
+    .map((program, i) => ({ program, result: results[i] }))
+    .filter((f): f is { program: Program; result: PromiseRejectedResult } => f.result.status === "rejected");
+  if (failures.length === 0) return null;
+
+  const statusOf = (reason: unknown): number | null => {
+    const match = reason instanceof Error ? /API error (\d+):/.exec(reason.message) : null;
+    return match ? Number(match[1]) : null;
+  };
+
+  // Every failure a 401 => no session at all, i.e. a guest visitor — expected,
+  // not an error (guestProfile is already saved and is this visitor's source
+  // of truth until they create an account).
+  if (failures.every((f) => statusOf(f.result.reason) === 401)) return null;
+
+  const realFailures = failures.filter((f) => statusOf(f.result.reason) !== 409);
+  if (realFailures.length === 0) return null;
+
+  const names = realFailures.map((f) => f.program.title).join(", ");
+  return (
+    `Couldn't save ${realFailures.length === 1 ? "one program" : `${realFailures.length} programs`} ` +
+    `(${names}) to your account. They're still saved on this device — you can retry from My Programs.`
+  );
+}
+
 const sectionTitleStyle: React.CSSProperties = {
   margin: "0 0 4px",
   fontFamily: "var(--font-serif)",
@@ -320,14 +381,35 @@ export default function Onboarding() {
 
   // ---- Step 4: tour + finish --------------------------------------------------
   const [syncPromptDismissed, setSyncPromptDismissed] = React.useState(false);
+  const [finishing, setFinishing] = React.useState(false);
+  const [syncErrorMessage, setSyncErrorMessage] = React.useState<string | null>(null);
 
   function persistGuestProfile() {
     saveGuestProfile({ programs: myPrograms, startSession: startSession || null });
   }
 
-  function handleFinish() {
-    persistGuestProfile();
+  function goToLanding() {
     navigate(creditsChoice === "manual" ? "/transcript" : "/dashboard");
+  }
+
+  /** `guestProfile` is saved unconditionally either way (see module doc
+   * comment); a signed-in visitor (returning user, or the dev auth bypass —
+   * see `syncProgramsToServer`) also gets a best-effort push to the server so
+   * "My Programs" isn't silently empty on the very next screen. A real sync
+   * failure doesn't block navigation — it's surfaced via `syncErrorMessage`
+   * and the visitor can continue past it (see `renderTourStep`) rather than
+   * getting stuck here. */
+  async function handleFinish() {
+    persistGuestProfile();
+    setFinishing(true);
+    setSyncErrorMessage(null);
+    const message = await syncProgramsToServer(myPrograms).catch(() => null);
+    setFinishing(false);
+    if (message) {
+      setSyncErrorMessage(message);
+      return;
+    }
+    goToLanding();
   }
 
   /** The sync-nudge's "Create account" also needs the in-progress selections
@@ -573,6 +655,22 @@ export default function Onboarding() {
           ))}
         </div>
 
+        {syncErrorMessage && (
+          <div style={{ marginBottom: "var(--space-4)" }}>
+            <Callout
+              tone="warning"
+              title="Couldn't sync your programs to your account"
+              action={
+                <Button size="sm" variant="primary" onClick={goToLanding}>
+                  Continue anyway
+                </Button>
+              }
+            >
+              {syncErrorMessage}
+            </Callout>
+          </div>
+        )}
+
         {!syncPromptDismissed && (
           <Callout
             tone="info"
@@ -597,7 +695,7 @@ export default function Onboarding() {
           <Button variant="ghost" onClick={() => setStep(2)}>
             Back
           </Button>
-          <Button variant="primary" trailingIcon="arrow-right" onClick={handleFinish}>
+          <Button variant="primary" trailingIcon="arrow-right" loading={finishing} onClick={() => void handleFinish()}>
             Start planning
           </Button>
         </div>
