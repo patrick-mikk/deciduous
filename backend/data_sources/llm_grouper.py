@@ -20,7 +20,9 @@ Design principles:
 
 Config (environment variables, never committed):
     GEMINI_API_KEY   required to make live calls (get one at aistudio.google.com)
-    GEMINI_MODEL     optional, default "gemini-2.0-flash"
+    GEMINI_MODEL     optional, default "gemini-flash-latest" (a Google-managed rolling
+                     alias for the current stable Flash release, so this module never
+                     pins a dated model ID that Google later retires)
 """
 
 from __future__ import annotations
@@ -140,6 +142,24 @@ def _retry_delay(resp: requests.Response) -> float | None:
     return None
 
 
+_MARKDOWN_FENCE_RE = re.compile(r"^```[a-zA-Z]*\s*\n?|\n?```\s*$")
+
+
+def _extract_json_text(payload_text: str) -> str:
+    """Strip a markdown code fence (` ```json ... ``` ` or ` ``` ... ``` `)
+    around the model's output, if present.
+
+    `responseMimeType: "application/json"` (set in `_generate`'s payload)
+    should make Gemini return bare JSON, but models occasionally wrap
+    structured output in a fence regardless of the requested MIME type — this
+    is defensive, not load-bearing for the happy path.
+    """
+    text = payload_text.strip()
+    if text.startswith("```"):
+        text = _MARKDOWN_FENCE_RE.sub("", text)
+    return text.strip()
+
+
 def _dedupe(items: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -151,7 +171,37 @@ def _dedupe(items: list[str]) -> list[str]:
 
 
 class LLMGroupingError(Exception):
-    """Raised when the LLM grouping call fails or returns unusable output."""
+    """Raised when the LLM grouping call fails or returns unusable output.
+
+    `status_code` is the HTTP status the API layer (`backend/api/programs.py`)
+    should surface for this failure — a sensible default of 502 (the server
+    talked to Gemini and Gemini's response couldn't be used), overridden by
+    subclasses for failure modes that aren't really "Gemini's fault" (e.g. a
+    missing server-side API key is a 503, not a bad-gateway).
+    """
+
+    status_code = 502
+
+
+class GeminiNotConfiguredError(LLMGroupingError):
+    """No `GEMINI_API_KEY` configured server-side — a deploy/config issue,
+    not a transient Gemini failure, so the frontend shouldn't invite a retry."""
+
+    status_code = 503
+
+
+class GeminiRequestError(LLMGroupingError):
+    """Gemini (or the network) rejected/failed the HTTP request itself —
+    non-2xx status, exhausted retries, or a connection failure."""
+
+    status_code = 502
+
+
+class GeminiResponseError(LLMGroupingError):
+    """Gemini answered 200 OK but the body wasn't the expected JSON shape —
+    e.g. markdown-fenced text that didn't get stripped, or truncated output."""
+
+    status_code = 502
 
 
 @dataclass
@@ -273,10 +323,7 @@ class GeminiGrouper:
 
     def _generate(self, text: str) -> dict:
         if not self.api_key:
-            raise LLMGroupingError(
-                "GEMINI_API_KEY is not set. Get a free key at aistudio.google.com "
-                "and export GEMINI_API_KEY=... before running."
-            )
+            raise GeminiNotConfiguredError("Gemini API key not configured on the server.")
         payload = {
             "contents": [{"parts": [{"text": _PROMPT.format(text=text)}]}],
             "generationConfig": {
@@ -287,11 +334,21 @@ class GeminiGrouper:
         }
         response = self._call_api(payload)
         try:
-            parts = response["candidates"][0]["content"]["parts"]
+            candidates = response["candidates"]
+        except KeyError as exc:
+            raise GeminiResponseError("Gemini returned an unparseable response.") from exc
+        if not candidates:
+            reason = str(response.get("promptFeedback", {}).get("blockReason") or "no candidates")
+            raise GeminiResponseError(f"Gemini returned an unparseable response: {reason}.")
+        try:
+            parts = candidates[0]["content"]["parts"]
             payload_text = "".join(p.get("text", "") for p in parts)
-            return json.loads(payload_text)
-        except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            raise LLMGroupingError(f"Unparseable Gemini response: {exc}") from exc
+        except (KeyError, IndexError, TypeError) as exc:
+            raise GeminiResponseError("Gemini returned an unparseable response.") from exc
+        try:
+            return json.loads(_extract_json_text(payload_text))
+        except json.JSONDecodeError as exc:
+            raise GeminiResponseError(f"Gemini returned an unparseable response: {exc}") from exc
 
     def _call_api(self, payload: dict) -> dict:
         """The single HTTP boundary (mocked in tests).
@@ -311,7 +368,7 @@ class GeminiGrouper:
                 if attempt < _MAX_RETRIES - 1:
                     time.sleep(2 ** attempt + 1)
                     continue
-                raise LLMGroupingError(f"Gemini request failed: {exc}") from exc
+                raise GeminiRequestError(f"Gemini rejected the request: {exc}") from exc
 
             if resp.status_code in _RETRY_STATUS and attempt < _MAX_RETRIES - 1:
                 time.sleep(min(_retry_delay(resp) or (2 ** attempt + 1), 20))
@@ -320,11 +377,11 @@ class GeminiGrouper:
             try:
                 resp.raise_for_status()
             except requests.HTTPError as exc:
-                raise LLMGroupingError(
-                    f"Gemini request failed: {exc}: {resp.text[:200]}"
+                raise GeminiRequestError(
+                    f"Gemini rejected the request: {exc}: {resp.text[:200]}"
                 ) from exc
             return resp.json()
-        raise LLMGroupingError(f"Gemini request failed after {_MAX_RETRIES} retries ({last_err})")
+        raise GeminiRequestError(f"Gemini rejected the request after {_MAX_RETRIES} retries ({last_err}).")
 
 
 # ------------------------------------------------------------- heuristic fallback

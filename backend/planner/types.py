@@ -104,6 +104,15 @@ class ProgramRequirement:
     """The slice of a `Program` (data_sources.models) a combination/progress
     check needs: its type, subject, credit target, and the flat set of course
     codes that count toward it (union of its `RequirementGroup.course_codes`).
+
+    `requirements_parsed` is `False` when the source program had completion-
+    requirement text but no course codes were ever extracted from it (neither
+    the deterministic heuristic parse nor a Gemini reparse succeeded) — i.e.
+    `course_codes` is empty because parsing never completed, not because the
+    program genuinely requires zero courses. Combination checks
+    (`validators.evaluate_program_combination`) must treat this differently
+    from "zero credits required": exclude the program from credit-counting
+    math and say so, rather than silently letting it contribute 0.
     """
 
     code: str  # "ASMAJ1305A"
@@ -111,6 +120,8 @@ class ProgramRequirement:
     subject: str  # 4-digit subject designator, e.g. "1305"
     total_credits: float
     course_codes: frozenset[str] = field(default_factory=frozenset)
+    title: str = ""
+    requirements_parsed: bool = True
 
     @classmethod
     def from_program(cls, program, code: str | None = None) -> "ProgramRequirement | None":
@@ -124,10 +135,16 @@ class ProgramRequirement:
         codes: set[str] = set()
         for group in program.completion_requirements:
             codes.update(c.strip().upper() for c in group.course_codes)
+        raw_text = (getattr(program, "raw_completion_text", "") or "").strip()
+        # Nothing to parse (no completion-requirement text at all) isn't a
+        # parsing failure; text present but zero codes captured is.
+        requirements_parsed = bool(codes) or not raw_text
         return cls(
             code=parsed.raw,
             program_type=parsed.program_type,
             subject=parsed.subject,
             total_credits=program.total_credits,
             course_codes=frozenset(codes),
+            title=getattr(program, "title", "") or "",
+            requirements_parsed=requirements_parsed,
         )

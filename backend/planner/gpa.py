@@ -33,6 +33,11 @@ _MARK_BANDS: tuple[tuple[int, str, float], ...] = (
 
 LETTER_POINTS: dict[str, float] = {letter: points for _, letter, points in _MARK_BANDS}
 
+# Highest-to-lowest letter order (index = "how many grade steps from the
+# top"), used by `grade_mark_step_mismatch` below to measure how far apart
+# two letters are.
+_LETTER_ORDER: tuple[str, ...] = tuple(letter for _, letter, _ in _MARK_BANDS)
+
 # Grade *notations* excluded from GPA (but the CR/NCR pair, Extra, etc. still
 # count toward the 20.0 total and breadth — see `validators.py`). `FL` is
 # deliberately NOT in this set: per the calendar, "FL/failure = 0.0 if
@@ -94,6 +99,35 @@ def grade_points(record: CourseRecord) -> tuple[float | None, bool]:
         return (points_for_mark(record.mark), True)
 
     return (None, False)
+
+
+def grade_mark_step_mismatch(record: CourseRecord) -> bool:
+    """True if a *completed* course's letter grade is more than one grade
+    step away from what its numeric mark implies (see `_MARK_BANDS`).
+
+    This is the tell for a stale pre-5bbe9ae import: an earlier bug in
+    `backend.ingest.degree_explorer`'s ACORN parser could capture the
+    **CrsAvg** (course-average) letter column instead of the student's own
+    grade, so the letter on file silently disagrees with the mark on file —
+    dragging `grade_points()` (which prefers the letter) to a wrong CGPA
+    even though the mark was captured correctly. One step of disagreement
+    (e.g. mark says "A-" but letter says "B+") is within normal
+    rounding/curve noise and not flagged; anything larger is not.
+    """
+    if record.status != "completed" or record.mark is None:
+        return False
+    grade = (record.grade or "").strip().upper()
+    if grade == "FL":
+        grade = "F"
+    if grade not in LETTER_POINTS:
+        return False
+    mark_letter = letter_for_mark(record.mark)
+    try:
+        grade_index = _LETTER_ORDER.index(grade)
+        mark_index = _LETTER_ORDER.index(mark_letter)
+    except ValueError:  # pragma: no cover - both come from LETTER_POINTS/_MARK_BANDS
+        return False
+    return abs(grade_index - mark_index) > 1
 
 
 def is_passing(record: CourseRecord) -> bool:

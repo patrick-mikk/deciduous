@@ -46,7 +46,12 @@ export interface Course {
   exclusions: string;
   breadth: string[]; // e.g. ["Society and its Institutions (3)"]
   distribution: string[];
-  sections: Section[]; // live TTB offerings (empty for calendar-only)
+  sections: Section[]; // live TTB offerings (empty for calendar-only, and for /api/courses search rows — see client.ts normalizeCourseSummary)
+  /** Only meaningful on a `getCourse()` detail fetch or a search row that
+   * carried it — defaulted (never `undefined`) by `src/api/client.ts`'s
+   * normalizers either way. */
+  sectionCount?: number;
+  hasSeats?: boolean;
 }
 
 export interface RequirementCourse {
@@ -99,6 +104,42 @@ export interface TranscriptCourse {
   grade: string;
   session: string;
   status: TranscriptCourseStatus;
+}
+
+/** One row within a `TranscriptSessionGroup.courses` (`GET /api/me/transcript`
+ * — backend/api/me.py `transcript()`). Same shape as `TranscriptCourse` minus
+ * `session` (implied by the group it's nested in). */
+export interface TranscriptSessionCourse {
+  code: string;
+  title: string;
+  credits: number;
+  mark: number | null;
+  grade: string | null;
+  status: TranscriptCourseStatus;
+}
+
+/** One session's courses plus its authoritative sessional/cumulative GPA,
+ * both computed server-side by `backend/planner/gpa.py` (the same engine
+ * `cgpa` below comes from) — never recomputed client-side. */
+export interface TranscriptSessionGroup {
+  session: string;
+  courses: TranscriptSessionCourse[];
+  sgpa: number | null;
+  /** Running cumulative GPA through this session, chronological order. The
+   * chronologically-last group's `cumGpa` is always mathematically equal to
+   * this response's top-level `cgpa` (both are the same computation over
+   * the same accumulated courses). */
+  cumGpa: number | null;
+}
+
+/** `GET /api/me/transcript` (backend/api/me.py `transcript()`) — the single
+ * source of truth for every GPA figure the Transcript screen shows. */
+export interface TranscriptResponse {
+  sessions: TranscriptSessionGroup[]; // newest session first
+  cgpa: number | null;
+  /** e.g. a re-import nudge when a completed course's letter grade and mark
+   * disagree by more than one grade step (stale pre-parser-fix import). */
+  warnings: string[];
 }
 
 export type RequirementProgressStatus = "complete" | "incomplete" | "na";
@@ -184,6 +225,8 @@ export interface PlanCourse {
 
 export interface PlanValidationIssue {
   severity: "error" | "warning" | "info";
+  /** Issue category, e.g. "prerequisite" | "exclusion" | "offering" | "requirements_unparsed". */
+  kind: string;
   code: string; // planCourse code this issue is about, or "" for plan-wide
   message: string;
 }

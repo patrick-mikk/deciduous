@@ -363,6 +363,60 @@ def test_reparse_requirements_llm_failure_is_502(client, cache, monkeypatch):
     assert "error" in resp.get_json()
 
 
+def test_reparse_requirements_missing_key_is_503_with_distinct_message(client, cache, monkeypatch):
+    """Issue #1: a missing server-side GEMINI_API_KEY must surface as a 503
+    with a message distinct from a generic Gemini failure, so the frontend
+    can tell the user what's actually wrong instead of a fixed generic string."""
+    from backend.data_sources.llm_grouper import GeminiNotConfiguredError
+
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _UnconfiguredGrouper:
+        def group(self, text: str) -> GroupingResult:
+            raise GeminiNotConfiguredError("Gemini API key not configured on the server.")
+
+    monkeypatch.setattr(programs_module, "_grouper", lambda: _UnconfiguredGrouper())
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/programs/ASMAJ1305A/requirements/reparse", headers=headers)
+    assert resp.status_code == 503
+    assert "not configured" in resp.get_json()["error"].lower()
+
+
+def test_reparse_requirements_request_error_is_502_with_rejected_message(client, cache, monkeypatch):
+    from backend.data_sources.llm_grouper import GeminiRequestError
+
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _RejectingGrouper:
+        def group(self, text: str) -> GroupingResult:
+            raise GeminiRequestError("Gemini rejected the request: 400 Client Error")
+
+    monkeypatch.setattr(programs_module, "_grouper", lambda: _RejectingGrouper())
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/programs/ASMAJ1305A/requirements/reparse", headers=headers)
+    assert resp.status_code == 502
+    assert "rejected the request" in resp.get_json()["error"].lower()
+
+
+def test_reparse_requirements_response_error_is_502_with_unparseable_message(client, cache, monkeypatch):
+    from backend.data_sources.llm_grouper import GeminiResponseError
+
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _UnparseableGrouper:
+        def group(self, text: str) -> GroupingResult:
+            raise GeminiResponseError("Gemini returned an unparseable response.")
+
+    monkeypatch.setattr(programs_module, "_grouper", lambda: _UnparseableGrouper())
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/programs/ASMAJ1305A/requirements/reparse", headers=headers)
+    assert resp.status_code == 502
+    assert "unparseable" in resp.get_json()["error"].lower()
+
+
 # ---------------------------------------------------------------------------
 # /api/me/programs
 # ---------------------------------------------------------------------------

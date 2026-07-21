@@ -308,7 +308,11 @@ def reparse_requirements(code: str):
     try:
         result = _grouper().group(program.raw_completion_text)
     except LLMGroupingError as exc:
-        return json_error(f"Requirement re-parsing failed: {exc}", 502)
+        # `exc.status_code` distinguishes a server misconfiguration (503, e.g.
+        # no GEMINI_API_KEY) from an actual Gemini-side failure (502) -- the
+        # frontend surfaces `str(exc)` verbatim, so keep these messages
+        # distinct and actionable (see llm_grouper.py's exception hierarchy).
+        return json_error(str(exc), getattr(exc, "status_code", 502))
 
     program = replace(
         program,

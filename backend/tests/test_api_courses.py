@@ -116,11 +116,26 @@ class _FakeTTBClient:
             if not e["header"] and str(e["value"]).isdigit()
         ]
 
-    def search(self, session, division="ARTSC", course_code=""):
+    def search(
+        self,
+        session,
+        division="ARTSC",
+        course_code="",
+        start_page=1,
+        max_pages=None,
+        deadline=None,
+        stats=None,
+    ):
         assert division == "ARTSC"
-        if session == FALL:
-            return list(_FALL_SESSION_COURSES)
-        return []
+        result = list(_FALL_SESSION_COURSES) if session == FALL else []
+        if stats is not None:
+            # This fake never needs more than one bounded call to finish, so
+            # every call reports a natural completion -- matching real
+            # `TTBClient.search`'s `stats["complete"]` contract closely enough
+            # for `backend/api/courses.py`'s sync-once behaviour to hold.
+            stats["total"] = len(result)
+            stats["complete"] = True
+        return result
 
     def get_course(self, code):
         if code == "POL208H1":
@@ -209,6 +224,61 @@ def test_search_courses_syncs_once_and_ranks_by_code_prefix(client, cache):
     resp2 = client.get("/api/courses?q=POL")
     assert resp2.status_code == 200
     assert cache.course_count(FALL) == len(_FALL_SESSION_COURSES)
+
+
+def test_search_courses_reports_catalog_complete(client):
+    """`catalogComplete` should be True once `_ensure_session_synced` reports
+    a finished sync (the fake TTB client here always completes in one bounded
+    call -- see `_FakeTTBClient.search`'s `stats["complete"] = True`)."""
+    resp = client.get("/api/courses?q=POL")
+    assert resp.status_code == 200
+    assert resp.get_json()["catalogComplete"] is True
+
+
+def test_search_courses_ttb_failure_resolving_default_session_is_a_clean_502(
+    client, monkeypatch: Any
+):
+    """Regression test for issue #7: `search_courses` used to call
+    `TTBClient().current_sessions()` (to resolve the default session when the
+    request omits `session`, exactly what the Courses page's requests do)
+    with no error handling at all, so a live TTB failure surfaced as an
+    unhandled 500 instead of the clean `json_error` shape every other failure
+    path in this module returns."""
+
+    class _BoomOnCurrentSessions:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def current_sessions(self) -> list[str]:
+            raise RuntimeError("TTB is unreachable")
+
+    monkeypatch.setattr(courses_module, "TTBClient", _BoomOnCurrentSessions)
+
+    resp = client.get("/api/courses?q=POL")  # no `session` param -> hits the default-session path
+    assert resp.status_code == 502
+    assert "error" in resp.get_json()
+
+
+def test_cached_current_sessions_reuses_ttb_result_across_requests(client, cache, monkeypatch: Any):
+    """The default-session lookup must not hit TTB live on every request --
+    the Courses page never sends a `session` param, so every debounced
+    keystroke search used to be a live TTB round trip (issue #7). A second
+    request within the cache TTL should reuse the first result."""
+    call_count = 0
+
+    class _CountingTTBClient(_FakeTTBClient):
+        def current_sessions(self) -> list[str]:
+            nonlocal call_count
+            call_count += 1
+            return super().current_sessions()
+
+    monkeypatch.setattr(courses_module, "TTBClient", _CountingTTBClient)
+
+    resp1 = client.get("/api/courses?q=POL")
+    assert resp1.status_code == 200
+    resp2 = client.get("/api/courses?q=POL")
+    assert resp2.status_code == 200
+    assert call_count == 1, "expected current_sessions() to be cached, not called on every search"
 
 
 def test_search_courses_defaults_to_current_fall_session(client):

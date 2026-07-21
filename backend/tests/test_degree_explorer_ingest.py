@@ -242,3 +242,137 @@ def test_extract_pdf_text_rejects_non_pdf_bytes():
 def test_extract_pdf_text_rejects_empty_bytes():
     with pytest.raises(DegreeExplorerParseError):
         extract_pdf_text(b"")
+
+
+# ---------------------------------------------------------------------------
+# Real ACORN "Complete Academic History" layout (validated against a genuine
+# export 2026-07; this fixture mirrors its structure with synthetic data).
+# The load-bearing quirks: year-first headings with a " - program - college"
+# suffix; a Registration History RANGE line that must NOT become a heading;
+# rows carrying BOTH the student's grade and the CrsAvg course-average letter;
+# IPR snapshot rows for multi-term (Y) courses; EXT designations; CR/NCR;
+# wrapped titles; and "Sessional GPA x Cumulative GPA y" lines.
+# ---------------------------------------------------------------------------
+
+ACORN_REAL_LAYOUT = """
+7/20/26, 2:39 PM Academic History - ACORN
+Complete Academic
+History
+Pat Example Accurate as of: Jul 20, 2026
+This is not an official transcript.
+Registration History
+2024 Fall-2026 Summer: Faculty of Arts and Science
+Faculty of Arts and Science
+2024 Fall - 1st Year Studies in Social Sciences - Example College
+Sessional GPA 3.46 Cumulative GPA 3.46
+Crs Code Title Wgt Mrk Grd CrsAvg
+AAA100H1 Intro Example Study 0.50 85 A A-
+BBB133Y1 Long Course Name 1.00 IPR EXT
+CCC110H1 A Title That Wraps Onto the 0.50 81 A- A-
+Next Line
+Credits Earned: 1.00
+2025 Winter - 1st Year Studies in Social Sciences - Example College
+Sessional GPA 3.57 Annual GPA 3.50 Cumulative GPA 3.50
+Status: In good standing
+BBB133Y1 Long Course Name 1.00 CR C+ EXT
+DDD140H1 Second Winter Course 0.50 91 A+ A
+Credits Earned: 0.50
+2025 Summer - Bachelor's Degree Program - Example College
+Sessional GPA 3.00 Cumulative GPA 3.40
+BBB133Y1 Long Course Name 1.00 73 B C+
+Credits Earned: 1.00
+2025 Fall - Bachelor's Degree Program - Example College
+EEE200Y1 Spanning Theory 1.00 IPR
+Credits Earned: 0.00
+2026 Winter - Bachelor's Degree Program - Example College
+Sessional GPA 2.89 Annual GPA 3.08 Cumulative GPA 3.24
+EEE200Y1 Spanning Theory 1.00 67 C+ B-
+Credits Earned: 1.00
+2026 Summer - Bachelor's Degree Program - Example College
+EEE200Y1 Spanning Theory 1.00 IPR
+Credits Earned: 0.00
+This is not an official transcript.
+https://acorn.utoronto.ca/sws/#/history/academic 3/3
+"""
+
+
+@pytest.fixture()
+def acorn_draft():
+    return parse_pdf_text(ACORN_REAL_LAYOUT)
+
+
+def _course(draft, code, session=None):
+    matches = [
+        c for c in draft.courses if c.code == code and (session is None or c.session == session)
+    ]
+    assert matches, f"no parsed course {code} (session={session})"
+    assert len(matches) == 1, f"expected one {code} for session={session}, got {matches}"
+    return matches[0]
+
+
+def test_acorn_grade_column_beats_crsavg(acorn_draft):
+    """"0.50 85 A A-" carries the student's grade (A) AND the CrsAvg letter
+    (A-); the leftmost token after the weight column is the student's."""
+    assert _course(acorn_draft, "AAA100H1").grade == "A"
+    assert _course(acorn_draft, "DDD140H1").grade == "A+"
+    assert _course(acorn_draft, "EEE200Y1", "20261").grade == "C+"  # not the B- CrsAvg
+
+
+def test_acorn_headings_with_program_college_suffix_set_sessions(acorn_draft):
+    assert _course(acorn_draft, "AAA100H1").session == "20249"
+    assert _course(acorn_draft, "DDD140H1").session == "20251"
+    assert _course(acorn_draft, "BBB133Y1", "20255").session == "20255"
+
+
+def test_acorn_registration_history_range_line_is_not_a_heading():
+    assert is_session_heading("2024 Fall-2026 Summer: Faculty of Arts and Science") is False
+    assert is_session_heading("2025 Fall - Bachelor's Degree Program - Example College") is True
+
+
+def test_acorn_cr_with_ext_designation_is_extra_with_cr_grade(acorn_draft):
+    """"1.00 CR C+ EXT" = grade CR (no GPA value), designated Extra; the C+
+    is the CrsAvg and must not become the grade."""
+    winter_attempt = _course(acorn_draft, "BBB133Y1", "20251")
+    assert winter_attempt.grade == "CR"
+    assert winter_attempt.status == "extra"
+
+
+def test_acorn_two_registrations_of_same_course_both_kept(acorn_draft):
+    """CR/NCR first take + a later numeric retake are two legitimate
+    registrations: the Fall IPR snapshot collapses away, the Winter CR row
+    and the Summer numeric row both survive."""
+    rows = [c for c in acorn_draft.courses if c.code == "BBB133Y1"]
+    assert {(c.session, c.grade) for c in rows} == {("20251", "CR"), ("20255", "B")}
+    summer = _course(acorn_draft, "BBB133Y1", "20255")
+    assert summer.status == "completed" and summer.mark == 73.0
+
+
+def test_acorn_y_course_ipr_snapshot_collapses_into_final_row(acorn_draft):
+    """A Y course prints an IPR row in Fall and its final row in Winter --
+    ONE course completing over two terms, not two entries. (The 2026 Summer
+    IPR row is a separate, genuinely in-progress retake registration.)"""
+    rows = [c for c in acorn_draft.courses if c.code == "EEE200Y1"]
+    assert {(c.session, c.status) for c in rows} == {
+        ("20261", "completed"),
+        ("20265", "in_progress"),
+    }  # the 2025 Fall (20259) IPR snapshot is gone
+
+
+def test_acorn_genuine_retake_kept_in_progress_with_rule_warning(acorn_draft):
+    retake = _course(acorn_draft, "EEE200Y1", "20265")
+    assert retake.status == "in_progress" and retake.grade == "IPR"
+    assert any("EEE200Y1" in w and "Extra" in w for w in acorn_draft.warnings)
+
+
+def test_acorn_wrapped_title_continuation_is_appended(acorn_draft):
+    assert _course(acorn_draft, "CCC110H1").title == "A Title That Wraps Onto the Next Line"
+
+
+def test_acorn_status_line_is_not_treated_as_title_continuation(acorn_draft):
+    """"Status: In good standing" follows a course row in the fixture but
+    must not be glued onto its title (the colon excludes it)."""
+    assert "In good standing" not in _course(acorn_draft, "BBB133Y1", "20251").title
+
+
+def test_acorn_last_cumulative_gpa_wins(acorn_draft):
+    assert acorn_draft.cgpa == 3.24

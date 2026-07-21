@@ -401,6 +401,73 @@ def test_validate_flags_one_type_per_subject_violation(client):
     assert len(combo_issues) == 1
 
 
+def test_validate_flags_uncached_enrolled_program_as_unparsed(client):
+    """Issue #4: an enrolled program with no cached data at all must not
+    silently report "0 issues" -- it's not "no requirements", it's "requirements
+    unknown", and the response must say so per-program."""
+    user = _signup(client)
+    with client.application.app_context():
+        db = get_session()
+        db.add(
+            ProgramEnrolment(
+                user_id=user["id"], program_code="ASMAJ1478", program_title="Economics Major"
+            )
+        )
+        db.commit()
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/plan/validate", json={"items": []}, headers=headers)
+    body = resp.get_json()
+    unparsed = [i for i in body["issues"] if i["type"] == "requirements_unparsed"]
+    assert len(unparsed) == 1
+    assert unparsed[0]["severity"] == "warning"
+    assert unparsed[0]["courseCode"] == "ASMAJ1478"
+    assert unparsed[0]["message"] == (
+        "Requirements for Economics Major haven't been parsed yet — "
+        "program progress can't be checked."
+    )
+
+
+def test_validate_flags_cached_program_with_no_extracted_requirements_as_unparsed(client):
+    """Same contract, but for a program that IS cached, just with zero
+    course codes ever extracted from its completion-requirement text (the
+    Gemini-parse-failed case from issue #1) -- not merely "not fetched"."""
+    user = _signup(client)
+    cache = get_course_cache()
+    cache.upsert_programs(
+        [
+            Program(
+                code="ASMAJ1478",
+                title="Economics Major",
+                program_type="major",
+                department="Economics",
+                department_url="",
+                enrolment_requirements="",
+                total_credits=8.0,
+                completion_requirements=[],  # never parsed
+                raw_completion_text="(8.0 credits) ECO101H1, ECO102H1, MAT133Y1 ...",
+            )
+        ],
+        "now",
+    )
+    with client.application.app_context():
+        db = get_session()
+        db.add(
+            ProgramEnrolment(
+                user_id=user["id"], program_code="ASMAJ1478", program_title="Economics Major"
+            )
+        )
+        db.commit()
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/plan/validate", json={"items": []}, headers=headers)
+    body = resp.get_json()
+    unparsed = [i for i in body["issues"] if i["type"] == "requirements_unparsed"]
+    assert len(unparsed) == 1
+    assert unparsed[0]["courseCode"] == "ASMAJ1478"
+    assert "Economics Major" in unparsed[0]["message"]
+
+
 def test_validate_requires_items_to_be_a_list(client):
     _signup(client)
     headers = _csrf_headers(client)
