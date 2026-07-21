@@ -201,9 +201,8 @@ export const mockCourses: Course[] = [
   // Demo case for the requirement-line-satisfaction + exclusion-filtering fix
   // (see degreeAudit.ts remainingRequirementMatches / isExcludedByTaken): the
   // mock student completed STA220H1, which both satisfies the Methods group's
-  // "STA220H1 / STA257H1" rule below AND formally excludes STA257H1 -- it must
-  // not be suggested, while POL222H1/POL232H1 (a separate, unsatisfied line)
-  // still are.
+  // "STA220H1 / STA257H1" rule below AND formally excludes STA257H1 -- it
+  // must not be suggested.
   { code: "STA257H1", title: "Probability and Statistics I", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Calculus-based introduction to probability and statistics.", prerequisites: "", corequisites: "", exclusions: "Exclusion: STA220H1", breadth: [], distribution: ["Science"], sections: [] },
   { code: "POL340H1", title: "Public Opinion", sectionCode: "S", credit: 0.5, campus: "St. George", description: "The formation and measurement of public opinion.", prerequisites: "POL208H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
   { code: "PPG340H1", title: "Policy Evaluation", sectionCode: "S", credit: 0.5, campus: "St. George", description: "Methods for evaluating the impact of public policy interventions.", prerequisites: "PPG310H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
@@ -242,8 +241,16 @@ const publicPolicyGroups: RequirementGroup[] = [
       // mechanism), even though it's also formally excluded by STA220H1
       // (exclusion mechanism) -- see mockCourses' STA257H1 entry.
       { credits: 0.5, description: "STA220H1 / STA257H1", courseCodes: ["STA220H1", "STA257H1"] },
-      // Line 2: one further methods course -- still unsatisfied, so
-      // POL222H1/POL232H1 stay suggestible.
+      // Line 2: one further methods course. The mock transcript below also
+      // happens to already have POL222H1 completed, so this line is
+      // *already* satisfied too -- by the same rule-satisfaction mechanism,
+      // POL232H1 correctly stops being suggested (the identical pattern as
+      // the real ECO200Y1-completed/ECO204Y1+ECO206Y1-suggested bug this fix
+      // targets). Nothing from "Methods" is suggestible once both lines are
+      // met, even though the group total (1.0 required) isn't reflected in
+      // the hand-authored progress row below (kept at 0.5/1.0 so the group
+      // stays "open" for other UI states) -- rule-level checks operate
+      // independently of that row.
       { credits: 0.5, description: "One methods course beyond STA220H1", courseCodes: ["POL222H1", "POL232H1"] },
     ],
     courses: [
