@@ -177,6 +177,14 @@ export default function Plan() {
   // ---- Add-course dialog (keyboard/click alternative to dragging) ----
   const [addDialogTermId, setAddDialogTermId] = React.useState<string | null>(null);
   const [addDialogChoice, setAddDialogChoice] = React.useState<string | null>(null);
+  // The dialog runs its own server-backed search rather than reusing the
+  // rail's first page of results: `/api/courses` is paged, so client-side
+  // filtering a single page can neither offer a useful default (it would dump
+  // the alphabetically-first courses) nor find a course past page one. This
+  // query is fed from the Combobox's own text input via `onQueryChange`.
+  const [addDialogQuery, setAddDialogQuery] = React.useState("");
+  const [addDialogResults, setAddDialogResults] = React.useState<Course[]>([]);
+  const [addDialogLoading, setAddDialogLoading] = React.useState(false);
 
   // ---- Course options dialog (move / lock / remove — also the drag alternative) ----
   const [activeCourseCode, setActiveCourseCode] = React.useState<string | null>(null);
@@ -292,6 +300,44 @@ export default function Plan() {
         setRailLoading(false);
       });
   }, [debouncedRailQuery, railRetryKey]);
+
+  // ---- Add-dialog debounced server search ----
+  // Only fires while the dialog is open and there's a query; an empty query
+  // stays in the Combobox's "type to search" state, so we never fetch (or
+  // show) the arbitrary first-page dump.
+  const addDialogRequestId = React.useRef(0);
+  React.useEffect(() => {
+    const q = addDialogQuery.trim();
+    if (addDialogTermId == null) {
+      setAddDialogResults([]);
+      setAddDialogLoading(false);
+      return;
+    }
+    if (!q) {
+      // Selecting an option resets the Combobox's own query to empty. Keep the
+      // last results so the chosen course's label still resolves in the
+      // trigger; the dropdown itself stays in the "type to search" state.
+      setAddDialogLoading(false);
+      return;
+    }
+    const id = ++addDialogRequestId.current;
+    setAddDialogLoading(true);
+    const t = window.setTimeout(() => {
+      api
+        .getCourses({ q })
+        .then((cs) => {
+          if (addDialogRequestId.current !== id) return;
+          setAddDialogResults(cs);
+          setAddDialogLoading(false);
+        })
+        .catch(() => {
+          if (addDialogRequestId.current !== id) return;
+          setAddDialogResults([]);
+          setAddDialogLoading(false);
+        });
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [addDialogQuery, addDialogTermId]);
 
   // ---- Debounced server validation, re-run whenever the plan changes ----
   const [debouncedPlanForValidation, setDebouncedPlanForValidation] = React.useState<PlanCourse[]>([]);
@@ -677,10 +723,10 @@ export default function Plan() {
 
   const addDialogOptions = React.useMemo(
     () =>
-      railResults
+      addDialogResults
         .filter((c) => !planCourses.some((p) => p.code === c.code))
         .map((c) => ({ value: c.code, label: `${c.code} — ${c.title}` })),
-    [railResults, planCourses],
+    [addDialogResults, planCourses],
   );
 
   const activeCourse = activeCourseCode ? planCourses.find((p) => p.code === activeCourseCode) ?? null : null;
@@ -859,10 +905,19 @@ export default function Plan() {
       <Dialog
         open={addDialogTermId != null}
         title={addDialogTermId ? `Add a course — ${termLabel(addDialogTermId)}` : "Add a course"}
-        onClose={() => setAddDialogTermId(null)}
+        onClose={() => {
+          setAddDialogTermId(null);
+          setAddDialogQuery("");
+        }}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setAddDialogTermId(null)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAddDialogTermId(null);
+                setAddDialogQuery("");
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -871,6 +926,7 @@ export default function Plan() {
               onClick={() => {
                 if (addDialogTermId && addDialogChoice) addCourseToTerm(addDialogChoice, addDialogTermId);
                 setAddDialogTermId(null);
+                setAddDialogQuery("");
               }}
             >
               Add
@@ -884,6 +940,10 @@ export default function Plan() {
           options={addDialogOptions}
           value={addDialogChoice}
           onChange={(v: string | null) => setAddDialogChoice(v)}
+          onQueryChange={(q: string) => setAddDialogQuery(q)}
+          loading={addDialogLoading}
+          searchToReveal
+          emptyHint="Type a course code or title to search."
           clearable
         />
       </Dialog>

@@ -2523,7 +2523,19 @@ function Combobox({
   placeholder = 'Select…',
   clearable,
   groupOrder,
-  collapsedGroup
+  collapsedGroup,
+  // Opt-in async/search behaviour (used by the course pickers). When
+  // `searchToReveal` is set, an empty query shows `emptyHint` instead of
+  // dumping every option alphabetically -- large catalogs (thousands of
+  // courses) have no useful "browse from A" default. `onQueryChange` lets a
+  // parent drive `options` from a server search as the user types, and
+  // `loading` shows a searching state while that request is in flight. Left
+  // unset, the component behaves exactly as before (browse-all, client-side
+  // filter) -- so grouped pickers like the program selector are unaffected.
+  onQueryChange,
+  loading = false,
+  searchToReveal = false,
+  emptyHint = 'Type to search.'
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -2540,7 +2552,18 @@ function Combobox({
   React.useEffect(() => {
     if (!open) setShowCollapsed(false);
   }, [open]);
+  // Surface query changes to a parent that wants to drive options via a
+  // server search. Intentionally keyed on `query` only (not the callback
+  // identity) so a fresh inline handler each render doesn't re-fire it.
+  React.useEffect(() => {
+    if (onQueryChange) onQueryChange(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
   const selected = options.find(o => o.value === value);
+  // When the parent already server-filtered by `query`, this client filter is
+  // a harmless no-op (labels contain the query); when browsing locally it does
+  // the filtering. `revealEmpty` gates the arbitrary alphabetical dump.
+  const revealEmpty = searchToReveal && !query.trim();
   const filtered = options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()));
   let sections = null;
   if (filtered.some(o => o.group)) {
@@ -2654,7 +2677,7 @@ function Combobox({
     autoFocus: true,
     value: query,
     onChange: e => setQuery(e.target.value),
-    placeholder: "Search\u2026",
+    placeholder: searchToReveal ? "Type to search\u2026" : "Search\u2026",
     style: {
       width: '100%',
       boxSizing: 'border-box',
@@ -2665,7 +2688,13 @@ function Combobox({
       fontSize: 'var(--text-body-sm)',
       outline: 'none'
     }
-  })), (() => {
+  })), revealEmpty ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px',
+      color: 'var(--text-tertiary)',
+      fontSize: 'var(--text-body-sm)'
+    }
+  }, emptyHint) : (() => {
     const renderOption = o => /*#__PURE__*/React.createElement("div", {
       key: o.value,
       onClick: () => {
@@ -2735,7 +2764,13 @@ function Combobox({
     })) : /*#__PURE__*/React.createElement("div", {
       style: headerStyle
     }, `${section.name} (${section.options.length})`), !section.collapsed && section.options.map(renderOption)));
-  })(), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
+  })(), !revealEmpty && loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px',
+      color: 'var(--text-tertiary)',
+      fontSize: 'var(--text-body-sm)'
+    }
+  }, "Searching…"), !revealEmpty && !loading && filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '12px',
       color: 'var(--text-tertiary)',

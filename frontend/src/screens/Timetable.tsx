@@ -276,9 +276,15 @@ export default function Timetable() {
   // ---- Add-course dialog ----
   const [addOpen, setAddOpen] = React.useState(false);
   const [addChoice, setAddChoice] = React.useState<string | null>(null);
+  // `/api/courses` is paged, so the dialog searches the server as the user
+  // types (driven by the Combobox query) instead of loading and client-side
+  // filtering a single alphabetical page -- which could neither default
+  // usefully nor reach a course past page one.
+  const [addQuery, setAddQuery] = React.useState("");
   const [catalog, setCatalog] = React.useState<Course[]>([]);
   const [catalogLoading, setCatalogLoading] = React.useState(false);
   const [catalogError, setCatalogError] = React.useState<string | null>(null);
+  const [catalogRetryKey, setCatalogRetryKey] = React.useState(0);
 
   // ---- Swap-section popover (click a grid block) ----
   const [swapCode, setSwapCode] = React.useState<string | null>(null);
@@ -384,22 +390,43 @@ export default function Timetable() {
     };
   }, [scenario]);
 
-  // ---- Course catalog for the "add course" dialog (fetched lazily) ----
+  // ---- Debounced server search for the "add course" dialog ----
+  // Fires only while the dialog is open with a non-empty query; an empty query
+  // keeps the Combobox in its "type to search" state (no arbitrary first-page
+  // dump).
+  const addSearchId = React.useRef(0);
   React.useEffect(() => {
-    if (!addOpen || catalog.length > 0 || catalogLoading) return;
+    const q = addQuery.trim();
+    if (!addOpen) {
+      setCatalog([]);
+      setCatalogLoading(false);
+      return;
+    }
+    if (!q) {
+      // Selecting an option resets the Combobox query to empty; keep the last
+      // results so the chosen course's label still resolves in the trigger.
+      setCatalogLoading(false);
+      return;
+    }
+    const id = ++addSearchId.current;
     setCatalogLoading(true);
     setCatalogError(null);
-    api
-      .getCourses()
-      .then((cs) => {
-        setCatalog(cs);
-        setCatalogLoading(false);
-      })
-      .catch((e: unknown) => {
-        setCatalogError(e instanceof Error ? e.message : "Couldn't load the course catalog.");
-        setCatalogLoading(false);
-      });
-  }, [addOpen, catalog.length, catalogLoading]);
+    const t = window.setTimeout(() => {
+      api
+        .getCourses({ q })
+        .then((cs) => {
+          if (addSearchId.current !== id) return;
+          setCatalog(cs);
+          setCatalogLoading(false);
+        })
+        .catch((e: unknown) => {
+          if (addSearchId.current !== id) return;
+          setCatalogError(e instanceof Error ? e.message : "Couldn't search the course catalog.");
+          setCatalogLoading(false);
+        });
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [addOpen, addQuery, catalogRetryKey]);
 
   // ---- Mutators (scoped to the active scenario) ----
   function mutateScenario(fn: (s: ScenarioVM) => ScenarioVM) {
@@ -686,6 +713,7 @@ export default function Timetable() {
         onClose={() => {
           setAddOpen(false);
           setAddChoice(null);
+          setAddQuery("");
         }}
         footer={
           <>
@@ -694,6 +722,7 @@ export default function Timetable() {
               onClick={() => {
                 setAddOpen(false);
                 setAddChoice(null);
+                setAddQuery("");
               }}
             >
               Cancel
@@ -705,6 +734,7 @@ export default function Timetable() {
                 if (addChoice) addCourseToTray(addChoice);
                 setAddOpen(false);
                 setAddChoice(null);
+                setAddQuery("");
               }}
             >
               Add
@@ -712,30 +742,33 @@ export default function Timetable() {
           </>
         }
       >
-        {catalogError ? (
-          <Callout
-            tone="danger"
-            title="Couldn't load the course catalog"
-            action={
-              <Button variant="secondary" size="sm" onClick={() => setCatalog([])}>
-                Retry
-              </Button>
-            }
-          >
-            {catalogError}
-          </Callout>
-        ) : catalogLoading ? (
-          <Skeleton height={38} />
-        ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {catalogError && (
+            <Callout
+              tone="danger"
+              title="Couldn't search the course catalog"
+              action={
+                <Button variant="secondary" size="sm" onClick={() => setCatalogRetryKey((k) => k + 1)}>
+                  Retry
+                </Button>
+              }
+            >
+              {catalogError}
+            </Callout>
+          )}
           <Combobox
             label="Course"
             placeholder="Search courses…"
             options={addOptions}
             value={addChoice}
             onChange={(v: string | null) => setAddChoice(v)}
+            onQueryChange={(q: string) => setAddQuery(q)}
+            loading={catalogLoading}
+            searchToReveal
+            emptyHint="Type a course code or title to search."
             clearable
           />
-        )}
+        </div>
       </Dialog>
 
       {/* ---- Swap section (click a grid block) ---- */}
