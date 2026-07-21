@@ -426,6 +426,86 @@ def test_evaluate_program_combination_upper_level_minimums():
 
 
 # ---------------------------------------------------------------------------
+# validators.py — unparsed-program exclusion + nonstandard combinations
+# (issue #2: 4 declared majors reporting a false "0.0 distinct credits")
+# ---------------------------------------------------------------------------
+
+
+def test_unparsed_program_excluded_from_distinct_credits_and_flagged():
+    """An enrolled program whose requirements never parsed (empty
+    course_codes with requirements_parsed=False) must NOT silently drop the
+    distinct-credits total to whatever the *other* programs contribute with
+    no explanation -- it must be excluded and reported, per issue #2."""
+    programs = [
+        ProgramRequirement(
+            code="ASMAJ1478",
+            program_type="major",
+            subject="1478",
+            total_credits=8.0,
+            title="Economics Major",
+            course_codes=frozenset(),  # never parsed
+            requirements_parsed=False,
+        ),
+        ProgramRequirement(
+            code="ASMAJ2660A",
+            program_type="major",
+            subject="2660",
+            total_credits=6.0,
+            title="Public Policy Major",
+            course_codes=frozenset({"PPG301H1", "PPG302H1"}),
+        ),
+        ProgramRequirement(
+            code="ASMAJ2001A",
+            program_type="major",
+            subject="2001",
+            total_credits=6.0,
+            title="Urban Studies Major",
+            course_codes=frozenset({"URB201H1"}),
+        ),
+    ]
+    records = [
+        _completed("ECO101H1", 0.5),
+        _completed("PPG301H1", 0.5),
+        _completed("PPG302H1", 0.5),
+        _completed("URB201H1", 0.5),
+    ]
+    result, issues = validators.evaluate_program_combination(programs, records)
+
+    assert result.unparsed_programs == ["ASMAJ1478"]
+    # Only the two PARSED programs' covered credits count -- ECO101H1 doesn't
+    # silently count as "0 shared credits", it's excluded from the math.
+    assert result.distinct_credits == 1.5  # PPG301H1 + PPG302H1 + URB201H1 only
+    unparsed_issues = [i for i in issues if i.code == "requirements-unparsed"]
+    assert len(unparsed_issues) == 1
+    assert unparsed_issues[0].course_code == "ASMAJ1478"
+    assert "Economics Major" in unparsed_issues[0].message
+    assert "not yet parsed" in unparsed_issues[0].message
+
+
+def test_four_majors_is_a_nonstandard_but_valid_combination():
+    """4 majors exceeds any standard shape (1 Specialist / 2 Majors / 1 Major
+    + 2 Minors), but 2 of the 4 already satisfy the 2-Major pattern -- this
+    must be recognized as valid + informational, not mis-flagged as an
+    invalid/incomplete combination (issue #2)."""
+    programs = [
+        ProgramRequirement(code="ASMAJ1478", program_type="major", subject="1478", total_credits=8.0),
+        ProgramRequirement(code="ASMAJ2001", program_type="major", subject="2001", total_credits=6.0),
+        ProgramRequirement(code="ASMAJ2660", program_type="major", subject="2660", total_credits=6.0),
+        ProgramRequirement(code="ASMAJ3001", program_type="major", subject="3001", total_credits=6.0),
+    ]
+    result, issues = validators.evaluate_program_combination(programs, [])
+
+    assert result.combo_type == "two_majors"
+    assert result.combo_valid
+    assert not any(i.code == "program-combination" for i in issues)  # not "invalid"
+    nonstandard = [i for i in issues if i.code == "program-combination-nonstandard"]
+    assert len(nonstandard) == 1
+    assert nonstandard[0].severity == "info"
+    assert "4 programs" in nonstandard[0].message
+    assert "2 of your 4 majors" in nonstandard[0].message
+
+
+# ---------------------------------------------------------------------------
 # validators.py — breadth
 # ---------------------------------------------------------------------------
 

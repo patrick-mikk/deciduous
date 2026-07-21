@@ -223,14 +223,42 @@ class ProgramCombinationResult:
     distinct_credits: float
     distinct_credits_ok: bool
     one_type_per_subject_violations: list[str] = field(default_factory=list)
+    # Codes of enrolled programs whose completion requirements haven't been
+    # parsed yet (`ProgramRequirement.requirements_parsed` is False) — the
+    # distinct-credits total below deliberately excludes these, so this list
+    # is how a caller knows the total is a *lower bound*, not a definitive 0.
+    unparsed_programs: list[str] = field(default_factory=list)
+
+
+# Minimum participant count for each recognized combo type — §1: 1 Specialist,
+# 2 Majors, or 1 Major + 2 Minors. Used to detect a *nonstandard* combination
+# (more programs declared than the minimal valid shape needs, e.g. 4 majors)
+# so it can be reported informationally instead of mis-flagged as invalid.
+_COMBO_MINIMUM_PARTICIPANTS = {
+    "specialist": 1,
+    "two_majors": 2,
+    "major_plus_two_minors": 3,
+}
 
 
 def _combo_type(counts: Counter) -> str | None:
-    if counts == Counter({"specialist": 1}):
+    """The combination shape (design/09-uoft-degree-rules.md §1) `counts`
+    satisfies, if any. Recognizes the shape even when MORE programs are
+    declared than the minimum it needs (e.g. 4 majors still satisfies
+    "two_majors" — 2 of the 4 already form a valid combination); the caller
+    reports the surplus informationally rather than treating it as invalid.
+    Priority when multiple shapes are technically satisfiable: specialist >
+    two_majors > major_plus_two_minors (a specialist alone already completes
+    the degree's program requirement, regardless of what else is declared).
+    """
+    specialists = counts.get("specialist", 0)
+    majors = counts.get("major", 0)
+    minors = counts.get("minor", 0)
+    if specialists >= 1:
         return "specialist"
-    if counts == Counter({"major": 2}):
+    if majors >= 2:
         return "two_majors"
-    if counts == Counter({"major": 1, "minor": 2}):
+    if majors >= 1 and minors >= 2:
         return "major_plus_two_minors"
     return None
 
@@ -260,6 +288,43 @@ def evaluate_program_combination(
                 f"(currently: {dict(counts)}).",
             )
         )
+    elif combo_type is not None:
+        # More programs declared than the minimal shape needs (e.g. 4 majors,
+        # or 2 specialists) — informational only: a subset already satisfies
+        # a valid combination, so this is nonstandard, not invalid.
+        total_participants = counts.get("specialist", 0) + counts.get("major", 0) + counts.get("minor", 0)
+        minimum = _COMBO_MINIMUM_PARTICIPANTS[combo_type]
+        if total_participants > minimum:
+            satisfied_by = {
+                "specialist": "your specialist already satisfies the combination requirement",
+                "two_majors": f"2 of your {counts.get('major', 0)} majors already satisfy the 2-Major pattern",
+                "major_plus_two_minors": (
+                    "1 major + 2 minors among your programs already satisfy the "
+                    "Major + 2 Minors pattern"
+                ),
+            }[combo_type]
+            issues.append(
+                Issue(
+                    "info",
+                    "program-combination-nonstandard",
+                    f"{total_participants} programs (specialists={counts.get('specialist', 0)}, "
+                    f"majors={counts.get('major', 0)}, minors={counts.get('minor', 0)}) exceeds "
+                    "the standard program combinations (1 Specialist, 2 Majors, or 1 Major + 2 "
+                    f"Minors); UofT requires at least one valid combination among your programs "
+                    f"— {satisfied_by}.",
+                )
+            )
+
+    unparsed = [p for p in programs if not p.requirements_parsed]
+    for p in unparsed:
+        issues.append(
+            Issue(
+                "warning",
+                "requirements-unparsed",
+                f"{p.title or p.code} requirements not yet parsed — combination check incomplete.",
+                course_code=p.code,
+            )
+        )
 
     by_subject: dict[str, list[ProgramRequirement]] = defaultdict(list)
     for p in programs:
@@ -279,10 +344,8 @@ def evaluate_program_combination(
             )
 
     progress: list[ProgramProgress] = []
-    all_required: set[str] = set()
     for p in programs:
         covered = p.course_codes & owned_codes
-        all_required |= p.course_codes
         earned = sum(credit_by_code[c] for c in covered)
         credits_300 = sum(credit_by_code[c] for c in covered if (level_by_code.get(c) or 0) >= 300)
         credits_400 = sum(credit_by_code[c] for c in covered if (level_by_code.get(c) or 0) >= 400)
@@ -324,10 +387,20 @@ def evaluate_program_combination(
                 )
             )
 
+    # Distinct-credits (§1) is only meaningful across programs whose
+    # requirements actually parsed — an unparsed program's `course_codes` is
+    # empty, so folding it in would silently understate the total as if the
+    # student simply hadn't taken the overlapping courses. Excluded programs
+    # already got their own "requirements-unparsed" warning above, so a caller
+    # never sees a bare 0.0 with no explanation.
+    parsed_programs = [p for p in programs if p.requirements_parsed]
     distinct_credits = 0.0
     distinct_ok = True
-    if len(programs) >= 2:
-        distinct_credits = sum(credit_by_code[c] for c in (all_required & owned_codes))
+    if len(parsed_programs) >= 2:
+        parsed_required: set[str] = set()
+        for p in parsed_programs:
+            parsed_required |= p.course_codes
+        distinct_credits = sum(credit_by_code[c] for c in (parsed_required & owned_codes))
         distinct_ok = distinct_credits + 1e-9 >= DISTINCT_CREDITS_MIN
         if not distinct_ok:
             issues.append(
@@ -346,6 +419,7 @@ def evaluate_program_combination(
         distinct_credits=round(distinct_credits, 2),
         distinct_credits_ok=distinct_ok,
         one_type_per_subject_violations=subject_violations,
+        unparsed_programs=[p.code for p in unparsed],
     )
     return result, issues
 
