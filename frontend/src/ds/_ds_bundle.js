@@ -1792,7 +1792,9 @@ function CourseCard({
       fontSize: 'var(--text-code)',
       fontWeight: 'var(--weight-medium)',
       color: 'var(--accent)',
-      letterSpacing: 'var(--tracking-code)'
+      letterSpacing: 'var(--tracking-code)',
+      whiteSpace: 'nowrap',
+      flexShrink: 0
     }
   }, code);
   const creditEl = credit != null && /*#__PURE__*/React.createElement("span", {
@@ -1800,7 +1802,9 @@ function CourseCard({
       fontFamily: 'var(--font-mono)',
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-tertiary)',
-      fontVariantNumeric: 'tabular-nums'
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      flexShrink: 0
     }
   }, fmtCredit(credit));
   if (compact) {
@@ -1824,49 +1828,29 @@ function CourseCard({
       style: { fontSize: 'var(--text-body)', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
     }, title);
     // Stacked layout (used in the narrow plan rail): code + breadth + credit on
-    // top, then the course title, then a plain "Counts toward ..." line. Only
-    // rendered when countsToward is supplied, so the dense single-row variant
-    // used elsewhere is unchanged.
-    if (countsToward) {
-      return /*#__PURE__*/React.createElement("div", {
-        draggable: draggable,
-        onDragStart: onDragStart,
-        style: {
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 5,
-          padding: '10px 12px',
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-md)',
-          fontFamily: 'var(--font-sans)',
-          cursor: draggable ? 'grab' : 'default'
-        }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: { display: 'flex', alignItems: 'center', gap: 8 }
-      }, grip, codeEl, chips, /*#__PURE__*/React.createElement("span", { style: { flex: 1 } }), creditEl, statusIcon, addBtn, detailsBtn), titleEl, /*#__PURE__*/React.createElement("div", {
-        style: { fontSize: 'var(--text-caption)', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
-      }, "Counts toward ", countsToward));
-    }
+    // the top row, then the course title on its own full-width line, then an
+    // optional "Counts toward ..." line. The title always renders -- the
+    // counts-toward line is appended only when present, it never gates the
+    // layout -- so every card shows its name regardless of requirement mapping.
     return /*#__PURE__*/React.createElement("div", {
       draggable: draggable,
       onDragStart: onDragStart,
       style: {
         display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '12px 16px',
+        flexDirection: 'column',
+        gap: 5,
+        padding: '10px 12px',
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
         fontFamily: 'var(--font-sans)',
         cursor: draggable ? 'grab' : 'default'
       }
-    }, grip, /*#__PURE__*/React.createElement("div", {
-      style: { minWidth: 96 }
-    }, codeEl), /*#__PURE__*/React.createElement("div", {
-      style: { flex: 1, minWidth: 0 }
-    }, titleEl), chips, creditEl, statusIcon, addBtn, detailsBtn);
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }
+    }, grip, codeEl, chips, /*#__PURE__*/React.createElement("span", { style: { flex: 1, minWidth: 4 } }), creditEl, statusIcon, addBtn, detailsBtn), titleEl, countsToward && /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 'var(--text-caption)', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+    }, "Counts toward ", countsToward));
   }
   return /*#__PURE__*/React.createElement("div", {
     draggable: draggable,
