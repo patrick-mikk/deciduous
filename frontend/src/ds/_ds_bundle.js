@@ -859,7 +859,7 @@ function SectionRow({
       color: 'var(--text-secondary)',
       minWidth: 90
     }
-  }, (s.instructors || []).map(i => i.last).join(', ') || '—'), /*#__PURE__*/React.createElement(__ds_scope.SeatMeter, {
+  }, (s.instructors || []).map(i => i.last).join(', ') || 'TBA'), /*#__PURE__*/React.createElement(__ds_scope.SeatMeter, {
     current: s.currentEnrol,
     max: s.maxEnrol,
     waitlist: s.waitlist
@@ -1733,6 +1733,7 @@ function CourseCard({
   title,
   credit,
   breadth = [],
+  countsToward,
   fall,
   winter,
   status,
@@ -1803,6 +1804,50 @@ function CourseCard({
     }
   }, fmtCredit(credit));
   if (compact) {
+    const grip = draggable && /*#__PURE__*/React.createElement("i", {
+      "data-lucide": "grip-vertical",
+      style: { width: 16, height: 16, color: 'var(--text-tertiary)', flexShrink: 0 }
+    });
+    const chips = breadth.map(b => /*#__PURE__*/React.createElement(__ds_scope.Chip, { key: b, breadth: b, dot: true }, b));
+    const statusIcon = st && /*#__PURE__*/React.createElement("i", {
+      "data-lucide": st.icon,
+      title: st.label,
+      style: { width: 16, height: 16, color: st.color }
+    });
+    const addBtn = onAdd && /*#__PURE__*/React.createElement("button", {
+      onClick: onAdd, "aria-label": "Add", style: ghostIcon
+    }, /*#__PURE__*/React.createElement("i", { "data-lucide": "plus", style: { width: 16, height: 16 } }));
+    const detailsBtn = onDetails && /*#__PURE__*/React.createElement("button", {
+      onClick: onDetails, "aria-label": "Details", style: ghostIcon
+    }, /*#__PURE__*/React.createElement("i", { "data-lucide": "chevron-right", style: { width: 16, height: 16 } }));
+    const titleEl = /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 'var(--text-body)', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+    }, title);
+    // Stacked layout (used in the narrow plan rail): code + breadth + credit on
+    // top, then the course title, then a plain "Counts toward ..." line. Only
+    // rendered when countsToward is supplied, so the dense single-row variant
+    // used elsewhere is unchanged.
+    if (countsToward) {
+      return /*#__PURE__*/React.createElement("div", {
+        draggable: draggable,
+        onDragStart: onDragStart,
+        style: {
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 5,
+          padding: '10px 12px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-md)',
+          fontFamily: 'var(--font-sans)',
+          cursor: draggable ? 'grab' : 'default'
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: { display: 'flex', alignItems: 'center', gap: 8 }
+      }, grip, codeEl, chips, /*#__PURE__*/React.createElement("span", { style: { flex: 1 } }), creditEl, statusIcon, addBtn, detailsBtn), titleEl, /*#__PURE__*/React.createElement("div", {
+        style: { fontSize: 'var(--text-caption)', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+      }, "Counts toward ", countsToward));
+    }
     return /*#__PURE__*/React.createElement("div", {
       draggable: draggable,
       onDragStart: onDragStart,
@@ -1817,61 +1862,11 @@ function CourseCard({
         fontFamily: 'var(--font-sans)',
         cursor: draggable ? 'grab' : 'default'
       }
-    }, draggable && /*#__PURE__*/React.createElement("i", {
-      "data-lucide": "grip-vertical",
-      style: {
-        width: 16,
-        height: 16,
-        color: 'var(--text-tertiary)',
-        flexShrink: 0
-      }
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        minWidth: 96
-      }
+    }, grip, /*#__PURE__*/React.createElement("div", {
+      style: { minWidth: 96 }
     }, codeEl), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1,
-        minWidth: 0,
-        fontSize: 'var(--text-body)',
-        color: 'var(--text)',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap'
-      }
-    }, title), breadth.map(b => /*#__PURE__*/React.createElement(__ds_scope.Chip, {
-      key: b,
-      breadth: b,
-      dot: true
-    }, b)), creditEl, st && /*#__PURE__*/React.createElement("i", {
-      "data-lucide": st.icon,
-      title: st.label,
-      style: {
-        width: 16,
-        height: 16,
-        color: st.color
-      }
-    }), onAdd && /*#__PURE__*/React.createElement("button", {
-      onClick: onAdd,
-      "aria-label": "Add",
-      style: ghostIcon
-    }, /*#__PURE__*/React.createElement("i", {
-      "data-lucide": "plus",
-      style: {
-        width: 16,
-        height: 16
-      }
-    })), onDetails && /*#__PURE__*/React.createElement("button", {
-      onClick: onDetails,
-      "aria-label": "Details",
-      style: ghostIcon
-    }, /*#__PURE__*/React.createElement("i", {
-      "data-lucide": "chevron-right",
-      style: {
-        width: 16,
-        height: 16
-      }
-    })));
+      style: { flex: 1, minWidth: 0 }
+    }, titleEl), chips, creditEl, statusIcon, addBtn, detailsBtn);
   }
   return /*#__PURE__*/React.createElement("div", {
     draggable: draggable,
@@ -4285,7 +4280,7 @@ function ImportPanel({
       color: 'var(--text-secondary)',
       textAlign: 'center'
     }
-  }, "Start with an empty record \u2014 add programs and courses by hand."), preview);
+  }, "Start with an empty record. Add programs and courses by hand."), preview);
 }
 
 /** Detected-programs + transcript-diff preview shown before applying an import. */
@@ -5177,7 +5172,7 @@ function CourseRail({
     checked: onlyRemaining,
     disabled: onlyRemainingDisabled,
     onChange: e => onToggleRemaining && onToggleRemaining(e.target.checked)
-  }), "Only courses that fill a remaining requirement"), onlyRemainingDisabled && onlyRemainingHint && /*#__PURE__*/React.createElement("div", {
+  }), "Only show courses that count toward what I still need"), onlyRemainingDisabled && onlyRemainingHint && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 'var(--text-caption)',
       color: 'var(--text-tertiary)',
@@ -5188,7 +5183,7 @@ function CourseRail({
       fontSize: 'var(--text-caption)',
       color: 'var(--text-tertiary)'
     }
-  }, countLabel, countLabel && helperText ? ' — ' : null, helperText), /*#__PURE__*/React.createElement("div", {
+  }, countLabel, countLabel && helperText ? ' · ' : null, helperText), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -5220,6 +5215,7 @@ function CourseRail({
     title: c.title,
     credit: c.credit,
     breadth: c.breadth,
+    countsToward: c.countsToward,
     status: c.status,
     draggable: true,
     onDragStart: e => {
@@ -5259,6 +5255,7 @@ function PlanCourseCard({
   status = 'planned',
   issues = [],
   satisfies = [],
+  countsToward,
   draggable = true,
   onDragStart,
   onRemove,
@@ -5307,7 +5304,7 @@ function PlanCourseCard({
       fontSize: 'var(--text-caption)',
       color: 'var(--text-tertiary)'
     }
-  }, typeof credit === 'number' ? credit.toFixed(1) : credit)), /*#__PURE__*/React.createElement("div", {
+  }, typeof credit === 'number' ? credit.toFixed(1) + ' FCE' : credit)), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-secondary)',
@@ -5316,7 +5313,16 @@ function PlanCourseCard({
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
     }
-  }, title)), onRemove && /*#__PURE__*/React.createElement("i", {
+  }, title), countsToward && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-caption)',
+      color: 'var(--text-tertiary)',
+      marginTop: 3,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, "Counts toward ", countsToward)), onRemove && /*#__PURE__*/React.createElement("i", {
     "data-lucide": "x",
     onClick: e => {
       e.stopPropagation();
@@ -5355,13 +5361,10 @@ function PlanCourseCard({
         height: 12
       }
     }), t.label);
-  }), satisfies.map((s, i) => s.breadth ? /*#__PURE__*/React.createElement(__ds_scope.Chip, {
+  }), satisfies.filter(s => s.breadth).map((s, i) => /*#__PURE__*/React.createElement(__ds_scope.Chip, {
     key: i,
     breadth: s.breadth,
     dot: true
-  }, s.label) : /*#__PURE__*/React.createElement(__ds_scope.Chip, {
-    key: i,
-    tone: "success"
   }, s.label))));
 }
 Object.assign(__ds_scope, { PlanCourseCard });
@@ -5442,7 +5445,7 @@ function TermColumn({
       fontWeight: 'var(--weight-semibold)',
       color: 'var(--text)'
     }
-  }, season, " ", year), /*#__PURE__*/React.createElement("span", {
+  }, season, " ", year), credits > 0 ? /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 'auto',
       fontFamily: 'var(--font-mono)',
@@ -5450,7 +5453,14 @@ function TermColumn({
       color: 'var(--text-tertiary)',
       fontVariantNumeric: 'tabular-nums'
     }
-  }, credits.toFixed(1), " cr")), /*#__PURE__*/React.createElement("div", {
+  }, credits.toFixed(1), " credits") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 'auto',
+      fontFamily: 'var(--font-sans)',
+      fontSize: 'var(--text-body-sm)',
+      color: 'var(--text-tertiary)'
+    }
+  }, "No courses yet")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -5639,12 +5649,12 @@ function ValidationSummary({
         width: 16,
         height: 16
       }
-    }), "No issues \u2014 plan validates");
+    }), "Your plan looks good.");
   }
   const hasError = issues.some(iss => (iss.severity || 'error') === 'error');
   const worst = hasError ? SEVERITY.error : SEVERITY.warning;
   const warningCount = issues.length - issues.filter(iss => (iss.severity || 'error') === 'error').length;
-  const headerLabel = hasError ? `${issues.length} issue${issues.length > 1 ? 's' : ''}` : `Validates with ${warningCount} warning${warningCount === 1 ? '' : 's'}`;
+  const headerLabel = hasError ? `${issues.length} thing${issues.length === 1 ? '' : 's'} to fix before this plan works` : warningCount === 1 ? "Your plan works, but there's one thing worth a look" : `Your plan works, but there are ${warningCount} things worth a look`;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'var(--surface)',
@@ -7264,7 +7274,7 @@ function DegreeAudit({
       width: 15,
       height: 15
     }
-  }), "CGPA ", cgpa.toFixed(2), " ", cgpa >= 1.85 ? '≥ 1.85 (eligible to graduate)' : '— below 1.85 graduation minimum'));
+  }), "CGPA ", cgpa.toFixed(2), " ", cgpa >= 1.85 ? '≥ 1.85 (eligible to graduate)' : 'is below the 1.85 graduation minimum'));
 }
 Object.assign(__ds_scope, { DegreeAudit });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/requirements/DegreeAudit.jsx", error: String((e && e.message) || e) }); }
@@ -10004,7 +10014,7 @@ function ExploreScreen({
     style: {
       fontWeight: 'var(--weight-bold)'
     }
-  }, "Disclaimer:"), " Explore courses is a search tool for building a hypothetical timetable. It does not connect to ACORN \u2014 to actually enrol, use ACORN during your assigned enrolment window."), /*#__PURE__*/React.createElement("div", {
+  }, "Disclaimer:"), " Explore courses is a search tool for building a hypothetical timetable. It does not connect to ACORN. To actually enrol, use ACORN during your assigned enrolment window."), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 32,
       fontWeight: 'var(--weight-heavy)',
@@ -10274,7 +10284,7 @@ function RequirementsScreen({
       color: 'var(--text-secondary)',
       marginBottom: 20
     }
-  }, "Honours Bachelor of Science \u2014 Computer Science Specialist \xB7 ", totalDone.toFixed(1), " / ", totalNeeded.toFixed(1), " FCE complete"), /*#__PURE__*/React.createElement("div", {
+  }, "Honours Bachelor of Science, Computer Science Specialist \xB7 ", totalDone.toFixed(1), " / ", totalNeeded.toFixed(1), " FCE complete"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -10417,7 +10427,7 @@ function TimetableScreen({
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-muted)'
     }
-  }, "Nothing yet \u2014 add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
+  }, "Nothing yet. Add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
     key: c.code,
     style: {
       background: 'var(--surface-card)',
@@ -10518,7 +10528,7 @@ function TimetableVariantA({
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-muted)'
     }
-  }, "Nothing yet \u2014 add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
+  }, "Nothing yet. Add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
     key: c.code,
     style: {
       background: 'var(--surface-card)',
@@ -10720,7 +10730,7 @@ function TimetableVariantB({
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-muted)'
     }
-  }, "Nothing yet \u2014 add sections from Explore courses.")));
+  }, "Nothing yet. Add sections from Explore courses.")));
 }
 window.TimetableVariantB = TimetableVariantB;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "ui_kits/planner/screens/TimetableVariantB.jsx", error: String((e && e.message) || e) }); }

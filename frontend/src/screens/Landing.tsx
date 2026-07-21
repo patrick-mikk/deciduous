@@ -29,7 +29,7 @@ const FEATURES = [
   {
     icon: "upload",
     title: "Import in seconds",
-    desc: "Drop in your Academic History PDF from ACORN or run the bookmarklet — your programs and transcript populate automatically, encrypted at rest.",
+    desc: "Drop in your Academic History PDF from ACORN or run the bookmarklet. Your programs and transcript populate automatically, encrypted at rest.",
   },
   {
     icon: "list-checks",
@@ -98,7 +98,7 @@ export default function Landing() {
         <div>
           <p className="dc-landing__eyebrow">For UofT Arts &amp; Science students</p>
           <h1 className="dc-landing__headline">
-            Plan your whole degree — requirements, courses, and a conflict-free timetable.
+            Plan your whole degree: requirements, courses, and a conflict-free timetable.
           </h1>
           <p className="dc-landing__subtitle">
             Deciduous pulls in your transcript, tracks every credit and breadth requirement against

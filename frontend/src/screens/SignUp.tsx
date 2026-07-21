@@ -117,7 +117,7 @@ export default function SignUp() {
   return (
     <AuthCard
       title="Create your account"
-      subtitle={isMockApi ? "Demo mode — no email is actually sent." : "Plan your degree, courses, and timetable."}
+      subtitle={isMockApi ? "Demo mode: no email is actually sent." : "Plan your degree, courses, and timetable."}
       footer={
         <>
           Already have an account?{" "}

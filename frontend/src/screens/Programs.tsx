@@ -83,7 +83,7 @@ function evaluateCombination(
   const distinctCredits = Array.from(applied).reduce((sum, code) => sum + creditFromCode(code), 0);
   const distinctOk = programs.length < 2 || distinctCredits >= 12.0;
   if (!distinctOk) {
-    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs — need ≥12.0.`);
+    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs. Need ≥12.0.`);
   }
 
   const valid = shapeValid && oneTypePerSubject && distinctOk;
@@ -97,7 +97,7 @@ function evaluateCombination(
           : `${programs.length} program${programs.length === 1 ? "" : "s"}`;
   return {
     valid,
-    message: valid ? `Valid combination — ${shapeLabel}` : "Program combination needs attention",
+    message: valid ? `Valid combination: ${shapeLabel}` : "Program combination needs attention",
     notes,
   };
 }

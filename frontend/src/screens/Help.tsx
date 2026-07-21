@@ -10,5 +10,5 @@ import { PageHeader } from "@/ds";
  * frontend/src/ds/index.ts for the import surface.
  */
 export default function Help() {
-  return <PageHeader title="Help" subtitle="Stub screen — not yet implemented." />;
+  return <PageHeader title="Help" subtitle="Stub screen, not yet implemented." />;
 }

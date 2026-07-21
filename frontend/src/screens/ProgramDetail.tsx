@@ -76,7 +76,7 @@ function evaluateCombination(
       notes.push(
         `${programs.length} programs exceeds the standard program combinations (1 Specialist, ` +
           `2 Majors, or 1 Major + 2 Minors); UofT requires at least one valid combination among ` +
-          `your programs — ${satisfiedBy}.`,
+          `your programs: ${satisfiedBy}.`,
       );
     }
   }
@@ -103,7 +103,7 @@ function evaluateCombination(
   // from the math here, and called out explicitly instead.
   const unparsed = programs.filter((p) => p.requirementsLoaded !== true);
   for (const p of unparsed) {
-    notes.push(`${p.title} requirements not yet parsed — combination check incomplete.`);
+    notes.push(`${p.title} requirements not yet parsed. Combination check incomplete.`);
   }
 
   const applied = new Set<string>();
@@ -117,7 +117,7 @@ function evaluateCombination(
   const parsedCount = programs.length - unparsed.length;
   const distinctOk = parsedCount < 2 || distinctCredits >= 12.0;
   if (!distinctOk) {
-    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs — need ≥12.0.`);
+    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs. Need ≥12.0.`);
   }
 
   const valid = shapeValid && oneTypePerSubject && distinctOk;
@@ -131,7 +131,7 @@ function evaluateCombination(
           : `${programs.length} program${programs.length === 1 ? "" : "s"}`;
   return {
     valid,
-    message: valid ? `Valid combination — ${shapeLabel}` : "Program combination needs attention",
+    message: valid ? `Valid combination: ${shapeLabel}` : "Program combination needs attention",
     notes,
   };
 }

@@ -82,7 +82,7 @@ export default function SignIn() {
   return (
     <AuthCard
       title="Sign in to your planner"
-      subtitle={isMockApi ? "Demo mode — any email + password signs you in." : undefined}
+      subtitle={isMockApi ? "Demo mode: any email + password signs you in." : undefined}
       footer={
         <>
           New here?{" "}
@@ -135,7 +135,7 @@ export default function SignIn() {
           </div>
           {showRecoveryNote && (
             <Callout tone="warning" title="You'll need your recovery code">
-              Resetting your password re-wraps your encrypted academic data — have the recovery code
+              Resetting your password re-wraps your encrypted academic data. Have the recovery code
               from Settings ready before you start. Password reset isn't wired up in this preview yet.
             </Callout>
           )}

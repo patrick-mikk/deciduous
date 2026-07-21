@@ -82,7 +82,7 @@ function formatSessionPart(part: string): string {
     const year = m[2] ?? m[3];
     return `${term.charAt(0).toUpperCase()}${term.slice(1)} ${year}`;
   }
-  return trimmed || "—";
+  return trimmed || "–";
 }
 
 function formatSession(code: string): string {
@@ -280,14 +280,14 @@ export default function Transcript() {
         header: "Mark",
         align: "right",
         mono: true,
-        render: (v) => (v == null ? "—" : String(v)),
+        render: (v) => (v == null ? "–" : String(v)),
       },
       {
         key: "grade",
         header: "Grade",
         render: (v, row) => {
           const grade = v as string;
-          if (!grade) return "—";
+          if (!grade) return "–";
           if (SPECIAL_GRADES.has(grade)) return <Chip tone="info">{grade}</Chip>;
           return (
             <>
@@ -368,13 +368,13 @@ export default function Transcript() {
         subtitle={record ? `${courses.length} course${courses.length === 1 ? "" : "s"} on record` : undefined}
         actions={
           <>
-            <Button variant="secondary" icon="upload" onClick={() => setToast("Import flow lives on Onboarding — see /onboarding.")}>
+            <Button variant="secondary" icon="upload" onClick={() => setToast("Import flow lives on Onboarding. See /onboarding.")}>
               Import
             </Button>
             <Button variant="secondary" icon="plus" onClick={() => setAdding(BLANK_ADD)}>
               Add course
             </Button>
-            <DataExportMenu onExport={(kind: string) => setToast(`Exported as ${kind.toUpperCase()} (demo — no backend export yet).`)} />
+            <DataExportMenu onExport={(kind: string) => setToast(`Exported as ${kind.toUpperCase()} (demo, no backend export yet).`)} />
           </>
         }
       />
@@ -408,7 +408,7 @@ export default function Transcript() {
             <StatTile label="CGPA" value={(transcriptResp?.cgpa ?? 0).toFixed(2)} accent="var(--primary)" />
             <StatTile
               label="This session"
-              value={thisSessionGroup?.sessionalGpa != null ? thisSessionGroup.sessionalGpa.toFixed(2) : "—"}
+              value={thisSessionGroup?.sessionalGpa != null ? thisSessionGroup.sessionalGpa.toFixed(2) : "–"}
               sub={thisSessionGroup?.label}
             />
             <StatTile label="Credits earned" value={creditsEarned.toFixed(1)} />
@@ -497,7 +497,7 @@ export default function Transcript() {
                     Projected CGPA
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: "var(--weight-semibold)", color: "var(--primary)" }}>
-                    {projectedCgpa != null ? projectedCgpa.toFixed(2) : "—"}
+                    {projectedCgpa != null ? projectedCgpa.toFixed(2) : "–"}
                   </span>
                 </div>
               </>
@@ -528,7 +528,7 @@ export default function Transcript() {
               label="Grade"
               value={editing.grade}
               onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditing({ ...editing, grade: e.target.value })}
-              options={[{ label: "—", value: "" }, ...GRADE_OPTIONS]}
+              options={[{ label: "–", value: "" }, ...GRADE_OPTIONS]}
             />
             <Select
               label="Status"

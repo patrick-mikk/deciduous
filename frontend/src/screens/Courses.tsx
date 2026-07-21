@@ -271,7 +271,7 @@ export default function Courses() {
       {state !== "loading" && !error && filtered.length === 0 && (
         <EmptyState
           title="No courses match your filters"
-          description="Try widening the search — clear a filter or search a different code or title."
+          description="Try widening the search: clear a filter or search a different code or title."
           icon="search"
           action={
             hasFilters ? (
@@ -301,7 +301,7 @@ export default function Courses() {
                 location={location}
                 instructor={instructor}
                 onDetails={() => navigate(`/courses/${course.code}`)}
-                onAdd={() => setToast(`${course.code} — plan integration is coming soon.`)}
+                onAdd={() => setToast(`${course.code}: plan integration is coming soon.`)}
               />
             );
           })}

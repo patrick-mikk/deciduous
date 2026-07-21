@@ -59,7 +59,7 @@ export const mockCourses: Course[] = [
     credit: 0.5,
     campus: "St. George",
     description:
-      "A survey of the theories, history, and current practice of international relations — war and peace, international political economy, human rights, and the institutions of global governance.",
+      "A survey of the theories, history, and current practice of international relations: war and peace, international political economy, human rights, and the institutions of global governance.",
     prerequisites: "4.0 credits, or POL101Y1",
     corequisites: "",
     exclusions: "POL208Y1, POL208Y5",

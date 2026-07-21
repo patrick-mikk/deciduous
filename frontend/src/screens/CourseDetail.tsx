@@ -231,8 +231,8 @@ export default function CourseDetail() {
           onSelectSection={(method: string, name: string) =>
             setSelectedSections((s) => ({ ...s, [method]: name }))
           }
-          onAddPlan={() => setToast(`${dsCourse.code} — plan integration is coming soon.`)}
-          onAddTimetable={() => setToast(`${dsCourse.code} — timetable integration is coming soon.`)}
+          onAddPlan={() => setToast(`${dsCourse.code}: plan integration is coming soon.`)}
+          onAddTimetable={() => setToast(`${dsCourse.code}: timetable integration is coming soon.`)}
         />
       )}
 

@@ -53,7 +53,8 @@ interface PlanCardVM {
   credit: number;
   status: "planned" | "completed";
   issues: string[]; // "prereq" | "exclusion" | "not-offered"
-  satisfies: { breadth?: string; label: string }[];
+  satisfies: { breadth?: string; label: string }[]; // breadth chips only
+  countsToward?: string; // plain-language "Counts toward X" line
   draggable: boolean;
   locked: boolean;
 }
@@ -108,6 +109,27 @@ function mapBreadthKeys(breadth: string[]): string[] {
     if (m) keys.push(`BR${m[1]}`);
   }
   return keys;
+}
+
+/**
+ * "Economics Major (ASMAJ1478)" -> "Economics" for the plain-language
+ * "Counts toward ..." line. Drops the trailing program-type word and any
+ * parenthetical POSt code so the card reads like a person would say it.
+ */
+function shortenProgram(title: string): string {
+  return title
+    .replace(/\s*\([A-Z0-9]+\)\s*$/i, "")
+    .replace(/\s+(Specialist|Major|Minor)\b.*$/i, "")
+    .trim();
+}
+
+/** "Counts toward" phrasing: one name, "A and B", or "N of your programs". */
+function countsTowardPhrase(names: string[]): string | undefined {
+  const unique = Array.from(new Set(names.filter(Boolean)));
+  if (unique.length === 0) return undefined;
+  if (unique.length === 1) return unique[0];
+  if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
+  return `${unique.length} of your programs`;
 }
 
 function anchorFallYear(sessions: SessionCode[]): number {
@@ -406,8 +428,12 @@ export default function Plan() {
   React.useEffect(() => {
     const missing = Array.from(neededCodes).filter((c) => !fetchedCodesRef.current.has(c));
     if (missing.length === 0) return;
-    missing.forEach((c) => fetchedCodesRef.current.add(c));
-    let cancelled = false;
+    // Mark a code fetched only once its request resolves (not up front): when
+    // `neededCodes` recomputes as record/programDetails load, this effect
+    // re-runs and its cleanup cancels the prior in-flight batch. If we marked
+    // up front, those cancelled codes would be skipped forever and their
+    // titles would never populate (the card would show the code twice).
+    let active = true;
     Promise.all(
       missing.map((code) =>
         api
@@ -416,7 +442,8 @@ export default function Plan() {
           .catch(() => [code, null] as const),
       ),
     ).then((pairs) => {
-      if (cancelled) return;
+      if (!active) return;
+      pairs.forEach(([code]) => fetchedCodesRef.current.add(code));
       setCourseDetails((prev) => {
         const next = new Map(prev);
         for (const [code, c] of pairs) next.set(code, c);
@@ -424,7 +451,7 @@ export default function Plan() {
       });
     });
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, [neededCodes]);
 
@@ -471,18 +498,28 @@ export default function Plan() {
     [record, planCourses, courseDetails],
   );
 
+  // Breadth chips only. The requirement-group heading (raw jargon like
+  // "Program Course Requirements") is deliberately no longer surfaced as a
+  // chip -- it's replaced by the plain-language "Counts toward ..." line below.
   const computeSatisfies = React.useCallback(
-    (code: string, course: Course | null): { breadth?: string; label: string }[] => {
-      const tags: { breadth?: string; label: string }[] = [];
-      if (course) {
-        for (const key of mapBreadthKeys(course.breadth)) tags.push({ breadth: key, label: key });
-      }
+    (_code: string, course: Course | null): { breadth?: string; label: string }[] => {
+      if (!course) return [];
+      return mapBreadthKeys(course.breadth).map((key) => ({ breadth: key, label: key }));
+    },
+    [],
+  );
+
+  // Which of the student's enrolled programs a course actually counts toward,
+  // as a plain-language phrase ("Economics and Public Policy"). Replaces the
+  // requirement-group jargon a student wouldn't recognize.
+  const computeCountsToward = React.useCallback(
+    (code: string): string | undefined => {
+      const names: string[] = [];
       for (const prog of programDetails) {
-        for (const group of prog.completionRequirements) {
-          if (group.courseCodes.includes(code)) tags.push({ label: group.heading || prog.title });
-        }
+        const inProgram = prog.completionRequirements.some((group) => group.courseCodes.includes(code));
+        if (inProgram) names.push(shortenProgram(prog.title));
       }
-      return tags;
+      return countsTowardPhrase(names);
     },
     [programDetails],
   );
@@ -512,6 +549,7 @@ export default function Plan() {
               status: completed ? "completed" : "planned",
               issues: course ? computeIssues(pc.code, course, id) : [],
               satisfies: computeSatisfies(pc.code, course),
+              countsToward: computeCountsToward(pc.code),
               draggable: !pc.locked,
               locked: !!pc.locked,
             };
@@ -551,7 +589,7 @@ export default function Plan() {
       const existing = prev.find((p) => p.code === code);
       if (!existing) return prev;
       if (existing.locked) {
-        pushToast("warning", `${code} is locked — unlock it before moving.`);
+        pushToast("warning", `${code} is locked. Unlock it before moving.`);
         return prev;
       }
       if (existing.term === toTermId) return prev;
@@ -569,7 +607,7 @@ export default function Plan() {
   function handleRemoveCourse(_termId: string, code: string) {
     const existing = planCourses.find((p) => p.code === code);
     if (existing?.locked) {
-      pushToast("warning", `${code} is locked — unlock it before removing.`);
+      pushToast("warning", `${code} is locked. Unlock it before removing.`);
       return;
     }
     setPlanCourses((prev) => prev.filter((p) => p.code !== code));
@@ -657,18 +695,22 @@ export default function Plan() {
   function handleValidateClick() {
     if (validationStatus === "loading") return;
     if (validationStatus === "error") {
-      pushToast("danger", validationError ?? "Couldn't validate your plan.");
+      pushToast("danger", validationError ?? "We couldn't check your plan just now.");
     } else if (validationIssues.length === 0) {
-      pushToast("success", "Plan validates — no issues found.");
+      pushToast("success", "Your plan looks good.");
     } else if (validationErrorCount === 0) {
       pushToast(
         "warning",
-        `Validates with ${validationWarningCount} warning${validationWarningCount === 1 ? "" : "s"} — see below.`,
+        validationWarningCount === 1
+          ? "Your plan works. There's one thing worth a look below."
+          : `Your plan works. There are ${validationWarningCount} things worth a look below.`,
       );
     } else {
       pushToast(
         "warning",
-        `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"} found — see below.`,
+        validationErrorCount === 1
+          ? "There's one thing to fix. See the details below."
+          : `There are ${validationErrorCount} things to fix. See the details below.`,
       );
     }
     validationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -694,7 +736,7 @@ export default function Plan() {
     ? undefined
     : !record || record.programs.length === 0
       ? "Add a program from Requirements to enable this filter."
-      : "Load your programs' requirements first — no requirement data available yet.";
+      : "Load your programs' requirements first. No requirement data is available yet.";
 
   const railCourses = React.useMemo(() => {
     const list = onlyRemaining && !onlyRemainingDisabled ? railResults.filter((c) => remainingCodes.has(c.code)) : railResults;
@@ -703,9 +745,10 @@ export default function Plan() {
       title: c.title,
       credit: c.credit,
       breadth: mapBreadthKeys(c.breadth),
+      countsToward: computeCountsToward(c.code),
       status: railCourseStatus(c.code),
     }));
-  }, [railResults, onlyRemaining, onlyRemainingDisabled, remainingCodes, railCourseStatus]);
+  }, [railResults, onlyRemaining, onlyRemainingDisabled, remainingCodes, railCourseStatus, computeCountsToward]);
 
   // Issue 5/6: the rail's empty/helper copy should say *why* the list looks
   // the way it does -- "no matches for this search" reads very differently
@@ -716,7 +759,7 @@ export default function Plan() {
       ? "No unplaced courses fill a remaining requirement."
       : "No courses available.";
   const railHelperText =
-    !debouncedRailQuery && !(onlyRemaining && !onlyRemainingDisabled) ? "Browsing the catalog — type to search." : undefined;
+    !debouncedRailQuery && !(onlyRemaining && !onlyRemainingDisabled) ? "Browsing the catalog. Type to search." : undefined;
   const railCountLabel = railLoading
     ? undefined
     : `${railCourses.length} course${railCourses.length === 1 ? "" : "s"}`;
@@ -725,7 +768,7 @@ export default function Plan() {
     () =>
       addDialogResults
         .filter((c) => !planCourses.some((p) => p.code === c.code))
-        .map((c) => ({ value: c.code, label: `${c.code} — ${c.title}` })),
+        .map((c) => ({ value: c.code, label: `${c.code} · ${c.title}` })),
     [addDialogResults, planCourses],
   );
 
@@ -739,8 +782,8 @@ export default function Plan() {
   return (
     <div>
       <PageHeader
-        title="Plan"
-        subtitle="Drag courses from the rail onto a term, or use the + / course menu to place them by keyboard."
+        title="Your plan"
+        subtitle="Drag a course onto a term, or search below to add one."
         actions={
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ width: 128 }}>
@@ -751,32 +794,13 @@ export default function Plan() {
                 options={YEAR_OPTIONS.map((n) => ({ value: String(n), label: `${n} years` }))}
               />
             </div>
-            <Button variant="secondary" icon="check-circle" onClick={handleValidateClick}>
-              Validate
-            </Button>
             <Button
-              variant={validationStatus === "error" || validationErrorCount > 0 ? "danger" : "secondary"}
-              icon={
-                validationStatus === "loading"
-                  ? "loader-circle"
-                  : validationStatus === "error"
-                    ? "circle-alert"
-                    : validationErrorCount > 0 || validationWarningCount > 0
-                      ? "triangle-alert"
-                      : "circle-check"
-              }
+              variant="secondary"
+              icon={validationStatus === "loading" ? "loader-circle" : "check-circle"}
               disabled={validationStatus === "loading"}
               onClick={validationStatus === "error" ? () => setValidationRetryKey((k) => k + 1) : handleValidateClick}
             >
-              {validationStatus === "loading"
-                ? "Validating…"
-                : validationStatus === "error"
-                  ? "Couldn't validate"
-                  : validationErrorCount > 0
-                    ? `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"}`
-                    : validationWarningCount > 0
-                      ? `${validationWarningCount} warning${validationWarningCount === 1 ? "" : "s"}`
-                      : "0 issues"}
+              {validationStatus === "loading" ? "Checking…" : "Check my plan"}
             </Button>
             <Button variant="primary" icon="sparkles" onClick={() => setAutoPlanOpen(true)}>
               Auto-plan
@@ -807,7 +831,7 @@ export default function Plan() {
         <EmptyState
           icon="git-branch"
           title="Nothing planned yet"
-          description="Add a program from Requirements, then drag courses from the rail onto a term to start building your plan."
+          description="Add a program from Requirements, then search for courses and drag them onto a term to start building your plan."
           action={
             <Button variant="primary" onClick={() => navigate("/programs")}>
               Browse programs
@@ -904,7 +928,7 @@ export default function Plan() {
       {/* ---- Add course (keyboard/click alternative to dragging) ---- */}
       <Dialog
         open={addDialogTermId != null}
-        title={addDialogTermId ? `Add a course — ${termLabel(addDialogTermId)}` : "Add a course"}
+        title={addDialogTermId ? `Add a course to ${termLabel(addDialogTermId)}` : "Add a course"}
         onClose={() => {
           setAddDialogTermId(null);
           setAddDialogQuery("");

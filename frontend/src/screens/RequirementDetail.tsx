@@ -198,7 +198,7 @@ export default function RequirementDetail() {
       setProgram((p) => (p ? { ...p, completionRequirements: groups, requirementsLoaded: true } : p));
       setToast({ tone: "success", message: "Requirements loaded from the calendar via Gemini." });
     } catch {
-      setToast({ tone: "danger", message: "Couldn't load requirements — try again." });
+      setToast({ tone: "danger", message: "Couldn't load requirements. Try again." });
     } finally {
       setReparsing(false);
     }

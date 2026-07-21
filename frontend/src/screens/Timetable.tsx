@@ -457,7 +457,7 @@ export default function Timetable() {
 
   function selectSection(code: string, method: string, name: string) {
     if (scenario?.locked[code]?.[method]) {
-      pushToast("warning", `${code} ${method} is locked — unlock it before changing sections.`);
+      pushToast("warning", `${code} ${method} is locked. Unlock it before changing sections.`);
       return;
     }
     mutateScenario((s) => ({ ...s, selected: { ...s.selected, [code]: { ...(s.selected[code] ?? {}), [method]: name } } }));
@@ -551,7 +551,7 @@ export default function Timetable() {
 
   function handleExport() {
     if (blocks.length === 0) {
-      pushToast("warning", "Nothing to export yet — add a course and pick sections first.");
+      pushToast("warning", "Nothing to export yet. Add a course and pick sections first.");
       return;
     }
     downloadText(`deciduous-${term}.ics`, "text/calendar", buildIcs(blocks, termLabel(term)));
@@ -587,7 +587,7 @@ export default function Timetable() {
     return catalog
       .filter((c) => !scenario.courseCodes.includes(c.code))
       .filter((c) => c.sectionCode === "Y" || season === "Summer" || (season === "Fall" && c.sectionCode === "F") || (season === "Winter" && c.sectionCode === "S"))
-      .map((c) => ({ value: c.code, label: `${c.code} — ${c.title}` }));
+      .map((c) => ({ value: c.code, label: `${c.code} · ${c.title}` }));
   }, [catalog, scenario, term]);
 
   const swapCourse = swapCode ? (courseDetails.get(swapCode) ?? null) : null;

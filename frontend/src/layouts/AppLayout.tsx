@@ -76,7 +76,7 @@ export function AppLayout() {
         <div className="dc-app-shell__main-inner">
           {isMockApi && (
             <div style={{ marginBottom: "var(--space-5)" }}>
-              <Callout tone="warning" title="Demo data — not connected to a backend">
+              <Callout tone="warning" title="Demo data: not connected to a backend">
                 Everything on this screen (transcript, programs, GPA, alerts) comes from seeded
                 sample data, not your account. Remove <code>VITE_API_BASE=mock</code> from{" "}
                 <code>frontend/.env</code> to use the real API.
