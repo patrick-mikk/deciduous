@@ -3,7 +3,13 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api";
 import type { Course, PlanCourse, PlanValidationIssue, Program, SessionCode, StudentRecord } from "@/api";
-import { creditFromCode, shortenProgram, countsTowardPhrase, remainingRequirementMatches } from "@/api";
+import {
+  creditFromCode,
+  shortenProgram,
+  countsTowardPhrase,
+  remainingRequirementMatches,
+  isExcludedByTaken,
+} from "@/api";
 import {
   AutoPlanPanel,
   Button,
@@ -404,28 +410,43 @@ export default function Plan() {
     return out;
   }, [record, programDetails, planCourses]);
 
+  // Completed/in-progress transcript courses + whatever's already on the plan
+  // -- "taken" for both requirement-line accounting (remainingMatches below)
+  // and exclusion filtering (suggestionResults below).
+  const takenCodes = React.useMemo(() => {
+    if (!record) return new Set<string>();
+    return new Set<string>([
+      ...record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
+      ...planCourses.map((p) => p.code),
+    ]);
+  }, [record, planCourses]);
+
   // Ranked remaining-requirement courses (multi-program first) -- the rail's
   // proactive default when nothing is typed. Excludes what's completed,
   // in progress, or already on the plan.
   const remainingMatches = React.useMemo(() => {
     if (!record) return [];
-    const taken = new Set<string>([
-      ...record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
-      ...planCourses.map((p) => p.code),
-    ]);
-    return remainingRequirementMatches(programDetails, record.requirementProgress, taken);
-  }, [record, programDetails, planCourses]);
+    return remainingRequirementMatches(programDetails, record.requirementProgress, takenCodes);
+  }, [record, programDetails, takenCodes]);
 
   // The top-ranked suggestions, in rank order, built from the course details
   // that are already fetched below (no extra network call). Drives both the
   // rail's default view and the "Add a course" dialog's default options.
+  // Formally-excluded courses (Calendar "Exclusion:" text naming an already-
+  // taken code, e.g. ECO105Y1 excluded by completed ECO101H1/ECO102H1) are
+  // dropped here too -- this is the one place both suggestion surfaces read
+  // from, so filtering once covers the rail default AND the add-dialog default.
   const suggestionCodes = React.useMemo(
     () => remainingMatches.slice(0, RAIL_SUGGEST_LIMIT).map((m) => m.code),
     [remainingMatches],
   );
   const suggestionResults = React.useMemo(
-    () => suggestionCodes.map((code) => courseDetails.get(code)).filter((c): c is Course => Boolean(c)),
-    [suggestionCodes, courseDetails],
+    () =>
+      suggestionCodes
+        .map((code) => courseDetails.get(code))
+        .filter((c): c is Course => Boolean(c))
+        .filter((c) => !isExcludedByTaken(c.exclusions, takenCodes)),
+    [suggestionCodes, courseDetails, takenCodes],
   );
   // Still resolving while any top code hasn't come back yet (present in the map
   // means fetched, even if it resolved to null).

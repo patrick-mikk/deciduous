@@ -198,6 +198,13 @@ export const mockCourses: Course[] = [
   { code: "ECO101H1", title: "Principles of Microeconomics", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Introductory microeconomics.", prerequisites: "", corequisites: "", exclusions: "", breadth: [], distribution: ["Social Science"], sections: [] },
   { code: "ECO102H1", title: "Principles of Macroeconomics", sectionCode: "S", credit: 0.5, campus: "St. George", description: "Introductory macroeconomics.", prerequisites: "", corequisites: "", exclusions: "", breadth: [], distribution: ["Social Science"], sections: [] },
   { code: "STA220H1", title: "The Practice of Statistics I", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Introductory applied statistics.", prerequisites: "", corequisites: "", exclusions: "", breadth: [], distribution: ["Science"], sections: [] },
+  // Demo case for the requirement-line-satisfaction + exclusion-filtering fix
+  // (see degreeAudit.ts remainingRequirementMatches / isExcludedByTaken): the
+  // mock student completed STA220H1, which both satisfies the Methods group's
+  // "STA220H1 / STA257H1" rule below AND formally excludes STA257H1 -- it must
+  // not be suggested, while POL222H1/POL232H1 (a separate, unsatisfied line)
+  // still are.
+  { code: "STA257H1", title: "Probability and Statistics I", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Calculus-based introduction to probability and statistics.", prerequisites: "", corequisites: "", exclusions: "Exclusion: STA220H1", breadth: [], distribution: ["Science"], sections: [] },
   { code: "POL340H1", title: "Public Opinion", sectionCode: "S", credit: 0.5, campus: "St. George", description: "The formation and measurement of public opinion.", prerequisites: "POL208H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
   { code: "PPG340H1", title: "Policy Evaluation", sectionCode: "S", credit: 0.5, campus: "St. George", description: "Methods for evaluating the impact of public policy interventions.", prerequisites: "PPG310H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
   { code: "ECO333H1", title: "Urban Economics", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Economic analysis of cities and urban policy.", prerequisites: "ECO101H1, ECO102H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
@@ -228,10 +235,20 @@ const publicPolicyGroups: RequirementGroup[] = [
     heading: "Methods",
     credits: 1.0,
     isNote: false,
-    courseCodes: ["STA220H1", "POL222H1", "POL232H1"],
-    rules: [{ credits: 0.5, description: "One methods course beyond STA220H1", courseCodes: ["POL222H1", "POL232H1"] }],
+    courseCodes: ["STA220H1", "STA257H1", "POL222H1", "POL232H1"],
+    rules: [
+      // Line 1: STA220H1 or STA257H1 -- satisfied by the completed STA220H1
+      // below, so STA257H1 must not be suggested (rule-satisfaction
+      // mechanism), even though it's also formally excluded by STA220H1
+      // (exclusion mechanism) -- see mockCourses' STA257H1 entry.
+      { credits: 0.5, description: "STA220H1 / STA257H1", courseCodes: ["STA220H1", "STA257H1"] },
+      // Line 2: one further methods course -- still unsatisfied, so
+      // POL222H1/POL232H1 stay suggestible.
+      { credits: 0.5, description: "One methods course beyond STA220H1", courseCodes: ["POL222H1", "POL232H1"] },
+    ],
     courses: [
       { code: "STA220H1", credits: 0.5, notes: "" },
+      { code: "STA257H1", credits: 0.5, notes: "" },
       { code: "POL222H1", credits: 0.5, notes: "" },
       { code: "POL232H1", credits: 0.5, notes: "" },
     ],

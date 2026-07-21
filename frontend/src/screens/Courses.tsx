@@ -14,7 +14,15 @@ import {
   Callout,
   Toast,
 } from "@/ds";
-import { api, courseLevel, BREADTH_KEYS, BREADTH_LABELS, remainingRequirementMatches, countsTowardPhrase } from "@/api";
+import {
+  api,
+  courseLevel,
+  BREADTH_KEYS,
+  BREADTH_LABELS,
+  remainingRequirementMatches,
+  countsTowardPhrase,
+  isExcludedByTaken,
+} from "@/api";
 import type { BreadthKey, Course, CourseSearchParams, Program, SessionCode, StudentRecord } from "@/api";
 
 /**
@@ -147,15 +155,22 @@ export default function Courses() {
     };
   }, [record]);
 
+  // Completed/in-progress transcript codes -- "taken" for both requirement-line
+  // accounting (remainingMatches below) and exclusion filtering (the
+  // suggestions effect below).
+  const takenCodes = React.useMemo(() => {
+    if (!record) return new Set<string>();
+    return new Set(
+      record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
+    );
+  }, [record]);
+
   // Ranked courses that fill a still-open requirement (multi-program first),
   // and a per-code "counts toward ..." phrase for any course we display.
   const remainingMatches = React.useMemo(() => {
     if (!record) return [];
-    const taken = new Set(
-      record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
-    );
-    return remainingRequirementMatches(programDetails, record.requirementProgress, taken);
-  }, [record, programDetails]);
+    return remainingRequirementMatches(programDetails, record.requirementProgress, takenCodes);
+  }, [record, programDetails, takenCodes]);
 
   const countsTowardByCode = React.useMemo(() => {
     const map: Record<string, string> = {};
@@ -190,13 +205,21 @@ export default function Courses() {
     ).then((pairs) => {
       if (cancelled) return;
       const byCode = new Map(pairs);
-      setSuggestions(top.map((m) => byCode.get(m.code)).filter((c): c is Course => Boolean(c)));
+      // Drop formal Calendar exclusions (e.g. ECO105Y1 excluded by a completed
+      // ECO101H1/ECO102H1) -- a hard rule, checked independently of the
+      // requirement-line satisfaction remainingRequirementMatches already applied.
+      setSuggestions(
+        top
+          .map((m) => byCode.get(m.code))
+          .filter((c): c is Course => Boolean(c))
+          .filter((c) => !isExcludedByTaken(c.exclusions, takenCodes)),
+      );
       setSuggestState("ready");
     });
     return () => {
       cancelled = true;
     };
-  }, [browsingDefault, record, programsResolved, remainingMatches]);
+  }, [browsingDefault, record, programsResolved, remainingMatches, takenCodes]);
 
   React.useEffect(() => {
     // The default view is driven by the suggestions effect above, not a
