@@ -42,42 +42,53 @@ network, the DB, or Flask, and it never receives real student data in tests
 -- only synthetic fixtures (`backend/tests/fixtures/`,
 `backend/tests/test_degree_explorer_ingest.py`).
 
-ASSUMPTIONS THAT STILL NEED VALIDATION AGAINST A REAL ACORN PDF (no sample
-PDF is available in this sandbox -- see the synthetic fixture text in
-`backend/tests/test_degree_explorer_ingest.py` for what was actually tested):
+VALIDATED AGAINST A REAL ACORN PDF (2026-07): the earlier format assumptions
+have now been checked against a genuine "Complete Academic History" export,
+and the parser handles the real layout, specifically:
 
-- Session headings are assumed to render as their own text line, containing
-  little else besides "Fall 2023" or "2023 Fall" (optionally with a
-  trailing "Session"/"Term" word or a colon/dash). If ACORN instead puts
-  other text on that same line (e.g. a sessional GPA), `_SESSION_HEADING_RE`
-  below won't match it and courses under it will fall back to whatever
-  session was last recognised (or "" if none yet).
-- Course rows are assumed to extract as one text line per course in the
-  order "CODE  TITLE  CREDIT-WEIGHT  MARK  LETTER-GRADE  [notation]"
-  (matching pdfplumber's default left-to-right, top-to-bottom reading
-  order for a simple table). A multi-line-wrapped title, or a PDF that
-  places the grade in a separate visual column pdfplumber reorders
-  differently, would not be handled.
-- The credit weight printed in the PDF (e.g. "0.50") is not read back out
-  as the authoritative credit value -- it's derived from the course code
-  itself (`parse_course_code(...).credit_value`) same as before, per
-  `design/06-data-model-and-api.md`. If ACORN and the course code ever
-  disagree (e.g. a transfer credit with a nonstandard weight), the code-
-  derived value wins silently.
-- The CGPA line is assumed to contain the phrase "Cumulative G.P.A." (with
-  optional periods) somewhere on its own line; ACORN's exact wording
-  ("Cumulative GPA", "CGPA:", etc.) is unverified.
-- A grade/notation token search still isn't column-aware, so a course title
-  containing a bare single-letter word (rare, but possible) could in theory
-  be mistaken for a one-letter grade; this is a pre-existing heuristic
-  limitation, not something the ACORN-shaped fixture below exercises.
+- Session headings render as
+  "2025 Fall - Bachelor's Degree Program - Trinity College" -- year-first
+  label plus a " - program - college" suffix. A heading is recognised as: a
+  line *starting* with a session label whose remainder holds NO second
+  session label (that second-label exclusion keeps the Registration History
+  range line "2024 Fall-2026 Summer: Faculty of Arts and Science" from
+  hijacking the running session).
+- Course rows are "CODE TITLE WGT MRK GRD CRSAVG": after the title comes the
+  credit weight, the mark column (a number, or a notation like IPR/CR), the
+  letter grade, then **CrsAvg -- the course-average letter grade**, and
+  optionally a trailing EXT/XTR designation. Grade scanning is therefore
+  (a) restricted to the text after the first digit (the weight column), so
+  title words can't be mistaken for grades, and (b) leftmost-match, so the
+  student's own grade wins over the CrsAvg letter to its right. An EXT/XTR
+  token *after* the grade is the "Extra" designation (status "extra"), on
+  top of whatever the grade itself is (e.g. "CR C+ EXT" = grade CR, extra).
+- Long titles wrap onto a following continuation line ("... Justice in the"
+  / "Indo-Pacific"); a bare-words line immediately after a course row is
+  appended to that course's title.
+- A course spanning sessions (Y courses) prints an in-progress snapshot row
+  (Mrk "IPR") in each earlier term and a final row in its completing term.
+  A row whose mark column is IPR is dropped when a later-session non-IPR
+  row exists for the same code -- that collapses the snapshot into the one
+  real registration -- while an IPR row with nothing after it (a genuinely
+  in-progress course, including a fresh retake registration) is kept.
+  An in-progress row for a course with an earlier *passed* attempt gets a
+  warning: per design/09 ("Repeated courses / Extra"), such a retake counts
+  as Extra (no credit, no GPA) once graded, and ACORN will mark it EXT.
+- The GPA lines read "Sessional GPA 3.57 Annual GPA 3.50 Cumulative GPA
+  3.50" (no periods); the LAST "Cumulative GPA" seen wins, which is the
+  most recent session that prints one.
+
+Still assumed, not yet contradicted by a real sample: the printed credit
+weight is not read back -- credits derive from the course code
+(`parse_course_code(...).credit_value`, design/06) -- and pdfplumber's
+left-to-right reading order is what produces the one-line row shape above.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from backend.planner.course_code import parse_course_code, parse_program_code
@@ -178,17 +189,16 @@ _SESSION_LABEL_RE = re.compile(
 _SESSION_CODE_RE = re.compile(r"\b(2\d{3}[159])\b")
 _TERM_DIGIT = {"summer": "5", "fall": "9", "winter": "1"}
 
-# A line that is *just* a session heading -- ACORN groups course rows under
-# one "2023 Fall" / "Fall 2023" section header per session rather than
-# repeating the session on every course row, unlike the original Degree
-# Explorer-oriented parser this module was written against. Conservative on
-# purpose: only lines that are essentially nothing but the session label
-# (plus an optional trailing "Session"/"Term" word or a colon/dash) update
-# the running section session, so an ordinary line that merely *mentions* a
-# term in passing doesn't hijack the session for later rows.
-_SESSION_HEADING_RE = re.compile(
-    r"^\s*(?:(?:Fall|Winter|Summer)\s+\d{4}|\d{4}\s+(?:Fall|Winter|Summer))"
-    r"\s*(?:Session|Term)?\s*[:\-]?\s*$",
+# A session section heading. In a real ACORN Academic History PDF these are
+# "2025 Fall - Bachelor's Degree Program - Trinity College": the session
+# label LEADS the line and is followed by a program/college suffix. So a
+# heading is a line *starting* with the label, whose remainder contains no
+# SECOND session label -- that exclusion keeps range lines like the
+# Registration History's "2024 Fall-2026 Summer: Faculty of Arts and
+# Science" (and any other line merely mentioning two terms) from hijacking
+# the running section session for the course rows underneath.
+_SESSION_HEADING_START_RE = re.compile(
+    r"^\s*(?:(?:Fall|Winter|Summer)\s+\d{4}|\d{4}\s+(?:Fall|Winter|Summer))\b",
     re.IGNORECASE,
 )
 
@@ -209,10 +219,15 @@ def normalize_session(text: str) -> str:
 
 
 def is_session_heading(line: str) -> bool:
-    """True if `line` is (almost) nothing but a session label -- a per-
-    session section heading in an ACORN Academic History PDF, rather than a
-    course/program row that happens to mention a term."""
-    return bool(_SESSION_HEADING_RE.match(line))
+    """True if `line` is an ACORN per-session section heading: it *starts*
+    with a session label ("2025 Fall - Bachelor's Degree Program - ..."),
+    and the rest of the line mentions no second session (which would make it
+    a range line like "2024 Fall-2026 Summer: Faculty of ...", not a section
+    heading)."""
+    m = _SESSION_HEADING_START_RE.match(line)
+    if m is None:
+        return False
+    return _SESSION_LABEL_RE.search(line[m.end():]) is None
 
 
 # -------------------------------------------------------------------- PDF parsing
@@ -262,13 +277,30 @@ _DECIMAL_NUM_RE = re.compile(r"\d+\.\d+")
 _INT_NUM_RE = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
 
 
-def _grade_token(text: str) -> tuple[str, int, int] | None:
-    """The first recognised grade token in `text`, as (token, start, end)."""
+def _leftmost_grade_token(text: str) -> tuple[str, int, int] | None:
+    """The LEFTMOST recognised grade token in `text` (ties broken by longest
+    token), as (token, start, end).
+
+    Leftmost matters because a real ACORN row carries TWO letter grades --
+    the student's grade, then the CrsAvg course-average letter to its right
+    ("0.50 85 A A-"). Scanning token-by-token in list order (the old
+    behaviour) could latch onto the CrsAvg letter and silently record the
+    wrong grade; leftmost-wins always takes the student's own column."""
+    best: tuple[int, int, str] | None = None  # (start, -len, token)
     for token in _ALL_GRADE_TOKENS:
         m = re.search(rf"(?<![A-Za-z]){re.escape(token)}(?![A-Za-z])", text)
-        if m:
-            return token, m.start(), m.end()
-    return None
+        if m is None:
+            continue
+        key = (m.start(), -len(token), token)
+        if best is None or key < best:
+            best = key
+    if best is None:
+        return None
+    start, neg_len, token = best
+    return token, start, start - neg_len
+
+
+_EXT_DESIGNATION_RE = re.compile(r"(?<![A-Za-z])(?:EXT|XTR)(?![A-Za-z])")
 
 
 def _parse_program_line(line: str) -> DraftProgram | None:
@@ -304,23 +336,41 @@ def _parse_course_line(line: str, *, default_session: str = "") -> DraftCourse |
     is_extra = bool(_EXTRA_FLAG_RE.search(after))
     after_clean = _EXTRA_FLAG_RE.sub("", after)
 
-    grade_hit = _grade_token(after_clean)
-    grade = grade_hit[0] if grade_hit else ""
-    tail_for_title_end = grade_hit[1] if grade_hit else len(after_clean)
-    search_zone = after_clean[:tail_for_title_end]
-
     # The title runs up to the first digit -- everything from there on is
-    # the credit/mark column, e.g. "Intro to Stats    0.5    65    C+". A
-    # course title containing a literal digit ("20th Century America") would
-    # get cut short here; a known heuristic limitation, not a crash.
-    digit_m = re.search(r"\d", search_zone)
-    title_end = digit_m.start() if digit_m else len(search_zone)
-    title = search_zone[:title_end].strip(" -–\t.,")
+    # the Wgt/Mrk/Grd/CrsAvg column block, e.g. "Intro to Stats 0.50 65 C+
+    # B". A course title containing a literal digit ("20th Century America")
+    # would get cut short here; a known heuristic limitation, not a crash.
+    first_digit = re.search(r"\d", after_clean)
+    title_end = first_digit.start() if first_digit else len(after_clean)
 
-    # A mark is a bare 0-100 integer in the numeric tail, ignoring the
-    # decimal credit weight (e.g. "0.5") -- credit is derived from the
-    # course code itself (design/06-data-model-and-api.md), not this column.
-    numeric_zone = _DECIMAL_NUM_RE.sub(" ", search_zone[title_end:])
+    # Grade scanning is restricted to AFTER the first digit (the credit-
+    # weight column) so a title word can never be read as a grade, and takes
+    # the LEFTMOST token so the student's grade wins over the CrsAvg letter
+    # to its right (see _leftmost_grade_token). Rows with no digits at all
+    # (no weight column printed) fall back to scanning the whole tail.
+    grade_zone_offset = first_digit.start() if first_digit else 0
+    grade_hit = _leftmost_grade_token(after_clean[grade_zone_offset:])
+    grade = grade_hit[0] if grade_hit else ""
+
+    if grade_hit:
+        numbers_end = grade_zone_offset + grade_hit[1]
+        grade_end = grade_zone_offset + grade_hit[2]
+    else:
+        numbers_end = grade_end = len(after_clean)
+    title = after_clean[: min(title_end, numbers_end)].strip(" -–\t.,")
+
+    # An EXT/XTR token AFTER the grade is ACORN's "Extra" designation -- an
+    # attribute on top of the grade ("CR C+ EXT" = grade CR, Extra), not the
+    # grade itself. (When the grade column itself is EXT/XTR, treat that as
+    # Extra too.)
+    if _EXT_DESIGNATION_RE.search(after_clean[grade_end:]) or grade in ("EXT", "XTR"):
+        is_extra = True
+
+    # A mark is a bare 0-100 integer between the title and the grade,
+    # ignoring the decimal credit weight (e.g. "0.50") -- credit is derived
+    # from the course code itself (design/06-data-model-and-api.md), not
+    # this column.
+    numeric_zone = _DECIMAL_NUM_RE.sub(" ", after_clean[title_end:numbers_end])
     mark: float | None = None
     for int_m in _INT_NUM_RE.finditer(numeric_zone):
         value = int(int_m.group(1))
@@ -347,12 +397,86 @@ def _parse_course_line(line: str, *, default_session: str = "") -> DraftCourse |
     )
 
 
+# A wrapped-title continuation: pure words/punctuation, no digits, no colon
+# (which excludes "Status: In good standing"), no sentence-ending period
+# (which excludes "This is not an official transcript.").
+_TITLE_CONTINUATION_RE = re.compile(r"^[A-Za-z][A-Za-z ,&'()–-]*$")
+
+
+def _session_label(code: str) -> str:
+    """"20261" -> "Winter 2026" for warning text; the raw code if unknown."""
+    names = {"1": "Winter", "5": "Summer", "9": "Fall"}
+    if len(code) == 5 and code[4] in names:
+        return f"{names[code[4]]} {code[:4]}"
+    return code or "an unknown session"
+
+
+# Passing letter grades/notations for the retake check below: every letter
+# that isn't an outright fail, plus CR/P ("Passing grade = 50% / P / CR",
+# design/09 section 1).
+PASSING_LETTERS_AND_NOTATIONS: frozenset[str] = frozenset(
+    {g for g in GRADE_POINTS if g not in ("F", "FL")} | {"CR", "P"}
+)
+
+
+def _collapse_ipr_snapshots(
+    courses: list[DraftCourse], warnings: list[str]
+) -> list[DraftCourse]:
+    """ACORN prints a course spanning sessions (Y courses) as an IPR-marked
+    snapshot row in each earlier term plus a final row in its completing
+    term. Drop an IPR row whenever a LATER-session non-IPR row exists for
+    the same code -- that's the same registration completing, not a second
+    course. An IPR row with nothing after it is a genuinely in-progress
+    registration (including a fresh retake) and is kept; if the same code
+    already has an earlier PASSED attempt, warn that the retake will count
+    as Extra (design/09 "Repeated courses / Extra") once graded.
+
+    Session codes ("20249" < "20251" < "20255") order chronologically as
+    strings, so plain comparison works; rows missing a session are never
+    collapsed (conservative -- better a visible duplicate than silent loss).
+    """
+    kept: list[DraftCourse] = []
+    for course in courses:
+        if course.grade == "IPR" and course.session:
+            completed_later = any(
+                other is not course
+                and other.code == course.code
+                and other.grade != "IPR"
+                and other.session
+                and other.session > course.session
+                for other in courses
+            )
+            if completed_later:
+                continue  # in-progress snapshot of a registration that later completed
+
+            passed_earlier = any(
+                other is not course
+                and other.code == course.code
+                and other.status == "completed"
+                and other.session
+                and other.session < course.session
+                and (
+                    (other.grade or "").upper() in PASSING_LETTERS_AND_NOTATIONS
+                    or (other.mark is not None and other.mark >= 50)
+                )
+                for other in courses
+            )
+            if passed_earlier:
+                warnings.append(
+                    f"{course.code} in {_session_label(course.session)} looks like a "
+                    "retake of a course you already passed; per UofT's repeated-course "
+                    "rule it will count as Extra (no credit, not in your GPA) once "
+                    "graded."
+                )
+        kept.append(course)
+    return kept
+
+
 def parse_pdf_text(text: str) -> StudentRecordDraft:
     """Pure line-scan over already-extracted PDF text. See module docstring
     for the heuristic and why it's line-oriented rather than column-fixed,
-    and for how a per-session ACORN section heading ("2023 Fall") is tracked
-    as a fallback session for course rows underneath it that don't carry
-    their own inline session mention."""
+    and for how a per-session ACORN section heading ("2025 Fall - ...") is
+    tracked as a fallback session for the course rows underneath it."""
     if not text or not text.strip():
         raise DegreeExplorerParseError("No text to parse.")
 
@@ -362,19 +486,23 @@ def parse_pdf_text(text: str) -> StudentRecordDraft:
     cgpa: float | None = None
     seen_program_codes: set[str] = set()
     current_session = ""  # last-seen ACORN session-section heading, if any
+    last_was_course = False  # for wrapped-title continuation lines
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
+            last_was_course = False
             continue
 
         if is_session_heading(line):
             current_session = normalize_session(line)
+            last_was_course = False
             continue
 
         cgpa_m = _CGPA_RE.search(line)
         if cgpa_m:
             cgpa = float(cgpa_m.group(1))
+            last_was_course = False
             continue
 
         # A line can only be ONE of a program line or a course line -- program
@@ -384,11 +512,24 @@ def parse_pdf_text(text: str) -> StudentRecordDraft:
             if program.code not in seen_program_codes:
                 seen_program_codes.add(program.code)
                 programs.append(program)
+            last_was_course = False
             continue
 
         course = _parse_course_line(line, default_session=current_session)
         if course is not None:
             courses.append(course)
+            last_was_course = True
+            continue
+
+        # A bare-words line directly under a course row is that row's wrapped
+        # title continuing ("...Justice in the" / "Indo-Pacific").
+        if last_was_course and courses and _TITLE_CONTINUATION_RE.match(line):
+            prev = courses[-1]
+            courses[-1] = replace(prev, title=f"{prev.title} {line}".strip())
+            continue
+        last_was_course = False
+
+    courses = _collapse_ipr_snapshots(courses, warnings)
 
     if not programs and not courses:
         warnings.append(
