@@ -7446,7 +7446,13 @@ function RequirementProgressList({
       fontFamily: 'var(--font-sans)'
     }
   }, programs.map((p, i) => {
-    const pct = p.required ? Math.round(p.earned / p.required * 100) : 0;
+    // `programs = []` above only guards the array itself — an item missing
+    // `earned`/`required` (a partial/malformed API response reaching this far)
+    // must not throw ".toFixed of undefined" here, so each field gets its own
+    // fallback too.
+    const earned = p.earned ?? 0;
+    const required = p.required ?? 0;
+    const pct = required ? Math.round(earned / required * 100) : 0;
     return /*#__PURE__*/React.createElement("div", {
       key: p.code || i,
       style: {
@@ -7477,7 +7483,7 @@ function RequirementProgressList({
         fontSize: 'var(--text-body-sm)',
         color: 'var(--text-tertiary)'
       }
-    }, p.earned.toFixed(1), " / ", p.required.toFixed(1), " cr", p.incomplete != null ? ` · ${p.incomplete} incomplete` : '')), onView && /*#__PURE__*/React.createElement("button", {
+    }, earned.toFixed(1), " / ", required.toFixed(1), " cr", p.incomplete != null ? ` · ${p.incomplete} incomplete` : '')), onView && /*#__PURE__*/React.createElement("button", {
       onClick: () => onView(p),
       style: {
         display: 'inline-flex',

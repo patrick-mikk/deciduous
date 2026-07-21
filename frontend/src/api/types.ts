@@ -46,7 +46,12 @@ export interface Course {
   exclusions: string;
   breadth: string[]; // e.g. ["Society and its Institutions (3)"]
   distribution: string[];
-  sections: Section[]; // live TTB offerings (empty for calendar-only)
+  sections: Section[]; // live TTB offerings (empty for calendar-only, and for /api/courses search rows — see client.ts normalizeCourseSummary)
+  /** Only meaningful on a `getCourse()` detail fetch or a search row that
+   * carried it — defaulted (never `undefined`) by `src/api/client.ts`'s
+   * normalizers either way. */
+  sectionCount?: number;
+  hasSeats?: boolean;
 }
 
 export interface RequirementCourse {
