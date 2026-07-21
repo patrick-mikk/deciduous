@@ -12,6 +12,7 @@ best-effort limitation, surfaced as incomplete rather than wrong).
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import asdict
 from typing import Any
@@ -24,9 +25,16 @@ from backend.api._audit import requirement_progress as _audit_requirement_progre
 from backend.api.programs import _enrolment_json
 from backend.data_sources.cache import SqliteCache
 from backend.extensions import get_course_cache
+from backend.ingest.degree_explorer import normalize_session as _parse_normalize_session
 from backend.models_db import Plan, ProgramEnrolment, TranscriptEntry
 from backend.planner.course_code import parse_course_code
-from backend.planner.gpa import academic_standing, cgpa, max_credits_for_term, sgpa
+from backend.planner.gpa import (
+    academic_standing,
+    cgpa,
+    grade_mark_step_mismatch,
+    max_credits_for_term,
+    sgpa,
+)
 from backend.planner.types import CourseRecord, ProgramRequirement
 from backend.planner.validators import (
     breadth_categories_from_labels,
@@ -41,6 +49,15 @@ from backend.security.crypto import decrypt_field
 bp = Blueprint("me", __name__, url_prefix="/api/me")
 
 _VALID_STATUSES = ("completed", "in_progress", "planned", "extra")
+
+# A session string that's already a well-formed TTB code or code range
+# ("20269", "20269-20271") -- left alone by `_normalize_session` below.
+_SESSION_CODE_OR_RANGE_RE = re.compile(r"^2\d{3}[159](-2\d{3}[159])?$")
+
+_REIMPORT_WARNING = (
+    "Some grades look inconsistent with their marks — re-import your "
+    "Academic History PDF to refresh them."
+)
 
 
 def _credit_of(code: str) -> float:
@@ -69,44 +86,147 @@ def _breadth_dist(cache: SqliteCache, code: str, session: str | None) -> tuple[t
     return (), ()
 
 
-def _course_records(db, user, data_key: bytes | None) -> list[CourseRecord]:
-    cache = get_course_cache()
-    records: list[CourseRecord] = []
-    seen: set[str] = set()
+def _normalize_session(raw: str | None) -> str:
+    """Best-effort normalize a possibly-legacy `term_session` string to
+    TTB's 5-digit session code (see AGENTS.md: "20265"=Summer 2026,
+    "20269"=Fall 2026, "20271"=Winter 2027, "20269-20271"=Fall-Winter full
+    year), so a stale pre-5bbe9ae-import DB self-heals at the API layer.
+    The DB row is never rewritten -- only what this module hands back to
+    callers changes.
+
+    A string that's already a valid code or code range is returned as-is.
+    Otherwise this defers to the same `degree_explorer.normalize_session`
+    the ACORN parser itself uses to recognise "2026 Winter" / "Winter 2026"
+    -style legacy labels; anything neither of those can make sense of falls
+    back to the original text VERBATIM (never dropped, never "?" — that
+    fallback is what lets `formatSession` on the frontend render *something*
+    reasonable no matter how old the row is).
+    """
+    text = (raw or "").strip()
+    if not text or _SESSION_CODE_OR_RANGE_RE.match(text):
+        return text
+    return _parse_normalize_session(text) or text
+
+
+def _session_sort_key(session: str) -> tuple[int, int | str]:
+    """Chronological sort key for a (already-normalized) session string.
+    Ranges ("20269-20271") sort by their start code. A session that never
+    normalized to a leading digit string (an unrecognised legacy label kept
+    verbatim by `_normalize_session`) sorts after every real session,
+    stably, by its raw text -- better a visible straggler at the end than a
+    crash or an arbitrary interleave."""
+    first = session.split("-")[0]
+    try:
+        return (0, int(first))
+    except (TypeError, ValueError):
+        return (1, session)
+
+
+def _is_snapshot_row(row: dict[str, Any]) -> bool:
+    """A course row that's an ACORN in-progress/IPR snapshot rather than a
+    real completed/graded registration -- see
+    `_collapse_stale_snapshot_rows` below."""
+    return row["status"] == "in_progress" or (row["grade"] or "").strip().upper() == "IPR"
+
+
+def _collapse_stale_snapshot_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop stale in-progress/IPR "snapshot" rows a pre-5bbe9ae import wrote
+    straight to the DB without the parser's own collapse
+    (`degree_explorer._collapse_ipr_snapshots`) ever running for them (that
+    collapse only runs on the PDF-upload path, not the bookmarklet-capture
+    path, and didn't exist at all before that commit).
+
+    ACORN prints a Y-course spanning sessions as an in-progress snapshot row
+    in each earlier term plus a final row in its completing term. A student
+    also can't be concurrently, genuinely "in progress" in the same course
+    code twice -- so whenever a LATER-session row exists for the same code
+    (whether that later row is itself a snapshot or a real completed/graded
+    row), the earlier in-progress/IPR row is a stale leftover of a
+    registration that has since resolved one way or another, and is
+    dropped. Only the chronologically LAST in-progress/IPR row for a code
+    is ever a genuine current registration (including a fresh retake), and
+    it is always kept. Rows that are already completed/graded are never
+    touched by this function -- a real retake of a previously-passed course
+    is handled elsewhere (the Extra-designation rule), not here. Rows with
+    no session are never collapsed (nothing to compare chronologically)."""
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        if _is_snapshot_row(row) and row["session"]:
+            superseded = any(
+                other["id"] != row["id"]
+                and other["code"].strip().upper() == row["code"].strip().upper()
+                and other["session"]
+                and other["session"] > row["session"]
+                for other in rows
+            )
+            if superseded:
+                continue
+        kept.append(row)
+    return kept
+
+
+def _load_transcript_entries(db, user, data_key: bytes | None) -> list[dict[str, Any]]:
+    """Query, decrypt, normalize-session, and collapse this user's
+    `TranscriptEntry` rows exactly ONCE. Every `/api/me/*` route below
+    (`_course_records`, `_transcript_courses`, `transcript()`) reads from
+    this single canonical list instead of re-querying/re-decrypting the
+    table itself, so they can never disagree about which rows exist, what a
+    session string looks like, or which stale duplicate rows got dropped."""
+    rows: list[dict[str, Any]] = []
     for entry in db.query(TranscriptEntry).filter_by(user_id=user.id).all():
         grade = (
             decrypt_field(entry.grade_encrypted, data_key)
             if (entry.grade_encrypted and data_key)
             else None
         )
-        breadth, distribution = _breadth_dist(cache, entry.code, entry.term_session)
-        status = entry.status if entry.status in _VALID_STATUSES else "completed"
+        rows.append(
+            {
+                "id": entry.id,
+                "code": entry.code,
+                "title": entry.title,
+                "credits": entry.credits,
+                "mark": _decrypt_mark(entry.mark_encrypted, data_key),
+                "grade": grade or "",
+                "session": _normalize_session(entry.term_session),
+                "status": entry.status if entry.status in _VALID_STATUSES else "completed",
+            }
+        )
+    return _collapse_stale_snapshot_rows(rows)
+
+
+def _course_records(db, user, data_key: bytes | None) -> list[CourseRecord]:
+    cache = get_course_cache()
+    records: list[CourseRecord] = []
+    seen: set[str] = set()
+    for row in _load_transcript_entries(db, user, data_key):
+        breadth, distribution = _breadth_dist(cache, row["code"], row["session"])
         records.append(
             CourseRecord(
-                code=entry.code,
-                credits=entry.credits or _credit_of(entry.code),
-                status=status,
-                session=entry.term_session,
+                code=row["code"],
+                credits=row["credits"] or _credit_of(row["code"]),
+                status=row["status"],
+                session=row["session"],
                 distribution=distribution,
                 breadth_categories=breadth,
-                grade=grade or None,
-                mark=_decrypt_mark(entry.mark_encrypted, data_key),
+                grade=row["grade"] or None,
+                mark=row["mark"],
             )
         )
-        seen.add(entry.code.strip().upper())
+        seen.add(row["code"].strip().upper())
 
     plan = db.query(Plan).filter_by(user_id=user.id, is_primary=True).first()
     if plan is not None:
         for item in plan.items:
             if item.course_code.strip().upper() in seen:
                 continue
-            breadth, distribution = _breadth_dist(cache, item.course_code, item.term_session)
+            session = _normalize_session(item.term_session)
+            breadth, distribution = _breadth_dist(cache, item.course_code, session)
             records.append(
                 CourseRecord(
                     code=item.course_code,
                     credits=_credit_of(item.course_code),
                     status="planned",
-                    session=item.term_session,
+                    session=session,
                     distribution=distribution,
                     breadth_categories=breadth,
                 )
@@ -157,27 +277,23 @@ def _program_refs(enrolments: list[ProgramEnrolment]) -> list[dict[str, Any]]:
 
 def _transcript_courses(db, user, data_key: bytes | None) -> list[dict[str, Any]]:
     """`TranscriptCourse[]` (frontend/src/api/types.ts) — a flat, per-course
-    variant of the `/transcript` route's per-session grouping, reusing the
-    same decrypt helpers (`decrypt_field`, `_decrypt_mark`)."""
-    out: list[dict[str, Any]] = []
-    for entry in db.query(TranscriptEntry).filter_by(user_id=user.id).all():
-        grade = (
-            decrypt_field(entry.grade_encrypted, data_key)
-            if (entry.grade_encrypted and data_key)
-            else None
-        )
-        out.append(
-            {
-                "code": entry.code,
-                "title": entry.title,
-                "credits": entry.credits,
-                "mark": _decrypt_mark(entry.mark_encrypted, data_key),
-                "grade": grade or "",
-                "session": entry.term_session or "",
-                "status": entry.status if entry.status in _VALID_STATUSES else "completed",
-            }
-        )
-    return out
+    variant of the `/transcript` route's per-session grouping, reading from
+    the same canonical, normalized, collapsed row list `_load_transcript_
+    entries` builds (so the Transcript screen's table/projector and the
+    `/transcript` route's session groups never disagree about which rows
+    exist)."""
+    return [
+        {
+            "code": row["code"],
+            "title": row["title"],
+            "credits": row["credits"],
+            "mark": row["mark"],
+            "grade": row["grade"],
+            "session": row["session"],
+            "status": row["status"],
+        }
+        for row in _load_transcript_entries(db, user, data_key)
+    ]
 
 
 def _requirement_progress_by_program(
@@ -278,6 +394,18 @@ def summary():
 @bp.route("/transcript", methods=["GET"])
 @require_auth
 def transcript():
+    """`GET /api/me/transcript` — the ONE authoritative source for every
+    GPA figure the Transcript screen displays (frontend/src/screens/
+    Transcript.tsx): per-session `sgpa`, a running per-session `cumGpa`
+    (chronological order, same `backend.planner.gpa` engine as the rest of
+    the app -- see that module's `grade_points()` for the letter-over-mark
+    precedence rule), and the overall `cgpa`. The frontend must not
+    recompute any of these client-side from raw marks; that split engine is
+    exactly what caused the CGPA/"Cum" mismatch this route now closes off.
+    `cumGpa` of the chronologically LAST session is mathematically
+    identical to the top-level `cgpa` (both are `cgpa()` over the exact same
+    accumulated `graded` list) -- not a coincidence to maintain by hand.
+    """
     db = db_session()
     user = current_user()
     data_key = current_data_key()
@@ -286,28 +414,41 @@ def transcript():
     graded = [r for r in records if r.status != "planned"]
 
     by_session: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for entry in db.query(TranscriptEntry).filter_by(user_id=user.id).all():
-        grade = (
-            decrypt_field(entry.grade_encrypted, data_key)
-            if (entry.grade_encrypted and data_key)
-            else None
-        )
-        by_session[entry.term_session or ""].append(
+    for row in _load_transcript_entries(db, user, data_key):
+        by_session[row["session"] or ""].append(
             {
-                "code": entry.code,
-                "title": entry.title,
-                "credits": entry.credits,
-                "grade": grade,
-                "mark": _decrypt_mark(entry.mark_encrypted, data_key),
-                "status": entry.status,
+                "code": row["code"],
+                "title": row["title"],
+                "credits": row["credits"],
+                "grade": row["grade"] or None,
+                "mark": row["mark"],
+                "status": row["status"],
             }
         )
 
+    chronological = sorted(by_session, key=_session_sort_key)  # oldest first
+    running: list[CourseRecord] = []
+    cum_by_session: dict[str, float | None] = {}
+    for s in chronological:
+        running = running + [r for r in graded if (r.session or "") == s]
+        cum_by_session[s] = cgpa(running).gpa
+    overall_cgpa = cum_by_session[chronological[-1]] if chronological else None
+
     sessions = [
-        {"session": s, "courses": by_session[s], "sgpa": sgpa(graded, s).gpa}
-        for s in sorted(by_session, reverse=True)
+        {
+            "session": s,
+            "courses": by_session[s],
+            "sgpa": sgpa(graded, s).gpa,
+            "cumGpa": cum_by_session[s],
+        }
+        for s in reversed(chronological)  # newest first, matching prior behavior
     ]
-    return jsonify({"sessions": sessions, "cgpa": cgpa(graded).gpa})
+
+    warnings: list[str] = []
+    if any(grade_mark_step_mismatch(r) for r in records):
+        warnings.append(_REIMPORT_WARNING)
+
+    return jsonify({"sessions": sessions, "cgpa": overall_cgpa, "warnings": warnings})
 
 
 @bp.route("/requirements", methods=["GET"])

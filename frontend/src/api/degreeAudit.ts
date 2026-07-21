@@ -82,6 +82,49 @@ export function markToGradePoint(mark: number): number {
   return (GRADE_SCALE.find((g) => mark >= g.min) ?? GRADE_SCALE[GRADE_SCALE.length - 1]).gp;
 }
 
+/** Grade *notations* excluded from GPA — mirrors
+ * `backend/planner/gpa.py`'s `NOTATIONS_EXCLUDED_FROM_GPA` exactly. "FL" is
+ * deliberately NOT in this set (see `resolveGradePoints` below): it counts
+ * as a 0.0 fail, unlike the rest. */
+export const GPA_EXCLUDED_NOTATIONS = new Set([
+  "AEG", "CR", "NCR", "EXT", "XTR", "GWR", "IPR", "LWD", "WDR", "SDF", "P",
+]);
+
+/**
+ * The letter-vs-mark precedence rule, mirrored client-side EXACTLY from
+ * `backend/planner/gpa.py`'s `grade_points()` — the single source of truth
+ * for what counts toward GPA and how: an explicit letter grade wins over a
+ * raw numeric mark; "FL" always counts as 0.0; a notation in
+ * `GPA_EXCLUDED_NOTATIONS`, or a `planned`/`extra` course, never counts.
+ * Falls through to the mark only when there's no grade or the grade string
+ * isn't a recognised letter/notation.
+ *
+ * This is the ONE place the rule is written client-side. Every client-side
+ * GPA figure that has to exist locally (the offline mock adapter's derived
+ * `TranscriptResponse`, and the GPA projector's what-if recompute in
+ * Transcript.tsx) resolves grade points through this function instead of
+ * re-deriving the rule. Every OTHER GPA figure in the app (CGPA, sessional/
+ * cumulative GPA) comes straight from the backend (`GET /api/me/transcript`)
+ * and never calls this at all — see AGENTS.md / the Transcript CGPA-mismatch
+ * fix for why two independent implementations of this rule caused a bug.
+ */
+export function resolveGradePoints(course: {
+  status: string;
+  grade: string | null;
+  mark: number | null;
+}): number | null {
+  if (course.status === "planned" || course.status === "extra") return null;
+  const grade = (course.grade || "").trim().toUpperCase();
+  if (grade) {
+    if (GPA_EXCLUDED_NOTATIONS.has(grade)) return null;
+    if (grade === "FL") return 0.0;
+    const entry = GRADE_SCALE.find((g) => g.letter === grade);
+    if (entry) return entry.gp;
+  }
+  if (course.mark != null) return markToGradePoint(course.mark);
+  return null;
+}
+
 /** Credit value from a course code's suffix — H=0.5, Y=1.0 (design/06, "Credits derive from the code suffix"). */
 export function creditFromCode(code: string): number {
   return /Y\d?$/.test(code) ? 1.0 : 0.5;

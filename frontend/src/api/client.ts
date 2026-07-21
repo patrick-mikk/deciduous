@@ -44,7 +44,7 @@
  * off a `fetch()` response, no exceptions.
  */
 import * as mock from "./mock";
-import { DEGREE_MINIMUMS, evaluateBreadth } from "./degreeAudit";
+import { DEGREE_MINIMUMS, evaluateBreadth, resolveGradePoints } from "./degreeAudit";
 import type {
   Alert,
   AlertKind,
@@ -70,6 +70,8 @@ import type {
   Term,
   TranscriptCourse,
   TranscriptCourseStatus,
+  TranscriptResponse,
+  TranscriptSessionGroup,
 } from "./types";
 
 export interface CourseSearchParams {
@@ -134,6 +136,14 @@ export interface ApiClient {
 
   // Me
   getMyRecord(): Promise<StudentRecord>;
+  /**
+   * `GET /api/me/transcript` (backend/api/me.py `transcript()`) — the ONE
+   * authoritative source for every GPA figure the Transcript screen shows
+   * (CGPA, per-session sessional/cumulative GPA): all computed server-side
+   * by the same `backend/planner/gpa.py` engine, never recomputed
+   * client-side from raw marks. See that route's docstring for why.
+   */
+  getMyTranscript(): Promise<TranscriptResponse>;
   getMyRequirementProgress(): Promise<StudentRecord["requirementProgress"]>;
   getMyDegreeAudit(): Promise<DegreeAuditData>;
   getMyBreadth(): Promise<{ data: BreadthData; evaluation: ReturnType<typeof evaluateBreadth> }>;
@@ -154,6 +164,70 @@ export interface ApiClient {
 
 function delay<T>(value: T, ms = 250): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
+/** Weighted-average GPA (weight = credits) over `list`, using the shared
+ * `resolveGradePoints` precedence rule — mirrors `backend/planner/gpa.py`
+ * `compute_gpa()`. `null` when nothing in `list` counts toward GPA. */
+function weightedGpa(list: TranscriptCourse[]): number | null {
+  let credits = 0;
+  let points = 0;
+  for (const c of list) {
+    const gp = resolveGradePoints(c);
+    if (gp == null) continue;
+    credits += c.credits;
+    points += c.credits * gp;
+  }
+  return credits > 0 ? points / credits : null;
+}
+
+/**
+ * Offline-demo stand-in for `GET /api/me/transcript`: derives per-session
+ * sessional/cumulative GPA from the same static `mock.mockStudentRecord.
+ * transcript` fixture `getMyRecord` reads, using the one shared
+ * `resolveGradePoints` rule so the mock adapter can't drift from the real
+ * backend's precedence the way the old client-side `computeGpa` did.
+ */
+function mockTranscriptResponse(): TranscriptResponse {
+  const courses = mock.mockStudentRecord.transcript;
+  const graded = courses.filter((c) => c.status !== "planned" && c.status !== "extra");
+
+  const bySession = new Map<string, TranscriptCourse[]>();
+  for (const c of graded) {
+    const arr = bySession.get(c.session) ?? [];
+    arr.push(c);
+    bySession.set(c.session, arr);
+  }
+  const chronological = [...bySession.keys()].sort(
+    (a, b) => Number(a.split("-")[0]) - Number(b.split("-")[0]),
+  );
+
+  let running: TranscriptCourse[] = [];
+  const cumBySession = new Map<string, number | null>();
+  for (const s of chronological) {
+    running = [...running, ...(bySession.get(s) ?? [])];
+    cumBySession.set(s, weightedGpa(running));
+  }
+
+  const sessions: TranscriptSessionGroup[] = [...chronological].reverse().map((s) => ({
+    session: s,
+    courses: (bySession.get(s) ?? []).map((c) => ({
+      code: c.code,
+      title: c.title,
+      credits: c.credits,
+      mark: c.mark,
+      grade: c.grade || null,
+      status: c.status,
+    })),
+    sgpa: weightedGpa(bySession.get(s) ?? []),
+    cumGpa: cumBySession.get(s) ?? null,
+  }));
+
+  const overallCgpa = chronological.length
+    ? cumBySession.get(chronological[chronological.length - 1]) ?? null
+    : null;
+
+  return { sessions, cgpa: overallCgpa, warnings: [] };
 }
 
 export const mockClient: ApiClient = {
@@ -221,6 +295,7 @@ export const mockClient: ApiClient = {
   },
 
   getMyRecord: () => delay(mock.mockStudentRecord),
+  getMyTranscript: () => delay(mockTranscriptResponse()),
   getMyRequirementProgress: () => delay(mock.mockStudentRecord.requirementProgress),
   getMyDegreeAudit: () => delay(mock.mockDegreeAudit),
   getMyBreadth: () => delay({ data: mock.mockBreadthData, evaluation: evaluateBreadth(mock.mockBreadthData) }),
@@ -1008,6 +1083,34 @@ export const httpClient: ApiClient = {
     })),
 
   getMyRecord: () => http<RawMeResponse>("/me").then(normalizeStudentRecord),
+
+  getMyTranscript: () =>
+    http<{ sessions?: unknown; cgpa?: unknown; warnings?: unknown }>("/me/transcript").then((res) => ({
+      sessions: asArray<{ session?: unknown; courses?: unknown; sgpa?: unknown; cumGpa?: unknown }>(
+        res?.sessions,
+      ).map((g) => ({
+        session: asStr(g?.session),
+        courses: asArray<{
+          code?: unknown;
+          title?: unknown;
+          credits?: unknown;
+          mark?: unknown;
+          grade?: unknown;
+          status?: unknown;
+        }>(g?.courses).map((c) => ({
+          code: asStr(c?.code),
+          title: asStr(c?.title),
+          credits: asNum(c?.credits, 0),
+          mark: asNullableNum(c?.mark),
+          grade: typeof c?.grade === "string" && c.grade !== "" ? c.grade : null,
+          status: (asStr(c?.status, "completed") as TranscriptCourseStatus) || "completed",
+        })),
+        sgpa: asNullableNum(g?.sgpa),
+        cumGpa: asNullableNum(g?.cumGpa),
+      })),
+      cgpa: asNullableNum(res?.cgpa),
+      warnings: asArray<unknown>(res?.warnings).filter((w): w is string => typeof w === "string"),
+    })),
   // `GET /api/me/requirements` is a DIFFERENT endpoint (plan-combination
   // structural check, `{combination, issues}`) -- not the per-program
   // `Record<code, RequirementProgress[]>` this method promises. The real data
