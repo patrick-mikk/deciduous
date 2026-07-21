@@ -11,6 +11,7 @@ per-request lifecycle Flask-SQLAlchemy would give you.
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from flask import Flask
@@ -84,8 +85,19 @@ def create_all(app: Flask) -> None:
 
 def get_course_cache() -> SqliteCache:
     """The shared `SqliteCache` for course/program data (separate store from SQLAlchemy;
-    see `backend/data_sources/cache.py` — reused here, never duplicated)."""
+    see `backend/data_sources/cache.py` — reused here, never duplicated).
+
+    By default `SqliteCache` lives under the OS temp dir
+    (`backend/data_sources/cache.py::DEFAULT_CACHE_PATH`), which shared cPanel
+    hosting wipes — fine for dev/tests, not for production. Set
+    `PLANNER_CACHE_PATH` (an absolute file path) in the environment to persist
+    the cache elsewhere in production; read once at construction time via
+    `os.environ`, so it must be set before the first call in a process.
+    Leaving it unset keeps today's behaviour exactly (the `DEFAULT_CACHE_PATH`
+    temp-dir file).
+    """
     global _course_cache
     if _course_cache is None:
-        _course_cache = SqliteCache()
+        cache_path = os.environ.get("PLANNER_CACHE_PATH")
+        _course_cache = SqliteCache(cache_path) if cache_path else SqliteCache()
     return _course_cache

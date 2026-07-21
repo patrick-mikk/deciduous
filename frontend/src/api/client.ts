@@ -39,6 +39,7 @@ export interface ProgramSearchParams {
   type?: string;
   subject?: string;
   page?: number;
+  pageSize?: number;
 }
 
 /** The full surface a screen can call. Both `mockClient` and `httpClient` implement this. */
@@ -48,6 +49,13 @@ export interface ApiClient {
 
   // Programs
   getPrograms(params?: ProgramSearchParams): Promise<Program[]>;
+  /**
+   * The WHOLE program catalog, for screens that filter client-side
+   * (onboarding search, department dropdowns). `GET /api/programs` is
+   * paginated (default page size 20), so a bare `getPrograms()` silently
+   * returns only the first page — this pages through until exhausted.
+   */
+  getAllPrograms(): Promise<Program[]>;
   getProgram(code: string): Promise<Program | null>;
   getProgramRequirements(code: string): Promise<Program["completionRequirements"]>;
   /** POST /api/programs/:code/requirements/reparse — on-demand Gemini grouper, ~10-20s. */
@@ -93,6 +101,7 @@ export const mockClient: ApiClient = {
     if (params?.type) results = results.filter((p) => p.programType === params.type);
     return delay(results);
   },
+  getAllPrograms: () => delay(mock.mockPrograms),
   getProgram: (code) => delay(mock.findProgram(code) ?? null),
   getProgramRequirements: (code) => delay(mock.findProgram(code)?.completionRequirements ?? []),
   reparseProgramRequirements: async (code) => {
@@ -157,7 +166,17 @@ export const mockClient: ApiClient = {
     ),
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE;
+// `VITE_API_BASE` wins when set. Otherwise EVERY build -- dev and prod --
+// defaults to `/api`: prod is served same-origin by Flask (backend/app.py's
+// `_register_spa`), and `npm run dev` reaches Flask through vite.config.ts's
+// `server.proxy`. When no backend is running, requests fail LOUDLY (see
+// `http()` below) instead of silently rendering demo data.
+//
+// The offline mock adapter (mock.ts) is opt-in only: set `VITE_API_BASE=mock`.
+export const isMockApi = import.meta.env.VITE_API_BASE === "mock";
+export const API_BASE: string | undefined = isMockApi
+  ? undefined
+  : import.meta.env.VITE_API_BASE || "/api";
 
 /**
  * Double-submit CSRF (backend/app.py `_register_csrf_guard`): every non-GET
@@ -190,17 +209,37 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (method !== "GET") {
     headers["X-CSRF-Token"] = await ensureCsrfToken();
   }
-  const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
-    ...init,
-    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      credentials: "include",
+      ...init,
+      headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
+    });
+  } catch {
+    // Network-level failure (backend down, proxy unreachable) -- fail LOUDLY
+    // with an actionable message instead of a bare "Failed to fetch".
+    throw new Error(
+      `Can't reach the backend API (${API_BASE}${path}). Is the Flask server running? ` +
+        "Start it with `python -m flask --app backend.app run` -- see frontend/.env.example.",
+    );
+  }
   if (res.status === 404) {
     // Design/06 + conventions.md: TTB-backed no-match search legitimately 404s — treat as empty, not an error.
     return [] as unknown as T;
   }
   if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+    const text = await res.text().catch(() => res.statusText);
+    // A 5xx whose body isn't the backend's JSON error shape is the dev proxy
+    // reporting a dead upstream (vite's http-proxy answers 500 with plain
+    // text when Flask isn't running) -- surface that clearly.
+    if (res.status >= 500 && !text.trimStart().startsWith("{")) {
+      throw new Error(
+        `Can't reach the backend API (${API_BASE}${path}). Is the Flask server running? ` +
+          "Start it with `python -m flask --app backend.app run` -- see frontend/.env.example.",
+      );
+    }
+    throw new Error(`API error ${res.status}: ${text}`);
   }
   return res.json() as Promise<T>;
 }
@@ -213,7 +252,14 @@ function qs(params: object | undefined): string {
 }
 
 export const httpClient: ApiClient = {
-  getSessions: () => http("/sessions"),
+  // `GET /api/sessions` returns `{sessions: [{code, term, termName, year,
+  // label}, ...], defaultSession}` (backend/api/courses.py), not the bare
+  // `SessionCode[]` this contract promises -- unwrap to codes, tolerating a
+  // bare array (the 404 fallback in `http()` yields `[]`).
+  getSessions: () =>
+    http<{ sessions: { code: SessionCode }[] } | SessionCode[]>("/sessions").then((res) =>
+      Array.isArray(res) ? res : res.sessions.map((s) => s.code),
+    ),
 
   // `GET /api/programs` and `/api/courses` return a paginated envelope
   // (`{programs: [...], page, total, ...}` / `{courses: [...], ...}`), not a
@@ -223,6 +269,19 @@ export const httpClient: ApiClient = {
     http<{ programs: Program[] } | Program[]>(`/programs${qs(params)}`).then((res) =>
       Array.isArray(res) ? res : res.programs,
     ),
+  getAllPrograms: async () => {
+    // Page until a short page. The 10-page ceiling only bounds a runaway —
+    // the full catalog is ~420 programs (and the backend serves a browse from
+    // at most 500 cached rows), so 5 pages is the expected worst case.
+    const pageSize = 100;
+    const all: Program[] = [];
+    for (let page = 1; page <= 10; page += 1) {
+      const batch = await httpClient.getPrograms({ page, pageSize });
+      all.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return all;
+  },
   getProgram: (code) => http(`/programs/${encodeURIComponent(code)}`),
   getProgramRequirements: (code) => http(`/programs/${encodeURIComponent(code)}/requirements`),
   reparseProgramRequirements: (code) =>
@@ -256,7 +315,5 @@ export const httpClient: ApiClient = {
   getShared: (token) => http(`/share/${encodeURIComponent(token)}`),
 };
 
-/** The client screens should use. Real backend when VITE_API_BASE is set, mock adapter otherwise. */
-export const api: ApiClient = API_BASE ? httpClient : mockClient;
-
-export const isMockApi = !API_BASE;
+/** The client screens should use. Real backend unless `VITE_API_BASE=mock` opted into the demo adapter (see `isMockApi` above). */
+export const api: ApiClient = isMockApi ? mockClient : httpClient;

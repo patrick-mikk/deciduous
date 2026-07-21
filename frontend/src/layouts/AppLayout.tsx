@@ -2,8 +2,8 @@ import * as React from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useTheme } from "@/theme/ThemeProvider";
-import { TopBar, SideNav, ProgressStrip } from "@/ds";
-import { api } from "@/api";
+import { TopBar, SideNav, ProgressStrip, Callout } from "@/ds";
+import { api, isMockApi } from "@/api";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import "./AppLayout.css";
 
@@ -74,6 +74,15 @@ export function AppLayout() {
       <SideNav active={active} onNavigate={(key: string) => navigate(`/${key}`)} collapsed={collapsed} />
       <main className="dc-app-shell__main">
         <div className="dc-app-shell__main-inner">
+          {isMockApi && (
+            <div style={{ marginBottom: "var(--space-5)" }}>
+              <Callout tone="warning" title="Demo data — not connected to a backend">
+                Everything on this screen (transcript, programs, GPA, alerts) comes from seeded
+                sample data, not your account. Remove <code>VITE_API_BASE=mock</code> from{" "}
+                <code>frontend/.env</code> to use the real API.
+              </Callout>
+            </div>
+          )}
           <RouteErrorBoundary key={location.pathname}>
             <Outlet />
           </RouteErrorBoundary>

@@ -2508,18 +2508,28 @@ Object.assign(__ds_scope, { Checkbox });
 
 // components/forms/Combobox.jsx
 try { (() => {
-/** Searchable single-select dropdown. Options filter as you type. */
+/** Searchable single-select dropdown. Options filter as you type.
+ *
+ * Options may optionally carry a `group` name; when any do, matches render
+ * under section headers ordered by `groupOrder` (leftover groups follow in
+ * first-seen order). One group named by `collapsedGroup` starts collapsed
+ * behind a toggle header — but auto-expands while the user is typing a
+ * query, so searching never hides matches. Ungrouped usage is unchanged. */
 function Combobox({
   label,
   options = [],
   value,
   onChange,
   placeholder = 'Select…',
-  clearable
+  clearable,
+  groupOrder,
+  collapsedGroup
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
+  const [showCollapsed, setShowCollapsed] = React.useState(false);
   const ref = React.useRef(null);
+  const triggerRef = React.useRef(null);
   React.useEffect(() => {
     const onDoc = e => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
@@ -2527,10 +2537,40 @@ function Combobox({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
+  React.useEffect(() => {
+    if (!open) setShowCollapsed(false);
+  }, [open]);
   const selected = options.find(o => o.value === value);
   const filtered = options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()));
+  let sections = null;
+  if (filtered.some(o => o.group)) {
+    const byGroup = new Map();
+    for (const o of filtered) {
+      const g = o.group || '';
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(o);
+    }
+    const preferred = (groupOrder || []).filter(g => byGroup.has(g));
+    const rest = Array.from(byGroup.keys()).filter(g => !preferred.includes(g));
+    sections = preferred.concat(rest).map(g => ({
+      name: g,
+      options: byGroup.get(g),
+      collapsible: g === collapsedGroup,
+      collapsed: g === collapsedGroup && !showCollapsed && !query.trim()
+    }));
+  }
   return /*#__PURE__*/React.createElement("label", {
     ref: ref,
+    onKeyDown: e => {
+      if (e.key === 'Escape' && open) {
+        // Keep the Escape from also dismissing any enclosing modal/sheet.
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+        setQuery('');
+        triggerRef.current && triggerRef.current.focus();
+      }
+    },
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -2547,6 +2587,7 @@ function Combobox({
     }
   }, label), /*#__PURE__*/React.createElement("button", {
     type: "button",
+    ref: triggerRef,
     onClick: () => setOpen(o => !o),
     style: {
       display: 'flex',
@@ -2624,40 +2665,77 @@ function Combobox({
       fontSize: 'var(--text-body-sm)',
       outline: 'none'
     }
-  })), filtered.map(o => /*#__PURE__*/React.createElement("div", {
-    key: o.value,
-    onClick: () => {
-      onChange && onChange(o.value);
-      setOpen(false);
-      setQuery('');
-    },
-    style: {
-      padding: '9px 12px',
-      cursor: 'pointer',
-      fontSize: 'var(--text-body)',
+  })), (() => {
+    const renderOption = o => /*#__PURE__*/React.createElement("div", {
+      key: o.value,
+      onClick: () => {
+        onChange && onChange(o.value);
+        setOpen(false);
+        setQuery('');
+      },
+      style: {
+        padding: '9px 12px',
+        cursor: 'pointer',
+        fontSize: 'var(--text-body)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        background: o.value === value ? 'var(--primary-bg)' : 'transparent',
+        color: o.value === value ? 'var(--primary)' : 'var(--text)'
+      },
+      onMouseEnter: e => {
+        if (o.value !== value) e.currentTarget.style.background = 'var(--surface-hover)';
+      },
+      onMouseLeave: e => {
+        if (o.value !== value) e.currentTarget.style.background = 'transparent';
+      }
+    }, o.value === value && /*#__PURE__*/React.createElement("i", {
+      "data-lucide": "check",
+      style: {
+        width: 14,
+        height: 14
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: o.value === value ? 0 : 22
+      }
+    }, o.label));
+    if (!sections) return filtered.map(renderOption);
+    const headerStyle = {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      background: o.value === value ? 'var(--primary-bg)' : 'transparent',
-      color: o.value === value ? 'var(--primary)' : 'var(--text)'
-    },
-    onMouseEnter: e => {
-      if (o.value !== value) e.currentTarget.style.background = 'var(--surface-hover)';
-    },
-    onMouseLeave: e => {
-      if (o.value !== value) e.currentTarget.style.background = 'transparent';
-    }
-  }, o.value === value && /*#__PURE__*/React.createElement("i", {
-    "data-lucide": "check",
-    style: {
-      width: 14,
-      height: 14
-    }
-  }), /*#__PURE__*/React.createElement("span", {
-    style: {
-      marginLeft: o.value === value ? 0 : 22
-    }
-  }, o.label))), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
+      justifyContent: 'space-between',
+      width: '100%',
+      boxSizing: 'border-box',
+      padding: '8px 12px 4px',
+      fontFamily: 'var(--font-sans)',
+      fontSize: 'var(--text-body-sm)',
+      fontWeight: 'var(--weight-medium)',
+      color: 'var(--text-tertiary)',
+      textAlign: 'left'
+    };
+    return sections.map(section => /*#__PURE__*/React.createElement("div", {
+      key: section.name
+    }, section.collapsible ? /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      "aria-expanded": !section.collapsed,
+      onClick: () => setShowCollapsed(s => !s),
+      style: {
+        ...headerStyle,
+        background: 'transparent',
+        border: 'none',
+        cursor: 'pointer'
+      }
+    }, `${section.name} (${section.options.length})`, /*#__PURE__*/React.createElement("i", {
+      "data-lucide": section.collapsed ? 'chevron-down' : 'chevron-up',
+      style: {
+        width: 14,
+        height: 14
+      }
+    })) : /*#__PURE__*/React.createElement("div", {
+      style: headerStyle
+    }, `${section.name} (${section.options.length})`), !section.collapsed && section.options.map(renderOption)));
+  })(), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '12px',
       color: 'var(--text-tertiary)',
@@ -4117,8 +4195,8 @@ function ImportPanel({
     active: tab,
     onChange: onTab
   }), tab === 'pdf' && /*#__PURE__*/React.createElement(__ds_scope.Dropzone, {
-    label: "Drop your Degree Explorer PDF here",
-    hint: "or click to browse \xB7 parsed locally & encrypted",
+    label: "Drop your Academic History PDF here",
+    hint: "from ACORN \xB7 parsed locally & encrypted",
     accept: "application/pdf",
     onFile: onFile,
     progress: progress

@@ -100,3 +100,4 @@ Remaining: cPanel deploy, timetable-optimizer polish, auth hardening (see docs/r
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Decisions (ADRs): [docs/decisions/](docs/decisions/)
 - Roadmap / phases: [docs/roadmap.md](docs/roadmap.md)
+- cPanel deploy runbook: [docs/deploy-cpanel.md](docs/deploy-cpanel.md)

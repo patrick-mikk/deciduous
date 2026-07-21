@@ -1,19 +1,19 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api, loadGuestProfile, saveGuestProfile } from "@/api";
+import { API_BASE, api, ensureCsrfToken, loadGuestProfile, saveGuestProfile } from "@/api";
 import type { Program, SessionCode } from "@/api";
 import {
   Button,
   Callout,
   Card,
   Combobox,
+  Dropzone,
   EmptyState,
   PageHeader,
   POStCombinationValidator,
   ProgramCard,
   Select,
-  Skeleton,
   Stepper,
   Wordmark,
 } from "@/ds";
@@ -25,28 +25,57 @@ import "./Onboarding.css";
  * header, no AppLayout) since a pre-account visitor has no session for
  * TopBar/SideNav to reflect.
  *
- * 3 steps in one Stepper:
+ * 4 steps in one Stepper:
  *  1. "What are you studying?" — search the (public, unauthenticated)
  *     program catalog via `api.getPrograms()`/`api.getProgram()` and add
  *     Specialists/Majors/Minors, validated live by `validateCombination`
  *     below — a pure function of `Program.programType`/`.code` only, so it
  *     runs instantly with no network/account dependency (design/09-uoft-
  *     degree-rules.md sec. 1-2: combo shape + one-type-per-subject).
- *  2. Current term — `api.getSessions()` for a live session Select.
- *  3. A brief "how it works" tour, plus a soft/dismissible nudge to create
- *     an account to sync across devices — never a hard requirement.
+ *  2. "When did you start at UofT?" — a Select of Fall start terms built
+ *     purely from today's date (see `fallSessionCode` below), no network
+ *     call needed for past years.
+ *  3. "Do you have existing credits?" — upload your Academic History PDF
+ *     from ACORN (`POST /api/import/pdf`), say you'll enter courses by hand
+ *     (routes to /transcript instead of /dashboard on finish), or skip for now.
+ *  4. A brief "how it works" tour of the dashboard you're about to land on,
+ *     plus a soft/dismissible nudge to create an account to sync across
+ *     devices — never a hard requirement.
  *
  * Finish always saves to `guestProfile` (localStorage, see api/guestProfile.ts)
- * and lands on /dashboard — saving is optional by default; SignUp.tsx picks
- * up this same guest profile and best-effort syncs it into a new account
- * via the existing `api.addMyProgram()` if the visitor later decides to
- * create one from the soft nudge here (or from the "Sign in" link below,
- * for a *returning* visitor who already has an account).
+ * and lands on /dashboard (or /transcript, for the "enter manually" choice
+ * above) — saving is optional by default; SignUp.tsx picks up this same guest
+ * profile and best-effort syncs it into a new account via the existing
+ * `api.addMyProgram()` if the visitor later decides to create one from the
+ * soft nudge here (or from the "Sign in" link below, for a *returning*
+ * visitor who already has an account).
  */
 
-const STEP_LABELS = ["What are you studying?", "Current term", "How it works"];
+const STEP_LABELS = ["What are you studying?", "Start term", "Existing credits", "How it works"];
 
-const FALLBACK_SESSIONS: SessionCode[] = ["20265", "20269", "20271"];
+/** Program-search grouping: the three degree-program types get their own
+ * sections (design/09 sec. 2's combination rules only involve these), and
+ * everything else — Focus clusters, Certificates, unrecognized types — sits
+ * under a collapsed "Other" so it doesn't bury the common choices. */
+const PROGRAM_TYPE_GROUPS: Record<string, string> = {
+  major: "Majors",
+  specialist: "Specialists",
+  minor: "Minors",
+};
+const PROGRAM_GROUP_ORDER = ["Majors", "Specialists", "Minors", "Other"];
+
+/**
+ * Session code for the Fall term of a given calendar year, per AGENTS.md's
+ * glossary: `20269`=Fall 2026, `20271`=Winter 2027, `20265`=Summer 2026. In
+ * each example the first 4 digits are "20" + the *term's own* 2-digit
+ * calendar year, and the 5th digit picks the term within that year (1=Winter,
+ * 5=Summer, 9=Fall). So Fall of year Y is `20{YY}9` where YY = Y's last two
+ * digits — a formula applied to whatever year is passed in, not a hard-coded
+ * session.
+ */
+function fallSessionCode(year: number): SessionCode {
+  return `20${String(year).slice(-2)}9`;
+}
 
 /** "20271" -> "Winter 2027" (AGENTS.md glossary: last digit 1=Winter, 5=Summer, 9=Fall). */
 function formatSession(code: SessionCode): string {
@@ -54,6 +83,19 @@ function formatSession(code: SessionCode): string {
   const term = code.slice(4);
   const label = term === "1" ? "Winter" : term === "5" ? "Summer" : term === "9" ? "Fall" : "Session";
   return `${label} ${year}`;
+}
+
+const START_TERM_YEARS_BACK = 7; // Fall {thisYear-7} .. Fall {thisYear}, derived from today's date below.
+
+/** Options for the "When did you start at UofT?" Select — built from `new Date()`, not fetched. */
+function buildStartTermOptions(): { value: string; label: string }[] {
+  const thisYear = new Date().getFullYear();
+  const options = [{ value: "", label: "Starting this year / haven't started yet" }];
+  for (let yearsAgo = START_TERM_YEARS_BACK; yearsAgo >= 0; yearsAgo--) {
+    const code = fallSessionCode(thisYear - yearsAgo);
+    options.push({ value: code, label: formatSession(code) });
+  }
+  return options;
 }
 
 /** "ASMAJ2660" -> "2660" (the 4-digit subject id design/09 sec.2's one-type-per-subject rule keys on). */
@@ -120,6 +162,40 @@ function validateCombination(programs: Program[]): ComboResult {
   return { valid, message, notes };
 }
 
+interface ImportPdfResult {
+  courseCount?: number;
+}
+
+/**
+ * `POST /api/import/pdf` (backend/api/import_.py) — multipart `file` field,
+ * same double-submit CSRF header as SignUp.tsx's direct fetch to
+ * `/auth/signup`. The route is `@require_auth`, so a guest visitor (the norm
+ * on this screen) gets a 401 back; that's surfaced as the "AUTH_REQUIRED"
+ * error message so the credits step can show the "create an account" nudge
+ * instead of a generic failure.
+ */
+async function importDegreeExplorerPdf(file: File): Promise<ImportPdfResult> {
+  if (!API_BASE) {
+    // Mock adapter opted in (`VITE_API_BASE=mock`) — simulate so the step still renders.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return { courseCount: 24 };
+  }
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/import/pdf`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "X-CSRF-Token": await ensureCsrfToken() },
+    body: form,
+  });
+  if (res.status === 401) throw new Error("AUTH_REQUIRED");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error((body && (body.error || body.message)) || "Couldn't import that PDF.");
+  }
+  return res.json();
+}
+
 const sectionTitleStyle: React.CSSProperties = {
   margin: "0 0 4px",
   fontFamily: "var(--font-serif)",
@@ -143,19 +219,19 @@ const footerRowStyle: React.CSSProperties = {
 
 const TOUR_ITEMS = [
   {
-    icon: "layout-list",
-    title: "Plan term by term",
-    desc: "Drag courses into Fall/Winter/Summer columns — prereqs, exclusions, and offering availability are checked as you go.",
+    icon: "graduation-cap",
+    title: "Credit progress at a glance",
+    desc: "Your dashboard tracks total credits earned toward the 20.0 you need to graduate, alongside your CGPA and standing.",
   },
   {
     icon: "list-checks",
-    title: "Track what's left",
-    desc: "A live degree audit rolls up credits, breadth categories, and program minimums against the real degree rules.",
+    title: "Breadth coverage, mapped",
+    desc: "A breadth spectrum shows how you're doing across all five categories (BR1–5), so gaps are obvious early.",
   },
   {
-    icon: "calendar-check-2",
-    title: "Build your timetable",
-    desc: "Turn a planned term into a conflict-free weekly schedule, with alternatives ranked around the times you want.",
+    icon: "bell",
+    title: "Next actions, front and center",
+    desc: "Alerts and a next-actions checklist flag deadlines, prereq issues, and seats worth grabbing before they fill.",
   },
 ] as const;
 
@@ -175,7 +251,7 @@ export default function Onboarding() {
     setCatalogLoading(true);
     setCatalogError(null);
     try {
-      setCatalog(await api.getPrograms());
+      setCatalog(await api.getAllPrograms());
     } catch {
       setCatalogError("Couldn't load the program catalog search.");
     } finally {
@@ -203,49 +279,55 @@ export default function Onboarding() {
 
   const combo = React.useMemo(() => validateCombination(myPrograms), [myPrograms]);
 
-  // ---- Step 2: current term ------------------------------------------------
-  const [sessions, setSessions] = React.useState<SessionCode[]>([]);
-  const [sessionsLoading, setSessionsLoading] = React.useState(false);
-  const [sessionsError, setSessionsError] = React.useState<string | null>(null);
-  const [session, setSession] = React.useState(() => loadGuestProfile()?.session ?? "");
-  const sessionsFetched = React.useRef(false);
+  // ---- Step 2: when did you start? -----------------------------------------
+  const [startSession, setStartSession] = React.useState<string>(() => loadGuestProfile()?.startSession ?? "");
+  const startTermOptions = React.useMemo(() => buildStartTermOptions(), []);
 
-  async function loadSessions() {
-    setSessionsLoading(true);
-    setSessionsError(null);
+  // ---- Step 3: existing credits ---------------------------------------------
+  const [creditsChoice, setCreditsChoice] = React.useState<"undecided" | "manual" | "skip">("undecided");
+  const [importStatus, setImportStatus] = React.useState<"idle" | "uploading" | "success" | "auth-error" | "error">(
+    "idle",
+  );
+  const [importCourseCount, setImportCourseCount] = React.useState<number | null>(null);
+  const [importErrorMessage, setImportErrorMessage] = React.useState<string | null>(null);
+
+  async function handleImportPdf(file: File) {
+    setImportStatus("uploading");
+    setImportErrorMessage(null);
     try {
-      const list = await api.getSessions();
-      setSessions(list);
-      setSession((prev) => prev || list[0] || "");
-    } catch {
-      setSessionsError("Couldn't load live sessions — showing defaults.");
-      // The Select below still renders FALLBACK_SESSIONS on error, so the
-      // tracked value must default too, or "Next" (gated on `!session`)
-      // stays disabled forever despite a session visibly being selected.
-      setSession((prev) => prev || FALLBACK_SESSIONS[0]);
-    } finally {
-      setSessionsLoading(false);
+      const result = await importDegreeExplorerPdf(file);
+      setImportCourseCount(typeof result.courseCount === "number" ? result.courseCount : null);
+      setImportStatus("success");
+    } catch (err) {
+      if (err instanceof Error && err.message === "AUTH_REQUIRED") {
+        setImportStatus("auth-error");
+      } else {
+        setImportErrorMessage(err instanceof Error ? err.message : "Couldn't import that PDF.");
+        setImportStatus("error");
+      }
     }
   }
 
-  React.useEffect(() => {
-    if (step !== 1 || sessionsFetched.current) return;
-    sessionsFetched.current = true;
-    void loadSessions();
-  }, [step]);
+  function handleManualEntry() {
+    setCreditsChoice("manual");
+    setStep(3);
+  }
 
-  const effectiveSessions = sessions.length > 0 ? sessions : FALLBACK_SESSIONS;
+  function handleSkipCredits() {
+    setCreditsChoice("skip");
+    setStep(3);
+  }
 
-  // ---- Step 3: tour + finish ------------------------------------------------
+  // ---- Step 4: tour + finish --------------------------------------------------
   const [syncPromptDismissed, setSyncPromptDismissed] = React.useState(false);
 
   function persistGuestProfile() {
-    saveGuestProfile({ programs: myPrograms, session: session || null });
+    saveGuestProfile({ programs: myPrograms, startSession: startSession || null });
   }
 
   function handleFinish() {
     persistGuestProfile();
-    navigate("/dashboard");
+    navigate(creditsChoice === "manual" ? "/transcript" : "/dashboard");
   }
 
   /** The sync-nudge's "Create account" also needs the in-progress selections
@@ -260,17 +342,22 @@ export default function Onboarding() {
   // ---- Render ---------------------------------------------------------------
 
   function renderProgramsStep() {
+    // Group the search results by program type so common choices lead and
+    // niche types (Focus clusters, Certificates, anything unrecognized) sit
+    // behind a collapsed "Other" section instead of burying the flat list.
     const addOptions = catalog
       .filter((p) => !myPrograms.some((mp) => mp.code === p.code))
-      .map((p) => ({ value: p.code, label: `${p.title} (${p.code})` }));
+      .map((p) => ({
+        value: p.code,
+        label: `${p.title} (${p.code})`,
+        group: PROGRAM_TYPE_GROUPS[p.programType] ?? "Other",
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
 
     return (
       <Card>
         <h2 style={sectionTitleStyle}>What are you studying?</h2>
-        <p style={mutedStyle}>
-          Search and add every Specialist, Major, and Minor you're pursuing (or exploring) — we'll flag
-          combination issues as you go.
-        </p>
+        <p style={mutedStyle}>Search and add your programs.</p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12, margin: "16px 0" }}>
           {/* myPrograms is synchronous (localStorage, not a fetch), so there's
@@ -314,6 +401,8 @@ export default function Onboarding() {
         <Combobox
           label="Add a program"
           options={addOptions}
+          groupOrder={PROGRAM_GROUP_ORDER}
+          collapsedGroup="Other"
           value={addValue}
           onChange={handleAddProgram}
           placeholder={catalogLoading ? "Loading programs…" : "Search programs…"}
@@ -339,45 +428,113 @@ export default function Onboarding() {
   function renderTermStep() {
     return (
       <Card>
-        <h2 style={sectionTitleStyle}>What term are you in?</h2>
-        <p style={mutedStyle}>We'll use this to show what's enrolling now and to plan your remaining terms.</p>
-
-        {sessionsError && (
-          <div style={{ marginTop: 12 }}>
-            <Callout
-              tone="warning"
-              title="Using default sessions"
-              action={
-                <Button size="sm" variant="secondary" onClick={() => void loadSessions()}>
-                  Retry
-                </Button>
-              }
-            >
-              {sessionsError}
-            </Callout>
-          </div>
-        )}
+        <h2 style={sectionTitleStyle}>When did you start at UofT?</h2>
+        <p style={mutedStyle}>We'll use this to figure out what's left and to plan your remaining terms.</p>
 
         <div style={{ marginTop: 16, maxWidth: 360 }}>
-          {sessionsLoading ? (
-            <Skeleton height={62} radius="var(--radius-md)" />
-          ) : (
-            <Select
-              label="Current session"
-              value={session}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSession(e.target.value)}
-              options={effectiveSessions.map((s) => ({ value: s, label: formatSession(s) }))}
-            />
-          )}
+          <Select
+            label="Start term"
+            value={startSession}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStartSession(e.target.value)}
+            options={startTermOptions}
+          />
         </div>
 
         <div style={footerRowStyle}>
           <Button variant="ghost" onClick={() => setStep(0)}>
             Back
           </Button>
-          <Button variant="primary" disabled={!session} onClick={() => setStep(2)}>
+          <Button variant="primary" onClick={() => setStep(2)}>
             Next
           </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  function renderCreditsStep() {
+    return (
+      <Card>
+        <h2 style={sectionTitleStyle}>Do you have existing credits?</h2>
+        <p style={mutedStyle}>
+          Bring in what you've already completed, or skip this for now — you can always import later from Settings.
+        </p>
+
+        <div style={{ marginTop: "var(--space-4)" }}>
+          <div
+            style={{
+              fontSize: "var(--text-body)",
+              fontWeight: "var(--weight-semibold)",
+              color: "var(--text)",
+              marginBottom: "var(--space-2)",
+            }}
+          >
+            Upload your Academic History PDF
+          </div>
+          <Dropzone
+            label="Drop your Academic History PDF here"
+            hint="from ACORN — parsed and encrypted on import"
+            accept="application/pdf"
+            onFile={(file: File) => void handleImportPdf(file)}
+            progress={importStatus === "uploading" ? 60 : undefined}
+          />
+
+          {importStatus === "success" && (
+            <div style={{ marginTop: "var(--space-3)" }}>
+              <Callout
+                tone="success"
+                title="Import complete"
+                action={
+                  <Button size="sm" variant="primary" onClick={() => setStep(3)}>
+                    Continue
+                  </Button>
+                }
+              >
+                {importCourseCount != null
+                  ? `Found ${importCourseCount} course${importCourseCount === 1 ? "" : "s"} on your record.`
+                  : "Your record was imported."}
+              </Callout>
+            </div>
+          )}
+
+          {importStatus === "auth-error" && (
+            <div style={{ marginTop: "var(--space-3)" }}>
+              <Callout
+                tone="info"
+                title="Create an account to save imported credits"
+                action={
+                  <Button size="sm" variant="primary" onClick={handleCreateAccount}>
+                    Create account
+                  </Button>
+                }
+              >
+                You're browsing as a guest, so there's nowhere to save an import yet. Create a free account, then
+                re-import from Settings.
+              </Callout>
+            </div>
+          )}
+
+          {importStatus === "error" && (
+            <div style={{ marginTop: "var(--space-3)" }}>
+              <Callout tone="danger" title="Couldn't import that PDF">
+                {importErrorMessage}
+              </Callout>
+            </div>
+          )}
+        </div>
+
+        <div style={footerRowStyle}>
+          <Button variant="ghost" onClick={() => setStep(1)}>
+            Back
+          </Button>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <Button variant="secondary" icon="pencil" onClick={handleManualEntry}>
+              I'll enter courses manually
+            </Button>
+            <Button variant="primary" onClick={handleSkipCredits}>
+              Skip for now
+            </Button>
+          </div>
         </div>
       </Card>
     );
@@ -437,7 +594,7 @@ export default function Onboarding() {
         )}
 
         <div style={footerRowStyle}>
-          <Button variant="ghost" onClick={() => setStep(1)}>
+          <Button variant="ghost" onClick={() => setStep(2)}>
             Back
           </Button>
           <Button variant="primary" trailingIcon="arrow-right" onClick={handleFinish}>
@@ -461,7 +618,8 @@ export default function Onboarding() {
         <Stepper steps={STEP_LABELS} current={step} />
         {step === 0 && renderProgramsStep()}
         {step === 1 && renderTermStep()}
-        {step === 2 && renderTourStep()}
+        {step === 2 && renderCreditsStep()}
+        {step === 3 && renderTourStep()}
       </div>
     </div>
   );

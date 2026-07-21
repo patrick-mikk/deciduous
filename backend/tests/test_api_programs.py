@@ -23,7 +23,7 @@ import pytest  # noqa: E402
 import backend.api.programs as programs_module  # noqa: E402
 from backend.app import create_app  # noqa: E402
 from backend.config_app import Config  # noqa: E402
-from backend.data_sources.cache import SqliteCache  # noqa: E402
+from backend.data_sources.cache import PROGRAMS_CATALOG_FULL_AT, SqliteCache  # noqa: E402
 from backend.data_sources.llm_grouper import GroupingResult, LLMGroupingError  # noqa: E402
 from backend.data_sources.models import (  # noqa: E402
     Program,
@@ -77,6 +77,13 @@ class _BoomProgramClient:
 
     def __init__(self, *_a: Any, **_k: Any) -> None:
         raise AssertionError("ProgramClient must not be constructed here")
+
+
+def _mark_catalog_full(cache: SqliteCache) -> None:
+    """Pretend a full catalog pull already ran (what refresh_cache.py records),
+    so empty-q "browse" requests trust the seeded cache instead of self-healing
+    with a live pull."""
+    cache.set_meta(PROGRAMS_CATALOG_FULL_AT, "2026-07-08T00:00:00")
 
 
 def _program(
@@ -150,6 +157,7 @@ def test_search_programs_filters_by_type_and_subject(client, cache, monkeypatch)
         ],
         "2026-07-08T00:00:00",
     )
+    _mark_catalog_full(cache)  # the ?subject= call below is an empty-q browse
     monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
 
     resp = client.get("/api/programs?type=minor")
@@ -167,6 +175,7 @@ def test_search_programs_paginates(client, cache, monkeypatch):
         [_program(code=f"ASMAJ{i:04d}", title=f"Program {i}") for i in range(25)],
         "2026-07-08T00:00:00",
     )
+    _mark_catalog_full(cache)  # empty-q browse must not self-heal here
     monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
 
     resp = client.get("/api/programs?pageSize=10&page=2")
@@ -180,6 +189,67 @@ def test_search_programs_bad_page_param_is_422(client, monkeypatch):
     monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
     resp = client.get("/api/programs?page=nope")
     assert resp.status_code == 422
+
+
+def test_browse_self_heals_full_catalog_once(client, cache, monkeypatch):
+    """Empty-q browse on a never-bulk-loaded cache pulls the FULL catalog once
+    (even over a partial cache seeded by keyword searches), records the meta
+    flag, and never pulls again."""
+    # Partial cache: one program seeded by an earlier keyword search.
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    calls: list[dict] = []
+
+    class _FullCatalogClient:
+        def search(self, keyword: str = "", program_type: str = "", max_pages: int = 5):
+            calls.append({"keyword": keyword, "type": program_type, "max_pages": max_pages})
+            return [
+                _program(),
+                _program(code="ASSPE0608", title="Sociology Specialist", program_type="specialist"),
+                _program(code="ASMIN2222", title="History Minor", program_type="minor"),
+            ]
+
+    monkeypatch.setattr(programs_module, "ProgramClient", _FullCatalogClient)
+
+    resp = client.get("/api/programs")
+    assert resp.status_code == 200
+    assert resp.get_json()["total"] == 3  # full catalog, not the 1-program partial cache
+    assert len(calls) == 1
+    assert calls[0]["keyword"] == "" and calls[0]["max_pages"] > 5  # full pull, not keyword-scoped
+    assert cache.get_meta(PROGRAMS_CATALOG_FULL_AT) is not None
+
+    # Second browse serves the cache; a network hit would now blow up.
+    monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
+    resp = client.get("/api/programs")
+    assert resp.status_code == 200
+    assert resp.get_json()["total"] == 3
+
+
+def test_browse_pull_failure_serves_partial_cache(client, cache, monkeypatch):
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _DownProgramClient:
+        def search(self, *_a: Any, **_k: Any):
+            raise RuntimeError("calendar unreachable")
+
+    monkeypatch.setattr(programs_module, "ProgramClient", _DownProgramClient)
+
+    resp = client.get("/api/programs")
+    assert resp.status_code == 200  # degrade to the partial cache, not a 502
+    assert resp.get_json()["total"] == 1
+    assert cache.get_meta(PROGRAMS_CATALOG_FULL_AT) is None  # still incomplete -> retried next browse
+
+
+def test_browse_pull_failure_with_empty_cache_is_502(client, monkeypatch):
+    class _DownProgramClient:
+        def search(self, *_a: Any, **_k: Any):
+            raise RuntimeError("calendar unreachable")
+
+    monkeypatch.setattr(programs_module, "ProgramClient", _DownProgramClient)
+
+    resp = client.get("/api/programs")
+    assert resp.status_code == 502
+    assert "Program search failed" in resp.get_json()["error"]
 
 
 # ---------------------------------------------------------------------------

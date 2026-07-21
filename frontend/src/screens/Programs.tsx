@@ -125,6 +125,9 @@ export default function Programs() {
   const [myError, setMyError] = React.useState<string | null>(null);
   const [myActionError, setMyActionError] = React.useState<string | null>(null);
   const [dragCode, setDragCode] = React.useState<string | null>(null);
+  // Scopes the aria-label lookup `focusPriorityButton` does after a keyboard
+  // reorder — see its comment below for why a DOM query is needed at all.
+  const myListRef = React.useRef<HTMLOListElement | null>(null);
 
   // Enrolled programs (in the student's saved order, `GET /api/me/programs`)
   // + requirement progress, once — drives every card's enrolled/Add-vs-Remove
@@ -164,7 +167,7 @@ export default function Programs() {
   React.useEffect(() => {
     let cancelled = false;
     api
-      .getPrograms({})
+      .getAllPrograms()
       .then((all) => {
         if (cancelled) return;
         setSubjectOptions(Array.from(new Set(all.map((p) => p.department).filter(Boolean))).sort());
@@ -241,6 +244,26 @@ export default function Programs() {
     }
   }
 
+  /** Human-readable name for a "Move X up/down" aria-label — the program
+   * title reads better to a screen reader than the raw code. */
+  function programDisplayName(program: Program): string {
+    return program.title || program.code;
+  }
+
+  /**
+   * `IconButton` (ds) doesn't forward a `ref` or pass through arbitrary
+   * props, so the only stable hook into its rendered `<button>` from this
+   * screen is the `aria-label` it already renders — used here, scoped to
+   * `myListRef`, to move focus after a keyboard reorder (see `moveProgram`).
+   */
+  function focusPriorityButton(program: Program, direction: "up" | "down") {
+    const label = `Move ${programDisplayName(program)} ${direction} in priority`;
+    const button = myListRef.current?.querySelector<HTMLButtonElement>(
+      `button[aria-label="${CSS.escape(label)}"]`,
+    );
+    button?.focus();
+  }
+
   /** Keyboard/touch alternative to dragging (also usable with a mouse). */
   function moveProgram(code: string, direction: -1 | 1) {
     const index = myPrograms.findIndex((p) => p.code === code);
@@ -249,6 +272,20 @@ export default function Programs() {
     const next = [...myPrograms];
     [next[index], next[target]] = [next[target], next[index]];
     persistOrder(next);
+
+    // The IconButton the user just activated disables itself once the item
+    // lands at that end of the list (top for "up", bottom for "down") — a
+    // disabled button can't hold focus, so without this the browser drops
+    // keyboard focus to <body> right after the move. Redirect focus to the
+    // opposite-direction button on the same row instead, which stays enabled
+    // (the list always has >=2 programs whenever a move is possible).
+    const reachedTop = direction === -1 && target === 0;
+    const reachedBottom = direction === 1 && target === next.length - 1;
+    if (reachedTop || reachedBottom) {
+      const moved = next[target];
+      const oppositeDirection = direction === -1 ? "down" : "up";
+      requestAnimationFrame(() => focusPriorityButton(moved, oppositeDirection));
+    }
   }
 
   function dropProgramOn(code: string) {
@@ -439,15 +476,27 @@ export default function Programs() {
               />
             ) : (
               !myError && (
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
-                  role="status"
+                // A native <ol> conveys list membership + position ("item 2
+                // of 3") to screen readers on its own — `aria-live` still
+                // announces reorders without needing `role="status"`, which
+                // would otherwise replace the implicit list role.
+                <ol
+                  ref={myListRef}
                   aria-live="polite"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                  }}
                 >
                   {myPrograms.map((p, i) => {
                     const cr = creditsFor(p);
+                    const name = programDisplayName(p);
                     return (
-                      <div
+                      <li
                         key={p.code}
                         draggable
                         onDragStart={() => setDragCode(p.code)}
@@ -465,13 +514,15 @@ export default function Programs() {
                         <div style={{ display: "flex", flexDirection: "column" }}>
                           <IconButton
                             icon="chevron-up"
-                            label={`Move ${p.code} up in priority`}
+                            label={`Move ${name} up in priority`}
+                            size={24}
                             disabled={i === 0}
                             onClick={() => moveProgram(p.code, -1)}
                           />
                           <IconButton
                             icon="chevron-down"
-                            label={`Move ${p.code} down in priority`}
+                            label={`Move ${name} down in priority`}
+                            size={24}
                             disabled={i === myPrograms.length - 1}
                             onClick={() => moveProgram(p.code, 1)}
                           />
@@ -489,10 +540,10 @@ export default function Programs() {
                             onRemove={() => removeProgram(p.code)}
                           />
                         </div>
-                      </div>
+                      </li>
                     );
                   })}
-                </div>
+                </ol>
               )
             )}
           </>

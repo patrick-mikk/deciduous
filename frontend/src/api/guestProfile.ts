@@ -14,7 +14,15 @@ const STORAGE_KEY = "deciduous:guest-profile:v1";
 
 export interface GuestProfile {
   programs: Program[];
-  session: SessionCode | null;
+  /** The session (term) the student *started* at UofT — see Onboarding.tsx's term step. */
+  startSession: SessionCode | null;
+  /**
+   * @deprecated Pre-startSession profiles stored the student's *current* term
+   * here instead. No longer written by `saveGuestProfile`, but the field (and
+   * `loadGuestProfile`'s fallback below) stay so an already-saved v1 profile
+   * keeps loading instead of crashing.
+   */
+  session?: SessionCode | null;
 }
 
 export function loadGuestProfile(): GuestProfile | null {
@@ -23,7 +31,13 @@ export function loadGuestProfile(): GuestProfile | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.programs)) return null;
-    return { programs: parsed.programs, session: parsed.session ?? null };
+    return {
+      programs: parsed.programs,
+      // Older saved profiles have `session` but no `startSession` yet — fall
+      // back to it rather than losing the student's choice on next load.
+      startSession: parsed.startSession ?? parsed.session ?? null,
+      session: parsed.session ?? null,
+    };
   } catch {
     return null;
   }

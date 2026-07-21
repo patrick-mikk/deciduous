@@ -8,7 +8,7 @@ export function ImportPanel({ tab = 'pdf', onTab, onFile, progress, bookmarkletV
     <div style={{ fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Tabs tabs={[{ label: 'Upload PDF', value: 'pdf' }, { label: 'Bookmarklet', value: 'bookmarklet' }, { label: 'Start blank', value: 'manual' }]} active={tab} onChange={onTab} />
 
-      {tab === 'pdf' && <Dropzone label="Drop your Degree Explorer PDF here" hint="or click to browse · parsed locally & encrypted" accept="application/pdf" onFile={onFile} progress={progress} />}
+      {tab === 'pdf' && <Dropzone label="Drop your Academic History PDF here" hint="from ACORN · parsed locally & encrypted" accept="application/pdf" onFile={onFile} progress={progress} />}
 
       {tab === 'bookmarklet' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

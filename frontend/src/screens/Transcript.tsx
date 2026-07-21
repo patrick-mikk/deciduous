@@ -323,7 +323,7 @@ export default function Transcript() {
         <EmptyState
           icon="file-text"
           title="No courses on record yet"
-          description="Import your Degree Explorer record or add a course manually to get started."
+          description="Import your Academic History PDF from ACORN or add a course manually to get started."
           action={
             <Button icon="plus" onClick={() => setAdding(BLANK_ADD)}>
               Add course
