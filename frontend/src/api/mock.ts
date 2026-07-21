@@ -378,9 +378,9 @@ for (const p of publicPolicyProgress) {
 
 export const mockStudentRecord: StudentRecord = {
   programs: [
-    { code: "ASMAJ2660", name: "Public Policy", startSession: "20229" },
-    { code: "ASMIN0301", name: "American Studies", startSession: "20229" },
-    { code: "ASMIN1120", name: "Geographic Information Systems", startSession: "20241" },
+    { code: "ASMAJ2660", name: "Public Policy", startSession: "20229", earnedCredits: 2.5, totalCredits: 6.0, percent: 41.7, requirementsLoaded: true },
+    { code: "ASMIN0301", name: "American Studies", startSession: "20229", earnedCredits: 1.0, totalCredits: 4.0, percent: 25.0, requirementsLoaded: true },
+    { code: "ASMIN1120", name: "Geographic Information Systems", startSession: "20241", earnedCredits: 0.5, totalCredits: 4.0, percent: 12.5, requirementsLoaded: true },
   ],
   transcript: [
     { code: "ECO101H1", title: "Principles of Microeconomics", credits: 0.5, mark: 78, grade: "B+", session: "20229", status: "completed" },

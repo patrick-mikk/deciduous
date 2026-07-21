@@ -16,7 +16,7 @@ import {
   POStCombinationValidator,
 } from "@/ds";
 import { api, creditFromCode } from "@/api";
-import type { Program, ProgramType, RequirementProgress } from "@/api";
+import type { EnrolledProgramRef, Program, ProgramType, RequirementProgress } from "@/api";
 
 /**
  * Screen — routed at "/programs" (design/screens/03-programs-and-courses.md,
@@ -120,6 +120,11 @@ export default function Programs() {
 
   // ---- My programs (enrolled list, in saved order, + per-program progress) -
   const [progressByCode, setProgressByCode] = React.useState<Record<string, RequirementProgress[]>>({});
+  // Authoritative per-program completion, keyed by code, from `GET /api/me`'s
+  // `programs[]` (`_audit.program_progress_summary`) — the single source every
+  // program card shares, so "My programs" summaries can't disagree with a
+  // program's own detail page.
+  const [summaryByCode, setSummaryByCode] = React.useState<Record<string, EnrolledProgramRef>>({});
   const [myPrograms, setMyPrograms] = React.useState<Program[]>([]);
   const [myLoading, setMyLoading] = React.useState(true);
   const [myError, setMyError] = React.useState<string | null>(null);
@@ -135,10 +140,11 @@ export default function Programs() {
   React.useEffect(() => {
     let cancelled = false;
     setMyLoading(true);
-    Promise.all([api.getMyPrograms(), api.getMyRequirementProgress()])
-      .then(([enrolled, progress]) => {
+    Promise.all([api.getMyPrograms(), api.getMyRequirementProgress(), api.getMyRecord()])
+      .then(([enrolled, progress, record]) => {
         if (cancelled) return;
         setProgressByCode(progress);
+        setSummaryByCode(Object.fromEntries(record.programs.map((p) => [p.code, p])));
         setMyError(null);
         // allSettled: one enrolled program's catalog lookup failing (stale
         // code, transient network blip) shouldn't take down the whole list —
@@ -314,9 +320,11 @@ export default function Programs() {
   const filtersActive = Boolean(q || type || subject);
 
   function creditsFor(program: Program): { earned: number; total: number } | undefined {
-    const groups = progressByCode[program.code];
-    if (!groups) return undefined;
-    return { earned: groups.reduce((s, g) => s + g.earned, 0), total: program.totalCredits };
+    // One source of truth — the server-computed summary — never a per-group
+    // sum of `earned` (double-counts shared courses) or a raw 0.0 total.
+    const summary = summaryByCode[program.code];
+    if (!summary) return undefined;
+    return { earned: summary.earnedCredits, total: summary.totalCredits };
   }
 
   return (

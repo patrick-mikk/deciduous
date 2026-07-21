@@ -20,7 +20,8 @@ from typing import Any
 from flask import Blueprint, jsonify
 
 from backend.api import current_data_key, current_user, db_session, require_auth
-from backend.api._audit import TranscriptRow
+from backend.api._audit import ProgramRow, TranscriptRow
+from backend.api._audit import program_progress_summary as _program_progress_summary
 from backend.api._audit import requirement_progress as _audit_requirement_progress
 from backend.api.programs import _enrolment_json
 from backend.data_sources.cache import SqliteCache
@@ -264,15 +265,41 @@ def _enrolments_for_user(db, user) -> list[ProgramEnrolment]:
     )
 
 
-def _program_refs(enrolments: list[ProgramEnrolment]) -> list[dict[str, Any]]:
+def _program_refs(
+    enrolments: list[ProgramEnrolment], records: list[CourseRecord]
+) -> list[dict[str, Any]]:
     """`EnrolledProgramRef[]` (frontend/src/api/types.ts) — the same
     `{code, name, startSession}` mapping `httpClient.getMyPrograms` derives
     client-side from `_enrolment_json` (backend/api/programs.py), done here
-    server-side so `/api/me` doesn't need a second round trip."""
-    return [
-        {"code": j["code"], "name": j["title"] or j["code"], "startSession": j["startSession"] or ""}
-        for j in map(_enrolment_json, enrolments)
-    ]
+    server-side so `/api/me` doesn't need a second round trip.
+
+    Each ref also carries the AUTHORITATIVE program-completion summary
+    (`earnedCredits`/`totalCredits`/`percent`/`requirementsLoaded`) computed by
+    `_audit.program_progress_summary` — the single source of truth every card
+    that shows "how much of this program have I completed" must use, so the
+    top-of-page summary can't disagree with the per-group breakdown (which is
+    the same engine). `requirementsLoaded=False` means the program's
+    requirements aren't cached yet, so the client should offer "Load
+    requirements" rather than treat 0% as a real answer."""
+    cache = get_course_cache()
+    rows = _transcript_rows(records)
+    refs: list[dict[str, Any]] = []
+    for enrolment, j in zip(enrolments, map(_enrolment_json, enrolments)):
+        ref = {
+            "code": j["code"],
+            "name": j["title"] or j["code"],
+            "startSession": j["startSession"] or "",
+        }
+        program = cache.get_program(enrolment.program_code)
+        summary = _program_progress_summary(
+            program, ProgramRow(code=j["code"], title=j["title"] or "", program_type=j["programType"]), rows
+        )
+        ref["earnedCredits"] = summary["earnedCredits"]
+        ref["totalCredits"] = summary["totalCredits"]
+        ref["percent"] = summary["percent"]
+        ref["requirementsLoaded"] = summary["loaded"]
+        refs.append(ref)
+    return refs
 
 
 def _transcript_courses(db, user, data_key: bytes | None) -> list[dict[str, Any]]:
@@ -296,16 +323,11 @@ def _transcript_courses(db, user, data_key: bytes | None) -> list[dict[str, Any]
     ]
 
 
-def _requirement_progress_by_program(
-    enrolments: list[ProgramEnrolment], records: list[CourseRecord]
-) -> dict[str, list[dict[str, Any]]]:
-    """`Record<programCode, RequirementProgress[]>` (frontend/src/api/
-    types.ts), via `backend.api._audit.requirement_progress` — the
-    already-written per-`RequirementGroup` cross-reference against the
-    transcript, adapted from the same `CourseRecord`s `_course_records`
-    builds for the other `/api/me/*` routes."""
-    cache = get_course_cache()
-    rows = [
+def _transcript_rows(records: list[CourseRecord]) -> list[TranscriptRow]:
+    """The `_audit` engine's `TranscriptRow` view of the same `CourseRecord`s
+    `_course_records` builds — shared by the requirement-progress and
+    program-summary computations so they can't diverge."""
+    return [
         TranscriptRow(
             code=r.code,
             credits=r.credits,
@@ -317,6 +339,18 @@ def _requirement_progress_by_program(
         )
         for r in records
     ]
+
+
+def _requirement_progress_by_program(
+    enrolments: list[ProgramEnrolment], records: list[CourseRecord]
+) -> dict[str, list[dict[str, Any]]]:
+    """`Record<programCode, RequirementProgress[]>` (frontend/src/api/
+    types.ts), via `backend.api._audit.requirement_progress` — the
+    already-written per-`RequirementGroup` cross-reference against the
+    transcript, adapted from the same `CourseRecord`s `_course_records`
+    builds for the other `/api/me/*` routes."""
+    cache = get_course_cache()
+    rows = _transcript_rows(records)
     progress: dict[str, list[dict[str, Any]]] = {}
     for enrolment in enrolments:
         program = cache.get_program(enrolment.program_code)
@@ -345,7 +379,7 @@ def student_record():
 
     return jsonify(
         {
-            "programs": _program_refs(enrolments),
+            "programs": _program_refs(enrolments, records),
             "transcript": _transcript_courses(db, user, data_key),
             "requirementProgress": _requirement_progress_by_program(enrolments, records),
             "cgpa": cgpa(records).gpa or 0.0,

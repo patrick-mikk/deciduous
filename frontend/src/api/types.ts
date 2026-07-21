@@ -157,6 +157,18 @@ export interface EnrolledProgramRef {
   code: string;
   name: string;
   startSession: string;
+  /**
+   * Authoritative program-completion summary from `GET /api/me`
+   * (`_audit.program_progress_summary`) — the single source of truth every
+   * program card must use for "how much of this program have I completed",
+   * so the top-of-page summary can't disagree with the per-group breakdown.
+   * `requirementsLoaded=false` means requirements aren't parsed yet, so
+   * `percent`/`earnedCredits` are 0 only for lack of data, not real progress.
+   */
+  earnedCredits: number;
+  totalCredits: number;
+  percent: number;
+  requirementsLoaded: boolean;
 }
 
 export interface StudentRecord {

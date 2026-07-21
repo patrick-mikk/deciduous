@@ -78,16 +78,18 @@ const TONE_VAR: Record<"success" | "warning" | "danger", string> = {
 function buildProgramRows(record: StudentRecord, allPrograms: Program[]): ProgramRow[] {
   return record.programs.map((enrolled) => {
     const full = allPrograms.find((p) => p.code === enrolled.code);
-    const groups = record.requirementProgress[enrolled.code] ?? [];
-    const earned = groups.reduce((sum, g) => sum + g.earned, 0);
-    const total = full?.totalCredits ?? groups.reduce((sum, g) => sum + g.required, 0);
+    // Completion comes from the ONE authoritative source (`GET /api/me`'s
+    // `programs[]`, computed by `_audit.program_progress_summary`) — never
+    // recomputed here by summing per-group `earned` (that double-counts a
+    // course listed under both an umbrella group and its sub-group) or by
+    // reading a raw 0.0 `totalCredits`.
     return {
       code: enrolled.code,
       name: full?.title ?? enrolled.name,
       programType: full?.programType ?? "major",
       department: full?.department ?? "",
-      earned,
-      total,
+      earned: enrolled.earnedCredits,
+      total: enrolled.totalCredits,
     };
   });
 }

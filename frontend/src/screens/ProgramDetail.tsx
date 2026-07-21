@@ -12,7 +12,7 @@ import {
   Button,
 } from "@/ds";
 import { api, creditFromCode } from "@/api";
-import type { Program, ProgramType, RequirementGroup, RequirementProgress } from "@/api";
+import type { EnrolledProgramRef, Program, ProgramType, RequirementGroup, RequirementProgress } from "@/api";
 
 /**
  * Screen — routed at "/programs/:code" (design/screens/03-programs-and-courses.md,
@@ -147,6 +147,7 @@ export default function ProgramDetail() {
   const [reparseError, setReparseError] = React.useState<string | null>(null);
 
   const [enrolled, setEnrolled] = React.useState(false);
+  const [myProgramRef, setMyProgramRef] = React.useState<EnrolledProgramRef | null>(null);
   const [enrolledPrograms, setEnrolledPrograms] = React.useState<Program[]>([]);
   const [progressByCode, setProgressByCode] = React.useState<Record<string, RequirementProgress[]>>({});
   const [comboLoading, setComboLoading] = React.useState(true);
@@ -180,6 +181,7 @@ export default function ProgramDetail() {
       .then(async ([record, progress]) => {
         if (cancelled) return;
         setProgressByCode(progress);
+        setMyProgramRef(record.programs.find((p) => p.code === code) ?? null);
         setEnrolled(record.programs.some((p) => p.code === code));
         const resolved = await Promise.all(record.programs.map((p) => api.getProgram(p.code)));
         if (cancelled) return;
@@ -278,7 +280,11 @@ export default function ProgramDetail() {
 
   const combo = evaluateCombination(enrolledPrograms, progressByCode);
   const myProgress = enrolled ? progressByCode[program.code] ?? [] : [];
-  const earnedCredits = myProgress.reduce((s, g) => s + g.earned, 0);
+  // The header's earned/total come from the ONE authoritative summary
+  // (`record.programs[]` -> `_audit.program_progress_summary`), the same
+  // engine the Dashboard and "My Programs" cards use — NOT a per-group sum of
+  // `myProgress` (that double-counts courses shared across nested groups). The
+  // per-group breakdown below still renders each group's own earned/required.
 
   function progressFor(group: RequirementGroup) {
     return myProgress.find((p) => p.label === group.heading);
@@ -297,8 +303,8 @@ export default function ProgramDetail() {
           name={program.title}
           programType={(program.programType || "major") as ProgramType}
           department={program.department}
-          totalCredits={program.totalCredits}
-          earned={enrolled ? earnedCredits : undefined}
+          totalCredits={myProgramRef?.totalCredits ?? program.totalCredits}
+          earned={enrolled ? myProgramRef?.earnedCredits ?? 0 : undefined}
           enrolmentRequirements={program.enrolmentRequirements || undefined}
           needsReparse={!program.requirementsLoaded}
           reparsing={reparsing}
