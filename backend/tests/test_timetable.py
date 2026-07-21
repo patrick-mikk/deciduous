@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -209,6 +210,102 @@ def test_search_paginates_by_running_total(monkeypatch: pytest.MonkeyPatch) -> N
     assert calls == [1, 2, 3]
     assert len(results) == 45
     assert all(hasattr(c, "code") for c in results)
+
+
+def _fake_paginated_post_json(total: int, page_size: int = 20):
+    """A `post_json` stand-in for a session with `total` courses, `page_size`
+    per page (self-contained -- doesn't need the TTB fixture file), used by
+    the bounded/resumable-sync tests below (issue #7: Courses search
+    latency -- `backend/api/courses.py::_ensure_session_synced` bounds a
+    cold-cache sync to a few pages/seconds per request instead of pulling an
+    entire ~80-page ARTSC session synchronously inside one request)."""
+
+    def fake_post_json(url: str, body: dict[str, Any]) -> dict[str, Any] | None:
+        page = body["page"]
+        start = (page - 1) * page_size
+        if start >= total:
+            return None
+        end = min(start + page_size, total)
+        courses = [
+            {
+                "code": f"ZZZ{i:03d}H1",
+                "name": f"Course {i}",
+                "sectionCode": "F",
+                "maxCredit": 0.5,
+                "campus": "St. George",
+                "cmCourseInfo": {},
+                "sections": [],
+            }
+            for i in range(start, end)
+        ]
+        return {"payload": {"pageableCourse": {"total": total, "courses": courses}}}
+
+    return fake_post_json
+
+
+def test_search_max_pages_stops_early_and_reports_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`max_pages` bounds a call to a handful of pages and `stats["complete"]`
+    reports that pagination did NOT reach the end, so a caller like
+    `_ensure_session_synced` knows to resume later instead of treating a
+    partial pull as a finished sync."""
+    import backend.data_sources.timetable.client as client_module
+
+    monkeypatch.setattr(client_module, "post_json", _fake_paginated_post_json(total=47))
+    monkeypatch.setattr(client_module, "throttle", lambda: None)
+
+    client = TTBClient()
+    stats: dict[str, Any] = {}
+    results = client.search(session="20269", start_page=1, max_pages=2, stats=stats)
+
+    assert len(results) == 40  # 2 pages * 20/page, stopped before the 3rd page
+    assert stats == {"total": 47, "complete": False}
+
+
+def test_search_resumes_from_start_page_to_full_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two bounded calls, the second resuming from where the first left off
+    (as `_ensure_session_synced` does via `cache.course_count(session)`),
+    must together collect every course exactly once and the second call must
+    report completion."""
+    import backend.data_sources.timetable.client as client_module
+
+    monkeypatch.setattr(client_module, "post_json", _fake_paginated_post_json(total=47))
+    monkeypatch.setattr(client_module, "throttle", lambda: None)
+
+    client = TTBClient()
+    stats1: dict[str, Any] = {}
+    batch1 = client.search(session="20269", start_page=1, max_pages=2, stats=stats1)
+    assert stats1["complete"] is False
+
+    start_page2 = len(batch1) // client_module.PAGE_SIZE_HINT + 1
+    stats2: dict[str, Any] = {}
+    batch2 = client.search(session="20269", start_page=start_page2, max_pages=2, stats=stats2)
+    assert stats2["complete"] is True
+
+    all_codes = {c.code for c in batch1} | {c.code for c in batch2}
+    assert len(all_codes) == 47
+
+
+def test_search_past_deadline_returns_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An already-elapsed `deadline` must stop `search()` before it fetches
+    even a first page -- the bound that keeps a cold-cache sync from
+    blocking a user-facing request past its time budget."""
+    import backend.data_sources.timetable.client as client_module
+
+    calls: list[int] = []
+
+    def fake_post_json(url: str, body: dict[str, Any]) -> dict[str, Any] | None:
+        calls.append(body["page"])
+        return None
+
+    monkeypatch.setattr(client_module, "post_json", fake_post_json)
+
+    client = TTBClient()
+    stats: dict[str, Any] = {}
+    results = client.search(session="20269", deadline=time.monotonic() - 1, stats=stats)
+
+    assert results == []
+    assert calls == []  # never even attempted a page fetch
+    assert stats == {"total": None, "complete": False}
 
 
 # ---------------------------------------------------------------------------

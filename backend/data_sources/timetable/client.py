@@ -19,6 +19,7 @@ with no network - see backend/tests/test_timetable.py.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from backend.data_sources.http import get_json, post_json, strip_html, throttle
@@ -29,6 +30,10 @@ BASE_URL = "https://api.easi.utoronto.ca/ttb"
 # TTB ignores a larger requested pageSize and returns ~20 rows per page
 # anyway; this is just the value we request, not something we rely on.
 _REQUESTED_PAGE_SIZE = 20
+# Public alias -- `backend/api/courses.py` uses this to estimate which page a
+# bounded, resumable sync left off on (see `search()`'s `start_page`), without
+# reaching into a private name.
+PAGE_SIZE_HINT = _REQUESTED_PAGE_SIZE
 # Safety cap on pagination loops so a misbehaving/unexpected `total` value
 # (e.g. 0 with non-empty pages) can never spin forever.
 _MAX_PAGES = 500
@@ -158,8 +163,17 @@ class TTBClient:
             if not entry.get("header") and str(entry.get("value", "")).isdigit()
         ]
 
-    def search(self, session: str, division: str = "ARTSC", course_code: str = "") -> list[Course]:
-        """POST /getPageableCourses, paginated to completion.
+    def search(
+        self,
+        session: str,
+        division: str = "ARTSC",
+        course_code: str = "",
+        start_page: int = 1,
+        max_pages: int | None = None,
+        deadline: float | None = None,
+        stats: dict[str, Any] | None = None,
+    ) -> list[Course]:
+        """POST /getPageableCourses, paginated to completion by default.
 
         A no-match search returns HTTP 404 (surfaced by `post_json` as
         `None`), which is treated as an empty result, not an error.
@@ -168,11 +182,30 @@ class TTBClient:
         "throttle bulk pulls") - a division-wide pull (`course_code=""`, as
         `refresh_cache.py` and the courses API's session-sync both do) can
         run to 100+ pages.
+
+        `max_pages`/`deadline` bound a single call to a handful of pages or a
+        wall-clock cutoff (`time.monotonic()` timestamp) instead of paging to
+        completion -- `backend/api/courses.py`'s cold-cache session sync uses
+        this so a user-facing search request is never blocked on a full
+        ~80-page ARTSC pull. TTB pages are stateless (requesting page N
+        doesn't depend on having fetched 1..N-1), so a later call can safely
+        resume from `start_page` where an earlier bounded call left off.
+
+        If `stats` is given, it is populated with `{"total": <TTB's reported
+        total, or None if no page was fetched>, "complete": <True if
+        pagination reached a genuine end (no more results / hit the reported
+        total), False if it stopped early because of `max_pages` or
+        `deadline`>}`, so a caller doing a bounded pull can tell "fully
+        synced" apart from "made partial progress, resume later".
         """
         courses: list[Course] = []
         total: int | None = None
-        page = 1
-        while page <= _MAX_PAGES:
+        complete = False
+        page = max(1, start_page)
+        page_ceiling = _MAX_PAGES if max_pages is None else min(_MAX_PAGES, page + max_pages - 1)
+        while page <= page_ceiling:
+            if deadline is not None and time.monotonic() >= deadline:
+                break  # bounded pull's time budget is up -- not a natural end
             body = _build_search_payload(
                 course_code=course_code,
                 sessions=[session],
@@ -182,19 +215,27 @@ class TTBClient:
             )
             response = post_json(f"{self._base_url}/getPageableCourses", body)
             if response is None:  # TTB's "no results" 404 quirk
+                complete = True
                 break
             payload = response.get("payload") or {}
             pageable = payload.get("pageableCourse") or {}
             raw_courses = pageable.get("courses") or []
             if not raw_courses:
+                complete = True
                 break
-            if total is None:
-                total = pageable.get("total", len(raw_courses))
+            page_total = pageable.get("total")
+            if page_total is not None:
+                total = page_total
             courses.extend(normalize_course(raw) for raw in raw_courses)
-            if total is not None and len(courses) >= total:
+            fetched_through = (page - 1) * _REQUESTED_PAGE_SIZE + len(raw_courses)
+            if total is not None and fetched_through >= total:
+                complete = True
                 break
             throttle()
             page += 1
+        if stats is not None:
+            stats["total"] = total
+            stats["complete"] = complete
         return courses
 
     def get_course(self, code: str) -> list[Course]:

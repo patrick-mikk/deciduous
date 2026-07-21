@@ -26,6 +26,17 @@ import type { BreadthKey, Course, CourseSearchParams, SessionCode, StudentRecord
 
 const LEVELS = [100, 200, 300, 400] as const;
 
+// Issue #7: the Courses search could show "Searching…" skeletons
+// indefinitely if the backend's Timetable Builder call hangs or is
+// unreachable. `api.getCourses` (frontend/src/api/client.ts) doesn't accept
+// an AbortSignal, so this is a soft client-side timeout: if nothing comes
+// back within `SEARCH_TIMEOUT_MS`, treat it as failed and show a retryable
+// error instead of waiting forever -- if the real request does eventually
+// resolve after that, its result still replaces the timeout message (see the
+// search effect below), so a slow-but-eventually-successful call self-heals
+// instead of getting stuck on a stale error.
+const SEARCH_TIMEOUT_MS = 10_000;
+
 // Session code = 4-digit year + 1 term digit (AGENTS.md glossary): 1=Winter, 5=Summer, 9=Fall.
 const TERM_DIGIT_LABEL: Record<string, string> = { "1": "Winter", "5": "Summer", "9": "Fall" };
 
@@ -78,6 +89,7 @@ export default function Courses() {
   const [error, setError] = React.useState<string | null>(null);
   const [record, setRecord] = React.useState<StudentRecord | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = React.useState(0);
 
   // Debounce free-text search so every keystroke doesn't refetch.
   React.useEffect(() => {
@@ -110,22 +122,35 @@ export default function Courses() {
       term: term || undefined,
       hasSeats: hasSeats || undefined,
     };
+    // Soft client-side timeout (see SEARCH_TIMEOUT_MS) -- stop showing an
+    // indefinite skeleton if the backend hasn't answered within a few
+    // seconds. The underlying request keeps running; if it resolves after
+    // this fires, its result still lands below and replaces this message.
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      setError("Course search is taking longer than expected. The Timetable Builder service may be slow or unreachable right now.");
+      setState("error");
+    }, SEARCH_TIMEOUT_MS);
     api
       .getCourses(params)
       .then((results) => {
         if (cancelled) return;
+        window.clearTimeout(timeoutId);
         setCourses(results);
+        setError(null);
         setState("ready");
       })
       .catch((e) => {
         if (cancelled) return;
+        window.clearTimeout(timeoutId);
         setError(e instanceof Error ? e.message : "Failed to search courses.");
         setState("error");
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
     };
-  }, [q, breadth, term, hasSeats]);
+  }, [q, breadth, term, hasSeats, retryNonce]);
 
   // Level isn't a mock/backend filter param — applied client-side (idempotent
   // if a real backend already filtered it, since courseLevel() is deterministic).
@@ -215,7 +240,12 @@ export default function Courses() {
 
       {error && (
         <Callout tone="danger" title="Couldn't load courses">
-          {error}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {error}
+            <Button type="button" variant="link" size="sm" onClick={() => setRetryNonce((n) => n + 1)}>
+              Retry
+            </Button>
+          </span>
         </Callout>
       )}
 
