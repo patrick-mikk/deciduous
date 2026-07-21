@@ -184,6 +184,8 @@ export interface PlanCourse {
 
 export interface PlanValidationIssue {
   severity: "error" | "warning" | "info";
+  /** Issue category, e.g. "prerequisite" | "exclusion" | "offering" | "requirements_unparsed". */
+  kind: string;
   code: string; // planCourse code this issue is about, or "" for plan-wide
   message: string;
 }

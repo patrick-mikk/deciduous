@@ -2,7 +2,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "@/api";
-import type { Course, PlanCourse, Program, SessionCode, StudentRecord } from "@/api";
+import type { Course, PlanCourse, PlanValidationIssue, Program, SessionCode, StudentRecord } from "@/api";
 import { creditFromCode } from "@/api";
 import {
   AutoPlanPanel,
@@ -17,6 +17,7 @@ import {
   PlanBoard,
   Select,
   Skeleton,
+  Spinner,
   Switch,
   Toast,
   ValidationSummary,
@@ -64,12 +65,6 @@ interface PlanTermVM {
   calendarYear: number;
   credits: number;
   courses: PlanCardVM[];
-}
-
-interface ValidationIssueVM {
-  kind: string;
-  code: string;
-  message: string;
 }
 
 interface ToastItem {
@@ -164,6 +159,20 @@ export default function Plan() {
   const [railResults, setRailResults] = React.useState<Course[]>([]);
   const [railLoading, setRailLoading] = React.useState(true);
   const [railError, setRailError] = React.useState<string | null>(null);
+
+  // ---- Server-authoritative plan validation (`POST /api/plan/validate`) ----
+  // This is the only source that can know about plan-wide warnings the
+  // client can't compute itself (e.g. "requirements_unparsed" for a program
+  // whose requirement groups never parsed) -- see issue tracker note on
+  // Plan validation below. Per-card prereq/exclusion/not-offered badges stay
+  // driven by the local `computeIssues` approximation (still useful as
+  // instant feedback while dragging); this state instead drives the
+  // page-level "N issues" pill and the ValidationSummary panel.
+  type ValidationStatus = "idle" | "loading" | "success" | "error";
+  const [validationStatus, setValidationStatus] = React.useState<ValidationStatus>("idle");
+  const [validationIssues, setValidationIssues] = React.useState<PlanValidationIssue[]>([]);
+  const [validationError, setValidationError] = React.useState<string | null>(null);
+  const [validationRetryKey, setValidationRetryKey] = React.useState(0);
 
   // ---- Add-course dialog (keyboard/click alternative to dragging) ----
   const [addDialogTermId, setAddDialogTermId] = React.useState<string | null>(null);
@@ -283,6 +292,40 @@ export default function Plan() {
         setRailLoading(false);
       });
   }, [debouncedRailQuery, railRetryKey]);
+
+  // ---- Debounced server validation, re-run whenever the plan changes ----
+  const [debouncedPlanForValidation, setDebouncedPlanForValidation] = React.useState<PlanCourse[]>([]);
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedPlanForValidation(planCourses), 300);
+    return () => window.clearTimeout(t);
+  }, [planCourses]);
+
+  const validationRequestId = React.useRef(0);
+  React.useEffect(() => {
+    if (!planInitialized) return;
+    const id = ++validationRequestId.current;
+    setValidationStatus("loading");
+    setValidationError(null);
+    const items = debouncedPlanForValidation.map((p) => ({ courseCode: p.code, termSession: p.term }));
+    api
+      .validatePlan(items)
+      .then((res) => {
+        if (validationRequestId.current !== id) return;
+        setValidationIssues(res.issues);
+        setValidationStatus("success");
+      })
+      .catch((e: unknown) => {
+        if (validationRequestId.current !== id) return;
+        setValidationError(e instanceof Error ? e.message : "Couldn't validate your plan.");
+        setValidationStatus("error");
+      });
+  }, [debouncedPlanForValidation, planInitialized, validationRetryKey]);
+
+  const validationErrorCount = React.useMemo(
+    () => validationIssues.filter((i) => i.severity === "error").length,
+    [validationIssues],
+  );
+  const validationWarningCount = validationIssues.length - validationErrorCount;
 
   // ---- Still-open requirement-group course codes, across enrolled programs ----
   const remainingCodes = React.useMemo(() => {
@@ -440,24 +483,6 @@ export default function Plan() {
     return list;
   }, [sessions, yearsAhead, planCourses, courseDetails, record, computeIssues, computeSatisfies]);
 
-  const issuesList = React.useMemo<ValidationIssueVM[]>(() => {
-    const out: ValidationIssueVM[] = [];
-    for (const term of terms) {
-      for (const c of term.courses) {
-        for (const kind of c.issues) {
-          const message =
-            kind === "prereq"
-              ? `Prerequisite not met for ${c.code} in ${term.season} ${term.calendarYear}.`
-              : kind === "exclusion"
-                ? `${c.code} conflicts with an exclusion already on your record or plan.`
-                : `${c.code} isn't typically offered in ${term.season}.`;
-          out.push({ kind, code: c.code, message });
-        }
-      }
-    }
-    return out;
-  }, [terms]);
-
   function termLabel(termId: string): string {
     const t = terms.find((x) => x.id === termId);
     return t ? `${t.season} ${t.calendarYear}` : termId;
@@ -584,8 +609,22 @@ export default function Plan() {
   }
 
   function handleValidateClick() {
-    if (issuesList.length === 0) pushToast("success", "Plan validates — no issues found.");
-    else pushToast("warning", `${issuesList.length} issue${issuesList.length === 1 ? "" : "s"} found — see below.`);
+    if (validationStatus === "loading") return;
+    if (validationStatus === "error") {
+      pushToast("danger", validationError ?? "Couldn't validate your plan.");
+    } else if (validationIssues.length === 0) {
+      pushToast("success", "Plan validates — no issues found.");
+    } else if (validationErrorCount === 0) {
+      pushToast(
+        "warning",
+        `Validates with ${validationWarningCount} warning${validationWarningCount === 1 ? "" : "s"} — see below.`,
+      );
+    } else {
+      pushToast(
+        "warning",
+        `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"} found — see below.`,
+      );
+    }
     validationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -599,8 +638,20 @@ export default function Plan() {
     [planCourses, record],
   );
 
+  // Issue 3: when no program's requirements have parsed (or none are
+  // enrolled), `remainingCodes` is empty -- filtering by it then would
+  // silently show "no matching courses" for every search, indistinguishable
+  // from a genuine zero-match search. Disable the checkbox instead, with a
+  // hint explaining why, rather than let it lie about the plan's state.
+  const onlyRemainingDisabled = remainingCodes.size === 0;
+  const onlyRemainingHint = !onlyRemainingDisabled
+    ? undefined
+    : !record || record.programs.length === 0
+      ? "Add a program from Requirements to enable this filter."
+      : "Load your programs' requirements first — no requirement data available yet.";
+
   const railCourses = React.useMemo(() => {
-    const list = onlyRemaining ? railResults.filter((c) => remainingCodes.has(c.code)) : railResults;
+    const list = onlyRemaining && !onlyRemainingDisabled ? railResults.filter((c) => remainingCodes.has(c.code)) : railResults;
     return list.map((c) => ({
       code: c.code,
       title: c.title,
@@ -608,7 +659,21 @@ export default function Plan() {
       breadth: mapBreadthKeys(c.breadth),
       status: railCourseStatus(c.code),
     }));
-  }, [railResults, onlyRemaining, remainingCodes, railCourseStatus]);
+  }, [railResults, onlyRemaining, onlyRemainingDisabled, remainingCodes, railCourseStatus]);
+
+  // Issue 5/6: the rail's empty/helper copy should say *why* the list looks
+  // the way it does -- "no matches for this search" reads very differently
+  // from "browsing the catalog, nothing filtered yet".
+  const railEmptyMessage = debouncedRailQuery
+    ? `No courses match "${debouncedRailQuery}".`
+    : onlyRemaining && !onlyRemainingDisabled
+      ? "No unplaced courses fill a remaining requirement."
+      : "No courses available.";
+  const railHelperText =
+    !debouncedRailQuery && !(onlyRemaining && !onlyRemainingDisabled) ? "Browsing the catalog — type to search." : undefined;
+  const railCountLabel = railLoading
+    ? undefined
+    : `${railCourses.length} course${railCourses.length === 1 ? "" : "s"}`;
 
   const addDialogOptions = React.useMemo(
     () =>
@@ -644,11 +709,28 @@ export default function Plan() {
               Validate
             </Button>
             <Button
-              variant={issuesList.length > 0 ? "danger" : "secondary"}
-              icon={issuesList.length > 0 ? "triangle-alert" : "circle-check"}
-              onClick={handleValidateClick}
+              variant={validationStatus === "error" || validationErrorCount > 0 ? "danger" : "secondary"}
+              icon={
+                validationStatus === "loading"
+                  ? "loader-circle"
+                  : validationStatus === "error"
+                    ? "circle-alert"
+                    : validationErrorCount > 0 || validationWarningCount > 0
+                      ? "triangle-alert"
+                      : "circle-check"
+              }
+              disabled={validationStatus === "loading"}
+              onClick={validationStatus === "error" ? () => setValidationRetryKey((k) => k + 1) : handleValidateClick}
             >
-              {issuesList.length} issue{issuesList.length === 1 ? "" : "s"}
+              {validationStatus === "loading"
+                ? "Validating…"
+                : validationStatus === "error"
+                  ? "Couldn't validate"
+                  : validationErrorCount > 0
+                    ? `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"}`
+                    : validationWarningCount > 0
+                      ? `${validationWarningCount} warning${validationWarningCount === 1 ? "" : "s"}`
+                      : "0 issues"}
             </Button>
             <Button variant="primary" icon="sparkles" onClick={() => setAutoPlanOpen(true)}>
               Auto-plan
@@ -710,31 +792,65 @@ export default function Plan() {
               onlyRemaining={onlyRemaining}
               onToggleRemaining={setOnlyRemaining}
               onDragCourse={() => {}}
+              loading={railLoading}
+              onlyRemainingDisabled={onlyRemainingDisabled}
+              onlyRemainingHint={onlyRemainingHint}
+              emptyMessage={railEmptyMessage}
+              helperText={railHelperText}
+              countLabel={railCountLabel}
             />
           )}
 
           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
             <div ref={validationRef}>
-              <ValidationSummary
-                issues={issuesList}
-                onJump={(iss: ValidationIssueVM) => iss.code && navigate(`/courses/${iss.code}`)}
-              />
+              {validationStatus === "error" ? (
+                <Callout
+                  tone="danger"
+                  title="Couldn't validate your plan"
+                  action={
+                    <Button variant="secondary" size="sm" onClick={() => setValidationRetryKey((k) => k + 1)}>
+                      Retry
+                    </Button>
+                  }
+                >
+                  {validationError}
+                </Callout>
+              ) : validationStatus === "loading" && validationIssues.length === 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    color: "var(--text-secondary)",
+                    fontSize: "var(--text-body-sm)",
+                  }}
+                >
+                  <Spinner size={16} />
+                  Validating your plan…
+                </div>
+              ) : (
+                <ValidationSummary
+                  issues={validationIssues}
+                  onJump={(iss: PlanValidationIssue) => iss.code && navigate(`/courses/${iss.code}`)}
+                />
+              )}
             </div>
 
-            {railLoading && railResults.length === 0 ? (
-              <PlanBoardSkeleton />
-            ) : (
-              <PlanBoard
-                terms={terms}
-                onDropCourse={(termId: string, code: string) => handleDropCourse(termId, code)}
-                onAddCourse={(termId: string) => {
-                  setAddDialogTermId(termId);
-                  setAddDialogChoice(null);
-                }}
-                onRemoveCourse={handleRemoveCourse}
-                onCourseClick={(c: PlanCardVM) => setActiveCourseCode(c.code)}
-              />
-            )}
+            <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
+              {planCourses.length} course{planCourses.length === 1 ? "" : "s"} planned across {terms.length} terms
+              shown.
+            </div>
+
+            <PlanBoard
+              terms={terms}
+              onDropCourse={(termId: string, code: string) => handleDropCourse(termId, code)}
+              onAddCourse={(termId: string) => {
+                setAddDialogTermId(termId);
+                setAddDialogChoice(null);
+              }}
+              onRemoveCourse={handleRemoveCourse}
+              onCourseClick={(c: PlanCardVM) => setActiveCourseCode(c.code)}
+            />
           </div>
         </div>
       )}

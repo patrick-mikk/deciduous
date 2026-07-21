@@ -22,6 +22,7 @@ import type {
   Course,
   DegreeAuditData,
   EnrolledProgramRef,
+  PlanValidationIssue,
   Program,
   SessionCode,
   StudentRecord,
@@ -42,6 +43,17 @@ export interface ProgramSearchParams {
   subject?: string;
   page?: number;
   pageSize?: number;
+}
+
+/** One `planCourses` entry, shaped for `POST /api/plan/validate`'s ad hoc `items` override. */
+export interface PlanValidationItem {
+  courseCode: string;
+  termSession: string;
+  status?: "planned" | "completed" | "in_progress" | "extra";
+}
+
+export interface PlanValidationResult {
+  issues: PlanValidationIssue[];
 }
 
 /** The full surface a screen can call. Both `mockClient` and `httpClient` implement this. */
@@ -66,6 +78,16 @@ export interface ApiClient {
   // Courses
   getCourses(params?: CourseSearchParams): Promise<Course[]>;
   getCourse(code: string): Promise<Course | null>;
+
+  /**
+   * `POST /api/plan/validate` (backend/api/plan.py) — validates an ad hoc
+   * `items` list (the client-held plan, not yet persisted via `PUT
+   * /api/plan`) against prerequisites/exclusions/offering plus the caller's
+   * program-requirement coverage. Server-authoritative: this is the only
+   * source that can surface plan-wide warnings the client can't compute
+   * itself (e.g. a program whose requirements haven't been parsed yet).
+   */
+  validatePlan(items: PlanValidationItem[]): Promise<PlanValidationResult>;
 
   // Me
   getMyRecord(): Promise<StudentRecord>;
@@ -130,6 +152,30 @@ export const mockClient: ApiClient = {
     return delay(results);
   },
   getCourse: (code) => delay(mock.findCourse(code) ?? null),
+
+  // Lightweight demo approximation (exclusion conflicts only) -- the offline
+  // mock adapter has no server to run the real prereq/requirement engine
+  // against; screens should treat this as a stand-in, not a spec.
+  validatePlan: (items) => {
+    const codes = new Set(items.map((i) => i.courseCode));
+    const issues: PlanValidationIssue[] = [];
+    for (const item of items) {
+      const course = mock.findCourse(item.courseCode);
+      if (!course) continue;
+      const excluded = Array.from(new Set(course.exclusions.match(/[A-Z]{3}\d{3}[HY]\d/g) ?? [])).filter(
+        (c) => c !== item.courseCode && codes.has(c),
+      );
+      if (excluded.length > 0) {
+        issues.push({
+          severity: "error",
+          kind: "exclusion",
+          code: item.courseCode,
+          message: `${item.courseCode} cannot be taken with ${excluded.join(", ")} (exclusion).`,
+        });
+      }
+    }
+    return delay({ issues });
+  },
 
   getMyRecord: () => delay(mock.mockStudentRecord),
   getMyRequirementProgress: () => delay(mock.mockStudentRecord.requirementProgress),
@@ -382,6 +428,25 @@ export const httpClient: ApiClient = {
       Array.isArray(res) ? res : res.courses,
     ),
   getCourse: (code) => http(`/courses/${encodeURIComponent(code)}`),
+
+  // `POST /api/plan/validate` returns `{issues: [{severity, type, courseCode,
+  // message}], summary, programs}` (backend/api/plan.py) -- normalize the
+  // wire shape's `type`/`courseCode` to our `PlanValidationIssue`'s
+  // `kind`/`code` at the client boundary (same pattern as the
+  // getPrograms/getCourses envelope-unwrap above), so screens only ever see
+  // the one issue shape regardless of mock vs live backend.
+  validatePlan: (items) =>
+    http<{ issues: { severity: string; type: string; courseCode: string; message: string }[] }>(
+      "/plan/validate",
+      { method: "POST", body: JSON.stringify({ items }) },
+    ).then((res) => ({
+      issues: (res.issues ?? []).map((iss) => ({
+        severity: (iss.severity as PlanValidationIssue["severity"]) || "error",
+        kind: iss.type,
+        code: iss.courseCode ?? "",
+        message: iss.message,
+      })),
+    })),
 
   getMyRecord: () => http("/me"),
   // `GET /api/me/requirements` (backend/api/me.py `requirements()`) is the

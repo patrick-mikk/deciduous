@@ -5069,7 +5069,13 @@ function CourseRail({
   onQuery,
   onlyRemaining = false,
   onToggleRemaining,
-  onDragCourse
+  onDragCourse,
+  loading = false,
+  onlyRemainingDisabled = false,
+  onlyRemainingHint,
+  emptyMessage = 'No matching courses.',
+  helperText,
+  countLabel
 }) {
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5102,7 +5108,7 @@ function CourseRail({
     style: {
       width: '100%',
       boxSizing: 'border-box',
-      padding: '9px 12px 9px 32px',
+      padding: '9px 32px 9px 32px',
       border: '1px solid var(--border)',
       borderRadius: 'var(--radius-md)',
       fontFamily: 'var(--font-sans)',
@@ -5111,27 +5117,68 @@ function CourseRail({
       background: 'var(--surface)',
       color: 'var(--text)'
     }
-  })), /*#__PURE__*/React.createElement("label", {
+  }), loading && /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: 'absolute',
+      right: 10,
+      top: '50%',
+      transform: 'translateY(-50%)',
+      display: 'inline-flex'
+    }
+  }, /*#__PURE__*/React.createElement(__ds_scope.Spinner, {
+    size: 14,
+    color: 'var(--text-tertiary)'
+  }))), /*#__PURE__*/React.createElement("label", {
     style: {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
       fontSize: 'var(--text-body-sm)',
-      color: 'var(--text-secondary)',
-      cursor: 'pointer'
+      color: onlyRemainingDisabled ? 'var(--text-tertiary)' : 'var(--text-secondary)',
+      cursor: onlyRemainingDisabled ? 'not-allowed' : 'pointer'
     }
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: onlyRemaining,
+    disabled: onlyRemainingDisabled,
     onChange: e => onToggleRemaining && onToggleRemaining(e.target.checked)
-  }), "Only courses that fill a remaining requirement"), /*#__PURE__*/React.createElement("div", {
+  }), "Only courses that fill a remaining requirement"), onlyRemainingDisabled && onlyRemainingHint && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-caption)',
+      color: 'var(--text-tertiary)',
+      marginTop: -6
+    }
+  }, onlyRemainingHint), (countLabel || helperText) && !loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-caption)',
+      color: 'var(--text-tertiary)'
+    }
+  }, countLabel, countLabel && helperText ? ' — ' : null, helperText), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
       gap: 8,
       overflowY: 'auto'
     }
-  }, courses.map(c => /*#__PURE__*/React.createElement(__ds_scope.CourseCard, {
+  }, loading ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+      color: 'var(--text-tertiary)',
+      fontSize: 'var(--text-body-sm)',
+      padding: '20px 4px'
+    }
+  }, /*#__PURE__*/React.createElement(__ds_scope.Spinner, {
+    size: 18
+  }), "Searching…") : courses.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-body-sm)',
+      color: 'var(--text-tertiary)',
+      padding: '12px 4px'
+    }
+  }, emptyMessage) : courses.map(c => /*#__PURE__*/React.createElement(__ds_scope.CourseCard, {
     key: c.code,
     compact: true,
     code: c.code,
@@ -5144,13 +5191,7 @@ function CourseRail({
       e.dataTransfer.setData('text/plain', c.code);
       onDragCourse && onDragCourse(c.code);
     }
-  })), courses.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 'var(--text-body-sm)',
-      color: 'var(--text-tertiary)',
-      padding: '12px 4px'
-    }
-  }, "No matching courses.")));
+  }))));
 }
 Object.assign(__ds_scope, { CourseRail });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/plan/CourseRail.jsx", error: String((e && e.message) || e) }); }
@@ -5486,20 +5527,60 @@ Object.assign(__ds_scope, { PlanBoard });
 try { (() => {
 const KIND = {
   prereq: {
-    icon: 'triangle-alert',
-    color: 'var(--danger)'
+    icon: 'triangle-alert'
+  },
+  prerequisite: {
+    icon: 'triangle-alert'
+  },
+  corequisite: {
+    icon: 'triangle-alert'
   },
   exclusion: {
-    icon: 'octagon-x',
-    color: 'var(--danger)'
+    icon: 'octagon-x'
   },
   'not-offered': {
-    icon: 'clock',
-    color: 'var(--warning)'
+    icon: 'clock'
+  },
+  offering: {
+    icon: 'clock'
+  },
+  unverified: {
+    icon: 'help-circle'
+  },
+  requirements_unparsed: {
+    icon: 'file-question'
+  },
+  'one-type-per-subject': {
+    icon: 'layers'
+  },
+  'distinct-credits': {
+    icon: 'layers'
   }
 };
 
-/** Collapsible list of all plan issues with jump-to links. */
+// severity -> banner/icon colour (Issue 4: warnings must read as warnings, not
+// errors \u2014 only an `error`-severity issue should ever paint this danger-red;
+// severity-only issues (e.g. backend's `requirements_unparsed`) get the
+// amber warning treatment instead).
+const SEVERITY = {
+  error: {
+    fg: 'var(--danger)',
+    bg: 'var(--danger-bg)'
+  },
+  warning: {
+    fg: 'var(--warning)',
+    bg: 'var(--warning-bg)'
+  },
+  info: {
+    fg: 'var(--info)',
+    bg: 'var(--info-bg)'
+  }
+};
+
+/** Collapsible list of all plan issues with jump-to links. Banner tone reflects
+ * the worst severity present \u2014 `error` only if at least one issue actually is
+ * one; a plan with only `warning`/`info` issues (e.g. unparsed requirements)
+ * reads as a warning, never the green "validates" state and never red. */
 function ValidationSummary({
   issues = [],
   onJump,
@@ -5525,10 +5606,14 @@ function ValidationSummary({
       }
     }), "No issues \u2014 plan validates");
   }
+  const hasError = issues.some(iss => (iss.severity || 'error') === 'error');
+  const worst = hasError ? SEVERITY.error : SEVERITY.warning;
+  const warningCount = issues.length - issues.filter(iss => (iss.severity || 'error') === 'error').length;
+  const headerLabel = hasError ? `${issues.length} issue${issues.length > 1 ? 's' : ''}` : `Validates with ${warningCount} warning${warningCount === 1 ? '' : 's'}`;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'var(--surface)',
-      border: '1px solid var(--danger)',
+      border: `1px solid ${worst.fg}`,
       borderRadius: 'var(--radius-md)',
       fontFamily: 'var(--font-sans)',
       overflow: 'hidden'
@@ -5541,7 +5626,7 @@ function ValidationSummary({
       gap: 8,
       width: '100%',
       padding: '12px 14px',
-      background: 'var(--danger-bg)',
+      background: worst.bg,
       border: 'none',
       cursor: 'pointer',
       textAlign: 'left'
@@ -5551,14 +5636,14 @@ function ValidationSummary({
     style: {
       width: 16,
       height: 16,
-      color: 'var(--danger)'
+      color: worst.fg
     }
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 'var(--weight-semibold)',
       color: 'var(--text)'
     }
-  }, issues.length, " issue", issues.length > 1 ? 's' : ''), /*#__PURE__*/React.createElement("i", {
+  }, headerLabel), /*#__PURE__*/React.createElement("i", {
     "data-lucide": open ? 'chevron-up' : 'chevron-down',
     style: {
       width: 16,
@@ -5568,6 +5653,7 @@ function ValidationSummary({
     }
   })), open && /*#__PURE__*/React.createElement("div", null, issues.map((iss, i) => {
     const k = KIND[iss.kind] || KIND.prereq;
+    const sev = SEVERITY[iss.severity || 'error'] || SEVERITY.error;
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       onClick: () => onJump && onJump(iss),
@@ -5584,7 +5670,7 @@ function ValidationSummary({
       style: {
         width: 15,
         height: 15,
-        color: k.color,
+        color: sev.fg,
         flexShrink: 0,
         marginTop: 2
       }
