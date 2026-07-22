@@ -72,9 +72,7 @@ export default function Landing() {
       <section className="dc-landing__hero">
         <div>
           <p className="dc-landing__eyebrow">For UofT Arts &amp; Science students</p>
-          <h1 className="dc-landing__headline">
-            Plan your degree: courses, requirements, and a conflict-free timetable.
-          </h1>
+          <h1 className="dc-landing__headline">Plan your degree with Deciduous.</h1>
           <p className="dc-landing__subtitle">
             Import your transcript, track credits and breadth against the real degree rules, and
             build a schedule that fits.
