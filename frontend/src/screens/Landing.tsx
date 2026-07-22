@@ -1,16 +1,29 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Wordmark, Button, Chip, Skeleton, Callout } from "@/ds";
+import {
+  Wordmark,
+  Button,
+  Badge,
+  Chip,
+  Skeleton,
+  Callout,
+  DegreeProgressCard,
+  BreadthTracker,
+} from "@/ds";
 import { api } from "@/api";
-import type { SessionCode } from "@/api";
+import type { BreadthData, SessionCode } from "@/api";
 import "./Landing.css";
 
 /**
- * Landing (`/`) — the one public page (design/screens/01-auth-and-onboarding.md).
- * Plain header bar + a one-line description of the tool, modelled on UofT's
- * Timetable Builder: no illustration, no sample-data preview, minimal color.
+ * Landing (`/`) — the one marketing/editorial page (design/screens/01-auth-and-onboarding.md).
+ * Public, no AppLayout chrome. Hero uses the serif/display treatment; the
+ * right-hand visual is real DegreeProgressCard + BreadthTracker components
+ * fed illustrative sample data (clearly labelled "Sample data" — this is a
+ * logged-out page, there is no real record to show yet).
  */
+
+const SAMPLE_BREADTH: BreadthData = { BR1: 1.0, BR2: 1.0, BR3: 1.0, BR4: 1.0, BR5: 0.5 };
 
 function sessionLabel(code: SessionCode): string {
   const year = code.slice(0, 4);
@@ -57,53 +70,75 @@ export default function Landing() {
       </header>
 
       <section className="dc-landing__hero">
-        <h1 className="dc-landing__headline">Deciduous</h1>
-        <p className="dc-landing__subtitle">
-          Search UofT Arts &amp; Science courses, track your degree progress against the real
-          program rules, and build a conflict-free timetable.
-        </p>
+        <div>
+          <p className="dc-landing__eyebrow">For UofT Arts &amp; Science students</p>
+          <h1 className="dc-landing__headline">
+            Plan your degree: courses, requirements, and a conflict-free timetable.
+          </h1>
+          <p className="dc-landing__subtitle">
+            Import your transcript, track credits and breadth against the real degree rules, and
+            build a schedule that fits.
+          </p>
 
-        <div className="dc-landing__cta-row">
-          <Button type="button" variant="primary" size="lg" onClick={() => navigate("/onboarding")}>
-            Get started
-          </Button>
+          <div className="dc-landing__cta-row">
+            <Button type="button" variant="primary" size="lg" onClick={() => navigate("/onboarding")}>
+              Get started
+            </Button>
+          </div>
+
+          <div className="dc-landing__live" aria-live="polite">
+            {sessionsState.status === "loading" && (
+              <>
+                <Skeleton width={96} height={22} radius="var(--radius-pill)" />
+                <Skeleton width={110} height={22} radius="var(--radius-pill)" />
+                <Skeleton width={88} height={22} radius="var(--radius-pill)" />
+              </>
+            )}
+            {sessionsState.status === "error" && (
+              <Callout tone="warning" title="Couldn't load live session data">
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  The timetable feed didn't respond.
+                  <Button type="button" variant="link" size="sm" onClick={() => setRetryKey((k) => k + 1)}>
+                    Retry
+                  </Button>
+                </span>
+              </Callout>
+            )}
+            {sessionsState.status === "ready" &&
+              (sessionsState.sessions.length > 0 ? (
+                sessionsState.sessions.map((s) => (
+                  <Chip key={s} tone="accent" dot>
+                    {sessionLabel(s)}
+                  </Chip>
+                ))
+              ) : (
+                <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
+                  No live sessions published right now.
+                </span>
+              ))}
+          </div>
+
+          <p className="dc-landing__disclaimer">
+            Unofficial · not affiliated with the University of Toronto.
+          </p>
         </div>
 
-        <div className="dc-landing__live" aria-live="polite">
-          {sessionsState.status === "loading" && (
-            <>
-              <Skeleton width={96} height={22} radius="var(--radius-pill)" />
-              <Skeleton width={110} height={22} radius="var(--radius-pill)" />
-              <Skeleton width={88} height={22} radius="var(--radius-pill)" />
-            </>
-          )}
-          {sessionsState.status === "error" && (
-            <Callout tone="warning" title="Couldn't load live session data">
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                The timetable feed didn't respond.
-                <Button type="button" variant="link" size="sm" onClick={() => setRetryKey((k) => k + 1)}>
-                  Retry
-                </Button>
-              </span>
-            </Callout>
-          )}
-          {sessionsState.status === "ready" &&
-            (sessionsState.sessions.length > 0 ? (
-              sessionsState.sessions.map((s) => (
-                <Chip key={s} tone="accent" dot>
-                  {sessionLabel(s)}
-                </Chip>
-              ))
-            ) : (
-              <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
-                No live sessions published right now.
-              </span>
-            ))}
+        <div className="dc-landing__visual" aria-hidden="true">
+          <div className="dc-landing__visual-badge">
+            <Badge tone="neutral">Sample data</Badge>
+          </div>
+          <DegreeProgressCard
+            degreeName="B.A., Public Policy Major"
+            degreePct={67}
+            earned={13.5}
+            requiredCredits={20}
+            onTrack
+            expectedGrad="Spring 2027"
+          />
+          <div className="dc-landing__breadth-card">
+            <BreadthTracker data={SAMPLE_BREADTH} />
+          </div>
         </div>
-
-        <p className="dc-landing__disclaimer">
-          Unofficial, not affiliated with the University of Toronto.
-        </p>
       </section>
     </div>
   );
