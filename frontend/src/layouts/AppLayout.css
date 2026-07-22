@@ -1,10 +1,12 @@
-/* Mirrors the grid the design system's own AppShell uses internally (top/nav/main/strip
-   named areas — see design/claude-design-output/_ds_bundle.js, components/layout/AppShell.jsx),
-   but composed by hand here so this app's ThemeProvider can drive TopBar's theme
-   toggle directly instead of AppShell's built-in (uncontrolled) theme state. */
+/* Modernized-ACORN app shell: a persistent dark navigation rail spanning the
+   full height on the left, with the light utility TopBar, routed content, and
+   the ProgressStrip stacked in the right column. Composed by hand (rather than
+   using the design system's AppShell) so this app's ThemeProvider drives the
+   TopBar theme toggle directly instead of AppShell's built-in (uncontrolled)
+   theme state. */
 .dc-app-shell {
   display: grid;
-  grid-template-areas: "top top" "nav main" "strip strip";
+  grid-template-areas: "nav top" "nav main" "nav strip";
   grid-template-columns: auto 1fr;
   grid-template-rows: auto 1fr auto;
   height: 100vh;
@@ -13,6 +15,17 @@
   color: var(--text);
   font-family: var(--font-sans);
   overflow: hidden;
+}
+
+/* Nav-rail item hover/focus — inline styles can't express :hover, so the rail's
+   idle→hover transition lives here. Active items keep their own background. */
+.dc-sidenav-item {
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+.dc-sidenav-item:hover {
+  background: var(--sidebar-bg-hover) !important;
+  color: var(--sidebar-text) !important;
 }
 
 .dc-app-shell__main {
@@ -30,6 +43,12 @@
   .dc-app-shell {
     grid-template-areas: "top" "main" "strip";
     grid-template-columns: 1fr;
+  }
+
+  /* The dark rail is hidden on narrow screens (it is not in the mobile grid);
+     mobile navigation belongs to a separate bottom bar / drawer surface. */
+  .dc-app-shell > nav {
+    display: none;
   }
 
   .dc-app-shell__main {

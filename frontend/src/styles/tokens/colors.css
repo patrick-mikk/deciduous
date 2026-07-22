@@ -76,6 +76,17 @@
   --accent-green: var(--br4);
   --accent-red: var(--danger);
   --accent-violet: var(--br1);
+
+  /* Persistent dark navigation rail (modernized-ACORN institutional sidebar).
+     A deep navy anchor on the left; the teal --accent is the single active-item
+     marker. Distinct from --primary so the rail can sit darker than buttons. */
+  --sidebar-bg: #16233D;
+  --sidebar-bg-hover: #22355A;
+  --sidebar-active-bg: #24396040;
+  --sidebar-text: #EAEFF8;
+  --sidebar-text-muted: #9AA8C2;
+  --sidebar-border: #26375A;
+  --sidebar-accent: var(--accent);
 }
 
 :root[data-theme="dark"] {
@@ -117,4 +128,14 @@
   --br4-bg: #12281C;
   --br5: #3FB6CB;
   --br5-bg: #0E2A30;
+
+  /* Dark-theme navigation rail: a shade below the page so the rail still reads
+     as a distinct surface against the near-black background. */
+  --sidebar-bg: #0C1526;
+  --sidebar-bg-hover: #1A2740;
+  --sidebar-active-bg: #24365C4D;
+  --sidebar-text: #E9EEF7;
+  --sidebar-text-muted: #8494AD;
+  --sidebar-border: #1F2E48;
+  --sidebar-accent: var(--accent);
 }

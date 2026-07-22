@@ -284,31 +284,33 @@ function ReadyDashboard({
 
   return (
     <>
+      {/* KPI row: flat, 1px-bordered tiles — no per-tile accent bar. The single
+          teal accent on this screen lives on the degree-progress summary card
+          below (modernized-ACORN: one highlighted card, not every card). */}
       <div className="dc-dashboard__stats">
         <StatTile
           label="Credits"
           value={`${summary.creditsEarned.toFixed(1)}/${summary.creditsTotal.toFixed(1)}`}
           sub={`${Math.round(summary.degreePct)}% of degree`}
-          accent="var(--primary)"
         />
         <StatTile
           label="CGPA"
           value={audit.cgpa.toFixed(2)}
           sub="Graduate minimum 1.85"
-          accent={TONE_VAR[audit.cgpa >= 1.85 ? "success" : "warning"]}
         />
         <StatTile
           label="Breadth"
           value={`${breadthEvaluation.fulls}/5`}
           sub={breadthEvaluation.satisfied ? "Requirement satisfied" : `${breadthEvaluation.remaining.toFixed(1)} cr to go`}
-          accent={TONE_VAR[breadthEvaluation.satisfied ? "success" : "warning"]}
         />
-        <StatTile label="Standing" value={standing.label} sub={`CGPA ${audit.cgpa.toFixed(2)}`} accent={TONE_VAR[standing.tone]} />
+        <StatTile label="Standing" value={standing.label} sub={`CGPA ${audit.cgpa.toFixed(2)}`} />
       </div>
 
       <div className="dc-dashboard__columns">
         <div className="dc-dashboard__left">
-          <Card>
+          {/* The one highlighted summary card on this screen: a single subtle
+              teal left-accent bar marks the degree-progress hero. */}
+          <Card style={{ borderLeft: "3px solid var(--accent)" }}>
             <div className="dc-dashboard__hero">
               <DegreeProgressCard
                 degreePct={summary.degreePct}
