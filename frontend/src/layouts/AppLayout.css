@@ -1,12 +1,12 @@
-/* Modernized-ACORN app shell: a persistent dark navigation rail spanning the
-   full height on the left, with the light utility TopBar, routed content, and
-   the ProgressStrip stacked in the right column. Composed by hand (rather than
-   using the design system's AppShell) so this app's ThemeProvider drives the
-   TopBar theme toggle directly instead of AppShell's built-in (uncontrolled)
-   theme state. */
+/* Modernized-ACORN app shell (ACORN's own two-tone bones): a full-width navy
+   TopBar across the top, a persistent dark-slate navigation rail down the left
+   beneath it, and the routed content + ProgressStrip filling the rest.
+   Composed by hand (rather than using the design system's AppShell) so this
+   app's ThemeProvider drives the TopBar theme toggle directly instead of
+   AppShell's built-in (uncontrolled) theme state. */
 .dc-app-shell {
   display: grid;
-  grid-template-areas: "nav top" "nav main" "nav strip";
+  grid-template-areas: "top top" "nav main" "nav strip";
   grid-template-columns: auto 1fr;
   grid-template-rows: auto 1fr auto;
   height: 100vh;

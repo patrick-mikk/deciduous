@@ -78,15 +78,18 @@
   --accent-violet: var(--br1);
 
   /* Persistent dark navigation rail (modernized-ACORN institutional sidebar).
-     A deep navy anchor on the left; the teal --accent is the single active-item
-     marker. Distinct from --primary so the rail can sit darker than buttons. */
-  --sidebar-bg: #16233D;
-  --sidebar-bg-hover: #22355A;
-  --sidebar-active-bg: #24396040;
-  --sidebar-text: #EAEFF8;
-  --sidebar-text-muted: #9AA8C2;
-  --sidebar-border: #26375A;
+     A dark-slate charcoal rail that sits beneath the navy TopBar — ACORN's own
+     two-tone chrome. The teal --accent is the single active-item marker. */
+  --sidebar-bg: #22262F;
+  --sidebar-bg-hover: #2C313C;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.06);
+  --sidebar-text: #E7ECF3;
+  --sidebar-text-muted: #B4BECE;
+  --sidebar-border: #333A46;
   --sidebar-accent: var(--accent);
+  /* The navy TopBar stays institutional navy in BOTH themes (unlike --primary,
+     which lightens in dark mode for button contrast). */
+  --topbar-bg: #1E3765;
 }
 
 :root[data-theme="dark"] {
@@ -129,13 +132,16 @@
   --br5: #3FB6CB;
   --br5-bg: #0E2A30;
 
-  /* Dark-theme navigation rail: a shade below the page so the rail still reads
-     as a distinct surface against the near-black background. */
-  --sidebar-bg: #0C1526;
-  --sidebar-bg-hover: #1A2740;
-  --sidebar-active-bg: #24365C4D;
-  --sidebar-text: #E9EEF7;
-  --sidebar-text-muted: #8494AD;
-  --sidebar-border: #1F2E48;
+  /* Dark-theme navigation rail: a near-black slate, a shade below the page so
+     the rail still reads as a distinct surface. */
+  --sidebar-bg: #191C22;
+  --sidebar-bg-hover: #242830;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.07);
+  --sidebar-text: #E7ECF3;
+  --sidebar-text-muted: #97A2B2;
+  --sidebar-border: #2A2F38;
   --sidebar-accent: var(--accent);
+  /* A deeper navy in dark mode so the bar stays institutional, not the bright
+     lightened --primary used for buttons. */
+  --topbar-bg: #172440;
 }

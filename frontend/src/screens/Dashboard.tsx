@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom";
 
 import {
   PageHeader,
-  StatTile,
-  DegreeProgressCard,
   DegreeAudit,
   ProgramCard,
   BreadthTracker,
@@ -24,12 +22,13 @@ import "./Dashboard.css";
  * Dashboard (`/dashboard`) — the degree-audit home screen
  * (design/screens/02-dashboard-and-progress.md + design/09-uoft-degree-rules.md).
  *
- * "Where am I and what's next?": a StatTile KPI row (credits / CGPA / breadth /
- * standing), the DegreeProgressCard growth-tree hero, a hard-rule DegreeAudit
- * (one row per design/09 §1 rule), the student's enrolled ProgramCard list,
- * the full-width BreadthTracker, an alerts panel, and a derived next-actions
- * checklist. Composed entirely from src/ds (design system) + src/api (typed
- * client, falling back to the mock adapter when VITE_API_BASE is unset).
+ * "Where am I and what's next?": one teal-accented summary card holding a
+ * label-above-value KPI grid (degree progress / CGPA / breadth / standing) and
+ * the primary actions, a hard-rule DegreeAudit (one row per design/09 §1 rule),
+ * the student's enrolled ProgramCard list, the full-width BreadthTracker, an
+ * alerts panel, and a derived next-actions checklist. Composed entirely from
+ * src/ds (design system) + src/api (typed client, falling back to the mock
+ * adapter when VITE_API_BASE is unset).
  */
 
 interface DashboardData {
@@ -74,6 +73,19 @@ const TONE_VAR: Record<"success" | "warning" | "danger", string> = {
   warning: "var(--warning)",
   danger: "var(--danger)",
 };
+
+/** One cell of the summary card's label-above-value KPI grid (modernized-ACORN:
+ * a small uppercase muted label over a bold value). */
+function Kpi({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className="dc-dashboard__kpi">
+      <p className="dc-dashboard__kpi-label">{label}</p>
+      <p className="dc-dashboard__kpi-value" style={valueColor ? { color: valueColor } : undefined}>
+        {value}
+      </p>
+    </div>
+  );
+}
 
 function buildProgramRows(record: StudentRecord, allPrograms: Program[]): ProgramRow[] {
   return record.programs.map((enrolled) => {
@@ -132,18 +144,23 @@ function buildNextActions(audit: DegreeAuditData, breadth: BreadthEvaluation, un
 function DashboardSkeleton() {
   return (
     <>
-      <div className="dc-dashboard__stats">
-        {[0, 1, 2, 3].map((i) => (
-          <Card key={i} style={{ flex: 1, minWidth: 150 }}>
-            <Skeleton width="60%" height={12} style={{ marginBottom: 10 }} />
-            <Skeleton width="45%" height={26} />
-          </Card>
-        ))}
-      </div>
+      <Card style={{ borderLeft: "3px solid var(--accent)", marginBottom: "var(--space-6, 24px)" }}>
+        <div className="dc-dashboard__summary-grid">
+          {[0, 1, 2, 3].map((i) => (
+            <div className="dc-dashboard__kpi" key={i}>
+              <Skeleton width="60%" height={12} style={{ marginBottom: 10 }} />
+              <Skeleton width="45%" height={22} />
+            </div>
+          ))}
+        </div>
+      </Card>
       <div className="dc-dashboard__columns">
         <div className="dc-dashboard__left">
           <Card>
-            <Skeleton width={200} height={200} radius="50%" />
+            <Skeleton height={14} style={{ marginBottom: 14 }} />
+            <Skeleton height={14} style={{ marginBottom: 14 }} />
+            <Skeleton height={14} style={{ marginBottom: 14 }} />
+            <Skeleton height={14} />
           </Card>
           <Card>
             <Skeleton height={14} style={{ marginBottom: 14 }} />
@@ -284,44 +301,30 @@ function ReadyDashboard({
 
   return (
     <>
-      {/* KPI row: flat, 1px-bordered tiles — no per-tile accent bar. The single
-          teal accent on this screen lives on the degree-progress summary card
-          below (modernized-ACORN: one highlighted card, not every card). */}
-      <div className="dc-dashboard__stats">
-        <StatTile
-          label="Credits"
-          value={`${summary.creditsEarned.toFixed(1)}/${summary.creditsTotal.toFixed(1)}`}
-          sub={`${Math.round(summary.degreePct)}% of degree`}
-        />
-        <StatTile
-          label="CGPA"
-          value={audit.cgpa.toFixed(2)}
-          sub="Graduate minimum 1.85"
-        />
-        <StatTile
-          label="Breadth"
-          value={`${breadthEvaluation.fulls}/5`}
-          sub={breadthEvaluation.satisfied ? "Requirement satisfied" : `${breadthEvaluation.remaining.toFixed(1)} cr to go`}
-        />
-        <StatTile label="Standing" value={standing.label} sub={`CGPA ${audit.cgpa.toFixed(2)}`} />
-      </div>
+      {/* The single highlighted summary card on this screen (modernized-ACORN:
+          one teal-left-accented card, not an accent on every tile). ACORN's
+          "label above value" density, consolidated into one clean KPI grid with
+          the primary actions — replacing the old four-tile row + tree hero. */}
+      <Card style={{ borderLeft: "3px solid var(--accent)", marginBottom: "var(--space-6, 24px)" }}>
+        <div className="dc-dashboard__summary-grid">
+          <Kpi
+            label="Degree progress"
+            value={`${summary.creditsEarned.toFixed(1)} / ${summary.creditsTotal.toFixed(1)} credits`}
+          />
+          <Kpi label="CGPA" value={audit.cgpa.toFixed(2)} />
+          <Kpi label="Breadth" value={`${breadthEvaluation.fulls} / 5 categories`} />
+          <Kpi label="Standing" value={standing.label} valueColor={TONE_VAR[standing.tone]} />
+        </div>
+        <div className="dc-dashboard__summary-actions">
+          <Button onClick={() => navigate("/plan")}>View plan</Button>
+          <Button variant="secondary" onClick={() => navigate("/requirements")}>
+            Requirements
+          </Button>
+        </div>
+      </Card>
 
       <div className="dc-dashboard__columns">
         <div className="dc-dashboard__left">
-          {/* The one highlighted summary card on this screen: a single subtle
-              teal left-accent bar marks the degree-progress hero. */}
-          <Card style={{ borderLeft: "3px solid var(--accent)" }}>
-            <div className="dc-dashboard__hero">
-              <DegreeProgressCard
-                degreePct={summary.degreePct}
-                earned={audit.totalEarned}
-                requiredCredits={20}
-                onTrack={audit.cgpa >= 1.85 && breadthEvaluation.satisfied}
-                degreeName="Your degree"
-              />
-            </div>
-          </Card>
-
           <Card>
             <div className="dc-dashboard__section-title">
               <h2>Degree audit</h2>

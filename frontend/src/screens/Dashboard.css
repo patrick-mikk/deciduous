@@ -2,11 +2,36 @@
    Grid layout only; visual styling comes entirely from design-system components
    and CSS custom properties (frontend/src/styles/tokens). */
 
-.dc-dashboard__stats {
+/* Consolidated summary card: a "label above value" KPI grid (modernized-ACORN),
+   2 columns on desktop, collapsing to 1 on narrow screens. */
+.dc-dashboard__summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5, 20px) var(--space-9, 48px);
+}
+
+.dc-dashboard__kpi-label {
+  margin: 0;
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.dc-dashboard__kpi-value {
+  margin: 4px 0 0;
+  font-size: var(--text-h2);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+  line-height: var(--leading-tight);
+}
+
+.dc-dashboard__summary-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-5, 20px);
-  margin-bottom: var(--space-7, 32px);
+  gap: var(--space-3, 12px);
+  margin-top: var(--space-6, 24px);
 }
 
 .dc-dashboard__columns {
@@ -40,13 +65,6 @@
   color: var(--text);
 }
 
-.dc-dashboard__hero {
-  display: flex;
-  gap: var(--space-6, 24px);
-  align-items: center;
-  flex-wrap: wrap;
-}
-
 .dc-dashboard__program-list {
   display: flex;
   flex-direction: column;
@@ -74,6 +92,12 @@
 
 @media (max-width: 900px) {
   .dc-dashboard__columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .dc-dashboard__summary-grid {
     grid-template-columns: 1fr;
   }
 }

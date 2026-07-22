@@ -3587,7 +3587,7 @@ function SideNav({
     }
   }, brandNode), /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: '0 12px',
+      padding: brandNode ? '0 12px' : '12px 12px 0',
       display: 'flex',
       flexDirection: 'column',
       gap: 2
@@ -3831,7 +3831,7 @@ function TopBar({
     borderRadius: 'var(--radius-md)',
     border: 'none',
     background: 'transparent',
-    color: 'var(--text-secondary)',
+    color: 'rgba(255,255,255,0.85)',
     cursor: 'pointer'
   };
   return /*#__PURE__*/React.createElement("header", {
@@ -3839,11 +3839,10 @@ function TopBar({
       gridArea: 'top',
       display: 'flex',
       alignItems: 'center',
-      gap: 12,
-      background: 'var(--surface)',
-      borderBottom: '1px solid var(--border)',
+      gap: 16,
+      background: 'var(--topbar-bg)',
       height: 60,
-      padding: '0 20px',
+      padding: '0 16px',
       boxSizing: 'border-box'
     }
   }, /*#__PURE__*/React.createElement("button", {
@@ -3859,22 +3858,25 @@ function TopBar({
       width: 20,
       height: 20
     }
-  })), /*#__PURE__*/React.createElement("button", {
+  })), /*#__PURE__*/React.createElement(__ds_scope.Wordmark, {
+    size: 20,
+    onDark: true
+  }), /*#__PURE__*/React.createElement("button", {
     onClick: onSearchClick,
     style: {
-      marginLeft: 4,
+      marginLeft: 20,
       flex: 1,
-      maxWidth: 440,
+      maxWidth: 420,
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      height: 40,
+      height: 38,
       padding: '0 12px',
       borderRadius: 'var(--radius-md)',
       cursor: 'pointer',
-      background: 'var(--surface-sunken)',
-      border: '1px solid var(--border)',
-      color: 'var(--text-tertiary)',
+      background: 'rgba(255,255,255,0.12)',
+      border: '1px solid rgba(255,255,255,0.18)',
+      color: 'rgba(255,255,255,0.75)',
       fontFamily: 'var(--font-sans)',
       fontSize: 'var(--text-body-sm)',
       textAlign: 'left'
@@ -3895,9 +3897,8 @@ function TopBar({
       fontSize: 11,
       padding: '2px 6px',
       borderRadius: 'var(--radius-sm)',
-      background: 'var(--surface)',
-      border: '1px solid var(--border)',
-      color: 'var(--text-tertiary)'
+      background: 'rgba(255,255,255,0.14)',
+      border: '1px solid rgba(255,255,255,0.2)'
     }
   }, "\u2318K")), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3950,11 +3951,11 @@ function TopBar({
     style: {
       width: 34,
       height: 34,
-      marginLeft: 6,
+      marginLeft: 4,
       borderRadius: '50%',
-      border: 'none',
-      background: 'var(--primary)',
-      color: 'var(--text-on-primary)',
+      border: '1px solid rgba(255,255,255,0.25)',
+      background: 'rgba(255,255,255,0.15)',
+      color: '#fff',
       fontFamily: 'var(--font-sans)',
       fontSize: 13,
       fontWeight: 'var(--weight-bold)',

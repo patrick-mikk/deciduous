@@ -2,7 +2,7 @@ import * as React from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useTheme } from "@/theme/ThemeProvider";
-import { TopBar, SideNav, ProgressStrip, Callout, Wordmark } from "@/ds";
+import { TopBar, SideNav, ProgressStrip, Callout } from "@/ds";
 import { api, isMockApi } from "@/api";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import "./AppLayout.css";
@@ -71,12 +71,7 @@ export function AppLayout() {
         onMenuClick={() => setCollapsed((c) => !c)}
         notifications={notifications}
       />
-      <SideNav
-        active={active}
-        onNavigate={(key: string) => navigate(`/${key}`)}
-        collapsed={collapsed}
-        brand={(isCollapsed: boolean) => <Wordmark onDark markOnly={isCollapsed} size={20} />}
-      />
+      <SideNav active={active} onNavigate={(key: string) => navigate(`/${key}`)} collapsed={collapsed} />
       <main className="dc-app-shell__main">
         <div className="dc-app-shell__main-inner">
           {isMockApi && (
