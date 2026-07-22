@@ -64,7 +64,35 @@ class CourseRecord:
 
     @property
     def is_artsci(self) -> bool:
-        return any(d.strip().lower() in ("arts", "science") for d in self.distribution)
+        """THE single ArtSci classification rule for a course record -- every
+        consumer (`validators.degree_credit_summary`, `backend.api._audit`'s
+        `TranscriptRow` via `backend.api.me._transcript_rows`) reads this
+        property rather than re-deriving its own answer, so the same course
+        can never be counted as ArtSci in one place and non-ArtSci in
+        another (the "dual-engine" bug class this codebase has been burned
+        by before -- CGPA, program completion).
+
+        1. Real Calendar/cache data wins: if `distribution` was populated
+           (the course was found in the course cache with a non-empty
+           `Course.distribution`), trust it -- "Arts" or "Science" means
+           ArtSci, anything else (e.g. an Engineering/APSC distribution)
+           means not.
+        2. No data available (`distribution` empty -- the common case for an
+           imported ACORN transcript row nothing has looked up in the cache
+           yet, or a past session the cache doesn't carry): fall back to the
+           course-code campus digit. This app is scoped to the ARTSC
+           division (AGENTS.md), and a St. George Arts & Science course code
+           ends its subject+number+credit-letter run in the campus digit
+           "1" (e.g. "ECO101H1", "POL208H1"). A transcript row shaped like
+           that defaults to ArtSci=True; anything else (unparseable code, or
+           a parseable non-"1" campus digit -- UTM/UTSC/professional
+           faculties) defaults to False. This is an honest default, not a
+           verified fact: a real `distribution` lookup always overrides it.
+        """
+        if self.distribution:
+            return any(d.strip().lower() in ("arts", "science") for d in self.distribution)
+        parsed = parse_course_code(self.code)
+        return parsed is not None and parsed.campus == "1"
 
 
 @dataclass(frozen=True)

@@ -48,6 +48,28 @@ export interface RemainingMatch {
  * group counts as open when its earned credits are below what it requires; a
  * program with no parsed progress row is treated as fully open. Courses the
  * student has already taken (`takenCodes`) are excluded.
+ *
+ * MECHANISM 1 — rule-level (requirement-line) satisfaction. A `RequirementGroup`
+ * can still be open overall while one of its individual `rules` (requirement
+ * *lines*, e.g. "1.0 credit from ECO101H1, ECO102H1 / ECO105Y1") is already
+ * satisfied by other completed courses. Suggesting a course from an
+ * already-satisfied line is the bug this guards against: e.g. a student who
+ * completed ECO101H1 + ECO102H1 has satisfied that line, so ECO105Y1 must not
+ * be suggested even though the group's other lines (Methods, electives, ...)
+ * are still open. A rule is satisfied once the sum of `creditFromCode` for its
+ * *taken* `courseCodes` reaches `rule.credits`. A code is only suggestible if
+ * it belongs to no rule at all (falls back to the old group-level open check)
+ * or belongs to at least one rule that is still unsatisfied — a code can
+ * appear in multiple rules across different groups/programs, so "unsatisfied
+ * somewhere" is enough. `rule.credits <= 0` is treated as not checkable (bad
+ * data) and its codes fall back to the group-level check rather than being
+ * silently hidden or force-suggested.
+ *
+ * Exclusion filtering (mechanism 2 — a *hard* Calendar exclusion, independent
+ * of degree-progress bookkeeping) is NOT done here: it needs each course's
+ * full `exclusions` text, which this function's inputs (`Program`/
+ * `RequirementProgress`) don't carry. See `isExcludedByTaken` below; callers
+ * apply it once course details are fetched.
  */
 export function remainingRequirementMatches(
   programs: Program[],
@@ -62,8 +84,31 @@ export function remainingRequirementMatches(
       const gp = progress.find((p) => p.label === group.heading);
       const open = gp ? gp.earned < gp.required : true;
       if (!open) continue;
+
+      // Codes covered by at least one *checkable* rule, and the subset of
+      // those still suggestible because some rule containing them isn't
+      // fully satisfied yet.
+      const codesInCheckableRules = new Set<string>();
+      const suggestibleFromRules = new Set<string>();
+      for (const rule of group.rules) {
+        if (rule.credits <= 0) continue; // not checkable -> its codes fall back below
+        for (const code of rule.courseCodes) codesInCheckableRules.add(code);
+        const earnedTowardRule = rule.courseCodes
+          .filter((code) => takenCodes.has(code))
+          .reduce((sum, code) => sum + creditFromCode(code), 0);
+        if (earnedTowardRule < rule.credits) {
+          for (const code of rule.courseCodes) suggestibleFromRules.add(code);
+        }
+      }
+
       for (const code of group.courseCodes) {
         if (takenCodes.has(code)) continue;
+        // Suggestible when: not covered by any checkable rule (fallback to
+        // the group-level open gate above), or covered by one that's still
+        // unsatisfied. Not suggestible when every rule it appears in is
+        // already satisfied by taken courses.
+        const suggestible = codesInCheckableRules.has(code) ? suggestibleFromRules.has(code) : true;
+        if (!suggestible) continue;
         if (!byCode.has(code)) byCode.set(code, new Set());
         byCode.get(code)!.add(shortenProgram(prog.title));
       }
@@ -72,6 +117,28 @@ export function remainingRequirementMatches(
   return Array.from(byCode.entries())
     .map(([code, set]) => ({ code, programs: Array.from(set), count: set.size }))
     .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+}
+
+/** Course codes mentioned in free text (prerequisites/exclusions/etc.), e.g.
+ * "POL208H1" — same pattern used ad hoc elsewhere in the app, exposed once
+ * here so the exclusion check below (and any future caller) shares it. */
+export function extractCourseCodes(text: string): string[] {
+  return Array.from(new Set(text.match(/[A-Z]{3}\d{3}[HY]\d/g) ?? []));
+}
+
+/**
+ * MECHANISM 2 — formal Calendar exclusion. True when a course's `exclusions`
+ * free text names a code the student has already completed/taken. This is a
+ * hard Calendar rule (e.g. ECO105Y1's exclusion text lists ECO101H1/ECO102H1)
+ * and is checked independently of rule/group satisfaction above: a course can
+ * belong to a requirement line that isn't "satisfied" by our bookkeeping yet
+ * and still be formally excluded, or vice versa. Every suggestion surface
+ * (Plan rail + add-dialog, Courses default list, Timetable add-dialog) must
+ * drop a fetched course when this returns true; explicit typed searches are
+ * left alone (searching isn't suggesting).
+ */
+export function isExcludedByTaken(exclusionsText: string, takenCodes: Set<string>): boolean {
+  return extractCourseCodes(exclusionsText).some((code) => takenCodes.has(code));
 }
 
 export interface BreadthEvaluation {

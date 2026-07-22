@@ -7,7 +7,10 @@ caller's data key — plus planned courses) and runs the pure
 `design/09-uoft-degree-rules.md`). Breadth categories and Arts/Science
 distribution are looked up from the course cache when available; a completed
 course whose past session isn't cached simply contributes no breadth tag (a
-best-effort limitation, surfaced as incomplete rather than wrong).
+best-effort limitation, surfaced as incomplete rather than wrong) -- but
+still gets an ArtSci classification, via `CourseRecord.is_artsci`'s
+course-code-campus-digit fallback (see that property's docstring), rather
+than silently reading as non-ArtSci for lack of a cache hit.
 """
 
 from __future__ import annotations

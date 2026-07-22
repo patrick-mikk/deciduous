@@ -25,24 +25,6 @@ import "./Landing.css";
 
 const SAMPLE_BREADTH: BreadthData = { BR1: 1.0, BR2: 1.0, BR3: 1.0, BR4: 1.0, BR5: 0.5 };
 
-const FEATURES = [
-  {
-    icon: "upload",
-    title: "Import in seconds",
-    desc: "Drop in your Academic History PDF from ACORN or run the bookmarklet. Your programs and transcript populate automatically, encrypted at rest.",
-  },
-  {
-    icon: "list-checks",
-    title: "See what's left",
-    desc: "A live degree audit tracks credits, breadth, and program minimums against the real UofT Arts & Science rules, not a guess.",
-  },
-  {
-    icon: "calendar-check-2",
-    title: "Optimize your timetable",
-    desc: "Build a conflict-free weekly schedule, then let the optimizer rank alternatives around the times you actually want.",
-  },
-] as const;
-
 function sessionLabel(code: SessionCode): string {
   const year = code.slice(0, 4);
   const digit = code.slice(4);
@@ -76,18 +58,11 @@ export default function Landing() {
     };
   }, [retryKey]);
 
-  const scrollToFeatures = () => {
-    document.getElementById("features")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
   return (
     <div className="dc-landing">
       <header className="dc-landing__header">
         <Wordmark size={22} />
         <nav className="dc-landing__header-nav">
-          <Button type="button" variant="ghost" size="sm" onClick={scrollToFeatures}>
-            Features
-          </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => navigate("/signin")}>
             Sign in
           </Button>
@@ -97,20 +72,15 @@ export default function Landing() {
       <section className="dc-landing__hero">
         <div>
           <p className="dc-landing__eyebrow">For UofT Arts &amp; Science students</p>
-          <h1 className="dc-landing__headline">
-            Plan your whole degree: requirements, courses, and a conflict-free timetable.
-          </h1>
+          <h1 className="dc-landing__headline">Plan your degree with Deciduous.</h1>
           <p className="dc-landing__subtitle">
-            Deciduous pulls in your transcript, tracks every credit and breadth requirement against
-            the real degree rules, and builds a schedule that actually fits together.
+            Import your transcript, track credits and breadth against the real degree rules, and
+            build a schedule that fits.
           </p>
 
           <div className="dc-landing__cta-row">
             <Button type="button" variant="primary" size="lg" onClick={() => navigate("/onboarding")}>
               Get started
-            </Button>
-            <Button type="button" variant="secondary" size="lg" onClick={scrollToFeatures}>
-              See how it works
             </Button>
           </div>
 
@@ -166,21 +136,6 @@ export default function Landing() {
           <div className="dc-landing__breadth-card">
             <BreadthTracker data={SAMPLE_BREADTH} />
           </div>
-        </div>
-      </section>
-
-      <section id="features" className="dc-landing__features">
-        <h2 className="dc-landing__features-heading">Everything a degree audit should be</h2>
-        <div className="dc-landing__feature-grid">
-          {FEATURES.map((f) => (
-            <div key={f.title}>
-              <div className="dc-landing__feature-icon">
-                <i data-lucide={f.icon} style={{ width: 20, height: 20, color: "var(--primary)" }} />
-              </div>
-              <h3 className="dc-landing__feature-title">{f.title}</h3>
-              <p className="dc-landing__feature-desc">{f.desc}</p>
-            </div>
-          ))}
         </div>
       </section>
     </div>

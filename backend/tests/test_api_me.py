@@ -375,3 +375,55 @@ def test_collapse_never_touches_completed_retake_rows(client):
     me_body = client.get("/api/me").get_json()
     sta_rows = [c for c in me_body["transcript"] if c["code"] == "STA220H1"]
     assert len(sta_rows) == 2
+
+
+# --------------------------------------------------------- ArtSci classification
+
+
+def test_summary_counts_uncached_st_george_transcript_as_artsci(client):
+    """Regression for the Requirements-page bug: "Total credits" showed
+    10.5/20.0 but "Arts & Science credits" showed 0.0/10.0 for a student
+    whose programs are ALL Arts & Science (Economics, American Studies,
+    Public Policy, Urban Studies). The course cache is empty in this test
+    (autouse `_clear_course_cache` fixture + nothing ever populates it), so
+    every imported row has no `Course.distribution` data -- exactly the
+    real-world state right after an ACORN import. Every course here is a
+    St. George ("...1") code, so ArtSci credits must equal total credits,
+    not 0.0."""
+    _signup(client)
+    _import_transcript(
+        client,
+        [
+            {"code": "ECO101H1", "credits": 0.5, "mark": 85, "grade": "A", "session": "20239", "status": "completed"},
+            {"code": "ECO102H1", "credits": 0.5, "mark": 80, "grade": "A-", "session": "20239", "status": "completed"},
+            {"code": "POL208H1", "credits": 0.5, "mark": 78, "grade": "B+", "session": "20249", "status": "completed"},
+            {"code": "URB101Y1", "credits": 1.0, "mark": 82, "grade": "A-", "session": "20249-20251", "status": "completed"},
+        ],
+    )
+
+    body = client.get("/api/me/summary").get_json()
+    credits = body["credits"]
+    assert credits["total_credits"] == pytest.approx(2.5)
+    assert credits["artsci_credits"] == pytest.approx(2.5)
+    assert credits["artsci_credits"] == credits["total_credits"]
+
+
+def test_summary_total_credits_never_less_than_artsci_credits(client):
+    """General regression guard: whatever the mix of courses, ArtSci
+    credits can never exceed total credits -- a non-ArtSci course
+    (campus digit "3" = UTM, outside this app's ARTSC scope) pulls total
+    up without pulling ArtSci up."""
+    _signup(client)
+    _import_transcript(
+        client,
+        [
+            {"code": "ECO101H1", "credits": 0.5, "mark": 85, "grade": "A", "session": "20239", "status": "completed"},
+            {"code": "MGT100H3", "credits": 0.5, "mark": 70, "grade": "B", "session": "20239", "status": "completed"},
+        ],
+    )
+
+    body = client.get("/api/me/summary").get_json()
+    credits = body["credits"]
+    assert credits["total_credits"] == pytest.approx(1.0)
+    assert credits["artsci_credits"] == pytest.approx(0.5)
+    assert credits["total_credits"] >= credits["artsci_credits"]

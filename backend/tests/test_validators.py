@@ -323,6 +323,55 @@ def test_degree_credit_summary_same_subject_cap():
     assert summary.same_subject_over_cap["POL"] == 16.0
 
 
+# ------------------------------------------------- CourseRecord.is_artsci
+# Regression coverage for the "Total credits 10.5/20.0, ArtSci credits
+# 0.0/10.0" bug: an imported ACORN transcript row has no `distribution`
+# until something looks it up in the course cache, and the classification
+# must not silently default to non-ArtSci for lack of a cache hit.
+
+
+def test_is_artsci_prefers_real_distribution_data():
+    """Real Calendar/cache data always wins, in either direction."""
+    assert CourseRecord(code="POL208H1", credits=0.5, distribution=("Arts",)).is_artsci
+    assert CourseRecord(code="MAT135H1", credits=0.5, distribution=("Science",)).is_artsci
+    # A campus-"1" code whose real distribution data says otherwise (e.g. a
+    # professional-faculty cross-list) is NOT overridden by the fallback.
+    assert not CourseRecord(code="APS100H1", credits=0.5, distribution=("Engineering",)).is_artsci
+
+
+def test_is_artsci_falls_back_to_campus_digit_when_no_distribution_data():
+    """No cache hit (empty `distribution`) -- fall back to the course-code
+    campus digit. St. George ArtSci codes ("...H1"/"...Y1") default True;
+    other campuses / unparseable codes default False."""
+    assert CourseRecord(code="ECO101H1", credits=0.5, distribution=()).is_artsci
+    assert CourseRecord(code="POL208H1", credits=0.5, distribution=()).is_artsci
+    assert CourseRecord(code="ECO100Y1", credits=1.0, distribution=()).is_artsci
+    # UTM (3) / UTSC (5) campus digits -- not this app's ARTSC scope.
+    assert not CourseRecord(code="ECO101H3", credits=0.5, distribution=()).is_artsci
+    assert not CourseRecord(code="ECO101H5", credits=0.5, distribution=()).is_artsci
+    # Unparseable code -- no signal either way, default False.
+    assert not CourseRecord(code="NOT-A-CODE", credits=0.5, distribution=()).is_artsci
+
+
+def test_degree_credit_summary_total_at_least_artsci():
+    """Regression: total credits must never be LESS than ArtSci credits, and
+    a transcript that's entirely campus-"1" (St. George ArtSci) courses with
+    no cached distribution data must count in full toward ArtSci, not 0.0 --
+    the exact bug reported on the Requirements page (10.5/20.0 total vs.
+    0.0/10.0 ArtSci for an all-ArtSci student)."""
+    records = [
+        _completed("ECO101H1", 0.5),
+        _completed("ECO102H1", 0.5),
+        _completed("POL208H1", 0.5),
+        _completed("URB101Y1", 1.0),
+    ]
+    summary = validators.degree_credit_summary(records)
+    assert summary.total_credits == 2.5
+    assert summary.artsci_credits == summary.total_credits
+    assert summary.artsci_credits >= 0
+    assert summary.total_credits >= summary.artsci_credits
+
+
 def test_validate_degree_credits_reports_gaps_and_cap_violation():
     summary = validators.DegreeCreditSummary(
         total_credits=5.0,

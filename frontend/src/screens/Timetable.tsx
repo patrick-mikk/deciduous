@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { api, remainingRequirementMatches, countsTowardPhrase } from "@/api";
+import { api, remainingRequirementMatches, countsTowardPhrase, isExcludedByTaken } from "@/api";
 import type { Course, Program, SessionCode, StudentRecord } from "@/api";
 import {
   Button,
@@ -337,17 +337,26 @@ export default function Timetable() {
     };
   }, [record]);
 
-  const remainingMatches = React.useMemo(() => {
-    if (!record) return [];
-    const taken = new Set(
+  // Completed/in-progress transcript codes -- "taken" for both requirement-line
+  // accounting (remainingMatches below) and exclusion filtering (the
+  // suggestion-fetch effect below).
+  const takenCodes = React.useMemo(() => {
+    if (!record) return new Set<string>();
+    return new Set(
       record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
     );
-    return remainingRequirementMatches(programDetails, record.requirementProgress, taken);
-  }, [record, programDetails]);
+  }, [record]);
+
+  const remainingMatches = React.useMemo(() => {
+    if (!record) return [];
+    return remainingRequirementMatches(programDetails, record.requirementProgress, takenCodes);
+  }, [record, programDetails, takenCodes]);
 
   // Fetch details for the top suggestions so the "add a course" dialog can lead
   // with courses that fill a remaining requirement (later narrowed to the ones
-  // actually offered in the selected term).
+  // actually offered in the selected term). Formal Calendar exclusions (e.g. a
+  // course excluded by an already-completed one) are dropped here too -- a hard
+  // rule, checked independently of the requirement-line satisfaction above.
   React.useEffect(() => {
     const top = remainingMatches.slice(0, 40).map((m) => m.code);
     if (top.length === 0) {
@@ -365,12 +374,17 @@ export default function Timetable() {
     ).then((pairs) => {
       if (cancelled) return;
       const byCode = new Map(pairs);
-      setSuggestionCourses(top.map((code) => byCode.get(code)).filter((c): c is Course => Boolean(c)));
+      setSuggestionCourses(
+        top
+          .map((code) => byCode.get(code))
+          .filter((c): c is Course => Boolean(c))
+          .filter((c) => !isExcludedByTaken(c.exclusions, takenCodes)),
+      );
     });
     return () => {
       cancelled = true;
     };
-  }, [remainingMatches]);
+  }, [remainingMatches, takenCodes]);
 
   // ---- Load stored scenarios once ----
   React.useEffect(() => {

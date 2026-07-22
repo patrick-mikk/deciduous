@@ -198,6 +198,12 @@ export const mockCourses: Course[] = [
   { code: "ECO101H1", title: "Principles of Microeconomics", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Introductory microeconomics.", prerequisites: "", corequisites: "", exclusions: "", breadth: [], distribution: ["Social Science"], sections: [] },
   { code: "ECO102H1", title: "Principles of Macroeconomics", sectionCode: "S", credit: 0.5, campus: "St. George", description: "Introductory macroeconomics.", prerequisites: "", corequisites: "", exclusions: "", breadth: [], distribution: ["Social Science"], sections: [] },
   { code: "STA220H1", title: "The Practice of Statistics I", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Introductory applied statistics.", prerequisites: "", corequisites: "", exclusions: "", breadth: [], distribution: ["Science"], sections: [] },
+  // Demo case for the requirement-line-satisfaction + exclusion-filtering fix
+  // (see degreeAudit.ts remainingRequirementMatches / isExcludedByTaken): the
+  // mock student completed STA220H1, which both satisfies the Methods group's
+  // "STA220H1 / STA257H1" rule below AND formally excludes STA257H1 -- it
+  // must not be suggested.
+  { code: "STA257H1", title: "Probability and Statistics I", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Calculus-based introduction to probability and statistics.", prerequisites: "", corequisites: "", exclusions: "Exclusion: STA220H1", breadth: [], distribution: ["Science"], sections: [] },
   { code: "POL340H1", title: "Public Opinion", sectionCode: "S", credit: 0.5, campus: "St. George", description: "The formation and measurement of public opinion.", prerequisites: "POL208H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
   { code: "PPG340H1", title: "Policy Evaluation", sectionCode: "S", credit: 0.5, campus: "St. George", description: "Methods for evaluating the impact of public policy interventions.", prerequisites: "PPG310H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
   { code: "ECO333H1", title: "Urban Economics", sectionCode: "F", credit: 0.5, campus: "St. George", description: "Economic analysis of cities and urban policy.", prerequisites: "ECO101H1, ECO102H1", corequisites: "", exclusions: "", breadth: ["Society and Its Institutions (3)"], distribution: ["Social Science"], sections: [] },
@@ -228,10 +234,34 @@ const publicPolicyGroups: RequirementGroup[] = [
     heading: "Methods",
     credits: 1.0,
     isNote: false,
-    courseCodes: ["STA220H1", "POL222H1", "POL232H1"],
-    rules: [{ credits: 0.5, description: "One methods course beyond STA220H1", courseCodes: ["POL222H1", "POL232H1"] }],
+    courseCodes: ["STA220H1", "STA257H1", "POL222H1", "POL232H1"],
+    rules: [
+      // Line 1: the intro stats requirement. STA257H1 is deliberately NOT in
+      // this rule's courseCodes: covered by no rule, it falls back to the
+      // group-level "still open" check and so remains a *candidate* from the
+      // engine -- what actually removes it is the exclusion filter
+      // (isExcludedByTaken), because its Calendar exclusion text names the
+      // completed STA220H1 (see mockCourses' STA257H1 entry). This is the one
+      // fixture that exercises the exclusion mechanism end to end; putting
+      // STA257H1 in this (already satisfied) rule would let rule-satisfaction
+      // pre-empt the exclusion filter and leave mechanism 2 untested.
+      { credits: 0.5, description: "STA220H1", courseCodes: ["STA220H1"] },
+      // Line 2: one further methods course. The mock transcript below also
+      // happens to already have POL222H1 completed, so this line is
+      // *already* satisfied -- by the rule-satisfaction mechanism, POL232H1
+      // correctly stops being suggested (the identical pattern as the real
+      // ECO200Y1-completed/ECO204Y1+ECO206Y1-suggested bug this fix targets).
+      // Net effect for this student: the engine still emits STA257H1 as a
+      // candidate (group open, no covering rule) and the exclusion filter
+      // then drops it, while POL232H1 never leaves the engine at all. The
+      // group total (1.0 required) is deliberately not reflected in the
+      // hand-authored progress row below (kept at 0.5/1.0 so the group stays
+      // "open") -- rule-level checks operate independently of that row.
+      { credits: 0.5, description: "One methods course beyond STA220H1", courseCodes: ["POL222H1", "POL232H1"] },
+    ],
     courses: [
       { code: "STA220H1", credits: 0.5, notes: "" },
+      { code: "STA257H1", credits: 0.5, notes: "" },
       { code: "POL222H1", credits: 0.5, notes: "" },
       { code: "POL232H1", credits: 0.5, notes: "" },
     ],
