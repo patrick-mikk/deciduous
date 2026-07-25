@@ -10,7 +10,7 @@ Build order for the degree planner. Backend first; React after the API is stable
 | **3** | Prerequisite parser + plan validator + degree-rules engine (`planner/`) | done ✅ |
 | **4** | Program-requirement tracker + auto-plan + Degree Explorer import | done ✅ |
 | **5** | React + TS SPA (Vite) on the Claude Design system, 18 screens | done ✅ |
-| **6** | cPanel deploy to `planner.mikkelsen.ca`, AutoSSL, nightly cron, hardening | in progress — code-side done, see [docs/deploy-cpanel.md](deploy-cpanel.md) |
+| **6** | cPanel deploy to `deciduous.mikkelsen.ca`, AutoSSL, nightly cron, hardening | in progress — code-side done, see [docs/deploy-cpanel.md](deploy-cpanel.md) |
 
 ## Done
 
@@ -26,7 +26,7 @@ Build order for the degree planner. Backend first; React after the API is stable
 ## Remaining (Phase 6)
 
 - **cPanel deploy**: MySQL provisioning, Passenger WSGI, React static build served at
-  `planner.mikkelsen.ca`, AutoSSL, env vars, nightly cache-refresh cron.
+  `deciduous.mikkelsen.ca`, AutoSSL, env vars, nightly cache-refresh cron.
 - Timetable **optimizer** polish; auth hardening (password reset + recovery-code flow, rate limits).
 - Breadth data completeness for past (uncached) sessions; wire the frontend off mock to the live API.
 

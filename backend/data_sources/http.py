@@ -30,7 +30,7 @@ from typing import Any
 
 import requests
 
-USER_AGENT = "uoft-degree-planner (+https://planner.mikkelsen.ca)"
+USER_AGENT = "uoft-degree-planner (+https://deciduous.mikkelsen.ca)"
 DEFAULT_TIMEOUT = 30  # seconds
 TTB_ORIGIN = "https://ttb.utoronto.ca"
 

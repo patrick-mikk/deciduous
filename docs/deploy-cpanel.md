@@ -1,4 +1,4 @@
-# Deploying to cPanel (planner.mikkelsen.ca)
+# Deploying to cPanel (deciduous.mikkelsen.ca)
 
 Production runbook for Phase 6 (see [roadmap.md](roadmap.md)). Follow the steps in
 order — later steps assume earlier ones are done. Commands prefixed `$` run over
@@ -11,7 +11,7 @@ Code pointers used throughout: [`backend/passenger_wsgi.py`](../backend/passenge
 
 ## 1. Prerequisites
 
-- `planner.mikkelsen.ca` DNS already pointed at the cPanel host.
+- `deciduous.mikkelsen.ca` DNS already pointed at the cPanel host.
 - SSH access to the account (Setup Python App also works from the UI alone, but
   `pip install` and the cron/init steps below need a shell).
 - Python **3.12** available as a cPanel "Setup Python App" version (check
@@ -73,7 +73,7 @@ cPanel UI → **Setup Python App** → Create Application:
 |---|---|
 | Python version | 3.12.13 (or closest 3.12.x offered) |
 | Application root | `deciduous` (relative to home — i.e. `~/deciduous`) |
-| Application URL | `planner.mikkelsen.ca` |
+| Application URL | `deciduous.mikkelsen.ca` |
 | Application startup file | `backend/passenger_wsgi.py` |
 | Application Entry point | `application` |
 
@@ -112,7 +112,7 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 | `DB_USER` | yes | from step 2 |
 | `DB_PASSWORD` | yes | from step 2 |
 | `DB_PORT` | no | defaults to `3306` (`backend/config_app.py:36`) |
-| `CORS_ORIGIN` | yes | `https://planner.mikkelsen.ca` |
+| `CORS_ORIGIN` | yes | `https://deciduous.mikkelsen.ca` |
 | `PLANNER_CACHE_PATH` | strongly recommended | absolute path outside `public_html` and outside `/tmp`, e.g. `/home/cpaneluser/deciduous-data/cache.sqlite` — see step 9 |
 | `SESSION_COOKIE_SECURE` | no | defaults to `True` when `FLASK_ENV=production` (`backend/config_app.py:86-90`); only set explicitly to override |
 | `SESSION_LIFETIME_SECONDS` | no | login-session lifetime; defaults to 14 days (`backend/config_app.py:91-93`) |
@@ -181,7 +181,7 @@ env var needed at build time.
 
 ## 8. AutoSSL / HTTPS
 
-cPanel UI → **SSL/TLS Status** → run AutoSSL for `planner.mikkelsen.ca` (or
+cPanel UI → **SSL/TLS Status** → run AutoSSL for `deciduous.mikkelsen.ca` (or
 confirm it already issued a cert — cPanel typically auto-runs this once DNS
 resolves to the account). Do this before or right after step 4; Passenger apps
 work over plain HTTP too, but `SESSION_COOKIE_SECURE` defaults to `True` in
@@ -222,10 +222,10 @@ the log after the first scheduled run.
 ## 10. Smoke tests
 
 ```
-$ curl -s https://planner.mikkelsen.ca/ | head -c 200          # HTML (index.html)
-$ curl -s https://planner.mikkelsen.ca/api/health               # {"status": "ok", ...}
-$ curl -s -c cookies.txt https://planner.mikkelsen.ca/api/auth/csrf   # {"csrfToken": "..."}
-$ curl -s -b cookies.txt -X POST https://planner.mikkelsen.ca/api/auth/signup \
+$ curl -s https://deciduous.mikkelsen.ca/ | head -c 200          # HTML (index.html)
+$ curl -s https://deciduous.mikkelsen.ca/api/health               # {"status": "ok", ...}
+$ curl -s -c cookies.txt https://deciduous.mikkelsen.ca/api/auth/csrf   # {"csrfToken": "..."}
+$ curl -s -b cookies.txt -X POST https://deciduous.mikkelsen.ca/api/auth/signup \
     -H "Content-Type: application/json" \
     -H "X-CSRF-Token: <csrfToken from above>" \
     -d '{"email":"smoketest@example.com","password":"a-long-enough-password"}'

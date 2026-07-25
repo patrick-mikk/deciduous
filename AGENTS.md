@@ -12,7 +12,7 @@ validate it against prerequisites, exclusions, breadth requirements, program
 requirements, and timetable conflicts — using live data from the UofT **Timetable
 Builder** API and the **Academic Calendar**.
 
-Target deployment: `planner.mikkelsen.ca`, a **cPanel Python app** (Passenger WSGI),
+Target deployment: `deciduous.mikkelsen.ca`, a **cPanel Python app** (Passenger WSGI),
 Python **3.12.13**, cPanel **MySQL**. React SPA frontend (built later).
 
 ## Why (design intent)
