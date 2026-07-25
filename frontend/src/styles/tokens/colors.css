@@ -76,6 +76,20 @@
   --accent-green: var(--br4);
   --accent-red: var(--danger);
   --accent-violet: var(--br1);
+
+  /* Persistent dark navigation rail (modernized-ACORN institutional sidebar).
+     A dark-slate charcoal rail that sits beneath the navy TopBar — ACORN's own
+     two-tone chrome. The teal --accent is the single active-item marker. */
+  --sidebar-bg: #22262F;
+  --sidebar-bg-hover: #2C313C;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.06);
+  --sidebar-text: #E7ECF3;
+  --sidebar-text-muted: #B4BECE;
+  --sidebar-border: #333A46;
+  --sidebar-accent: var(--accent);
+  /* The navy TopBar stays institutional navy in BOTH themes (unlike --primary,
+     which lightens in dark mode for button contrast). */
+  --topbar-bg: #1E3765;
 }
 
 :root[data-theme="dark"] {
@@ -117,4 +131,17 @@
   --br4-bg: #12281C;
   --br5: #3FB6CB;
   --br5-bg: #0E2A30;
+
+  /* Dark-theme navigation rail: a near-black slate, a shade below the page so
+     the rail still reads as a distinct surface. */
+  --sidebar-bg: #191C22;
+  --sidebar-bg-hover: #242830;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.07);
+  --sidebar-text: #E7ECF3;
+  --sidebar-text-muted: #97A2B2;
+  --sidebar-border: #2A2F38;
+  --sidebar-accent: var(--accent);
+  /* A deeper navy in dark mode so the bar stays institutional, not the bright
+     lightened --primary used for buttons. */
+  --topbar-bg: #172440;
 }

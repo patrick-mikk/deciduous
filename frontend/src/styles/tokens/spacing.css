@@ -11,18 +11,23 @@
   --space-8: 40px;
   --space-9: 48px;
   --space-10: 64px;
-  --gutter: 24px;
-  --gutter-mobile: 16px;
-  --card-padding: 20px;
-  --grid-gap: 16px;
+  --gutter: 32px;
+  --gutter-mobile: 20px;
+  --card-padding: 24px;
+  --grid-gap: 20px;
   --content-max: 1200px;
   --board-max: 1440px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  /* Modernized-ACORN: very subtle corner rounding (2-4px) — barely noticeable
+     but present, never fully sharp, never heavily rounded. */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
   --radius-pill: 999px;
-  --shadow-e1: 0 1px 2px rgba(16, 27, 48, 0.06);
+  /* Flat, shadow-free surfaces: cards get definition from a 1px border, not
+     elevation. e1 is the card tier → none. e2/e3 stay for true overlays
+     (dialogs, drawers, dropdowns) that genuinely float above the page. */
+  --shadow-e1: none;
   --shadow-e2: 0 4px 14px rgba(16, 27, 48, 0.10);
   --shadow-e3: 0 16px 40px rgba(16, 27, 48, 0.18);
   --shadow-focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
@@ -36,7 +41,7 @@
 }
 
 :root[data-theme="dark"] {
-  --shadow-e1: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-e1: none;
   --shadow-e2: 0 4px 14px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --shadow-e3: 0 16px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }

@@ -3508,6 +3508,8 @@ const DEFAULT_ITEMS = [{
   label: 'Dashboard',
   icon: 'layout-dashboard'
 }, {
+  section: 'Academics'
+}, {
   key: 'programs',
   label: 'Programs',
   icon: 'graduation-cap'
@@ -3543,20 +3545,28 @@ const DEFAULT_ITEMS = [{
   icon: 'circle-help'
 }];
 
-/** Left navigation rail. Collapses to an icon-only rail when `collapsed`. */
+/**
+ * Persistent dark navigation rail — the modernized-ACORN institutional sidebar.
+ * A deep-navy anchor holding the brand at top and the primary nav below; the
+ * active item is marked by a single teal left accent bar. Collapses to an
+ * icon-only rail when `collapsed`. `brand` is a node, or a `(collapsed) => node`
+ * render function so the mark can shrink to a glyph when the rail collapses.
+ */
 function SideNav({
   items = DEFAULT_ITEMS,
   active,
   onNavigate,
-  collapsed = false
+  collapsed = false,
+  brand
 }) {
+  const brandNode = typeof brand === 'function' ? brand(collapsed) : brand;
   return /*#__PURE__*/React.createElement("nav", {
     style: {
       gridArea: 'nav',
-      background: 'var(--surface)',
-      borderRight: '1px solid var(--border)',
-      width: collapsed ? 64 : 224,
-      padding: '12px 10px',
+      background: 'var(--sidebar-bg)',
+      borderRight: '1px solid var(--sidebar-border)',
+      width: collapsed ? 68 : 244,
+      padding: '0 0 12px',
       boxSizing: 'border-box',
       display: 'flex',
       flexDirection: 'column',
@@ -3564,18 +3574,56 @@ function SideNav({
       overflowY: 'auto',
       transition: 'width var(--duration-base) var(--ease-standard)'
     }
+  }, brandNode && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: collapsed ? 'center' : 'flex-start',
+      height: 60,
+      padding: collapsed ? '0' : '0 20px',
+      marginBottom: 8,
+      borderBottom: '1px solid var(--sidebar-border)',
+      flexShrink: 0
+    }
+  }, brandNode), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: brandNode ? '0 12px' : '12px 12px 0',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 2
+    }
   }, items.map((item, i) => {
     if (item.divider) return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
         height: 1,
-        background: 'var(--border)',
-        margin: '10px 6px'
+        background: 'var(--sidebar-border)',
+        margin: '12px 8px'
       }
     });
+    if (item.section) return collapsed ? /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        height: 1,
+        background: 'var(--sidebar-border)',
+        margin: '12px 8px'
+      }
+    }) : /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        fontSize: 'var(--text-overline)',
+        fontWeight: 'var(--weight-semibold)',
+        letterSpacing: 'var(--tracking-overline)',
+        textTransform: 'uppercase',
+        color: 'var(--sidebar-text-muted)',
+        padding: '16px 12px 6px',
+        userSelect: 'none'
+      }
+    }, item.section);
     const isActive = item.key === active;
     return /*#__PURE__*/React.createElement("button", {
       key: item.key,
+      className: 'dc-sidenav-item' + (isActive ? ' is-active' : ''),
       onClick: () => onNavigate && onNavigate(item.key),
       title: collapsed ? item.label : undefined,
       "aria-current": isActive ? 'page' : undefined,
@@ -3584,15 +3632,15 @@ function SideNav({
         alignItems: 'center',
         gap: 12,
         width: '100%',
-        padding: collapsed ? '10px' : '10px 12px',
+        padding: collapsed ? '10px' : '9px 12px',
         justifyContent: collapsed ? 'center' : 'flex-start',
         borderRadius: 'var(--radius-md)',
         border: 'none',
         cursor: 'pointer',
-        background: isActive ? 'var(--primary-bg)' : 'transparent',
-        color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
+        background: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
+        color: isActive ? 'var(--sidebar-text)' : 'var(--sidebar-text-muted)',
         fontFamily: 'var(--font-sans)',
-        fontSize: 'var(--text-body)',
+        fontSize: 'var(--text-body-sm)',
         fontWeight: isActive ? 'var(--weight-semibold)' : 'var(--weight-regular)',
         position: 'relative',
         boxSizing: 'border-box'
@@ -3600,19 +3648,20 @@ function SideNav({
     }, isActive && !collapsed && /*#__PURE__*/React.createElement("span", {
       style: {
         position: 'absolute',
-        left: 0,
-        top: 8,
-        bottom: 8,
+        left: -12,
+        top: 6,
+        bottom: 6,
         width: 3,
-        borderRadius: 3,
-        background: 'var(--primary)'
+        borderRadius: '0 2px 2px 0',
+        background: 'var(--sidebar-accent)'
       }
     }), /*#__PURE__*/React.createElement("i", {
       "data-lucide": item.icon,
       style: {
-        width: 20,
-        height: 20,
-        flexShrink: 0
+        width: 19,
+        height: 19,
+        flexShrink: 0,
+        color: isActive ? 'var(--sidebar-accent)' : 'currentColor'
       }
     }), !collapsed && /*#__PURE__*/React.createElement("span", null, item.label), !collapsed && item.badge != null && /*#__PURE__*/React.createElement("span", {
       style: {
@@ -3630,7 +3679,7 @@ function SideNav({
         justifyContent: 'center'
       }
     }, item.badge));
-  }));
+  })));
 }
 Object.assign(__ds_scope, { SideNav });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/layout/SideNav.jsx", error: String((e && e.message) || e) }); }
@@ -3791,7 +3840,7 @@ function TopBar({
       display: 'flex',
       alignItems: 'center',
       gap: 16,
-      background: 'var(--primary)',
+      background: 'var(--topbar-bg)',
       height: 60,
       padding: '0 16px',
       boxSizing: 'border-box'
@@ -3847,7 +3896,7 @@ function TopBar({
       fontFamily: 'var(--font-mono)',
       fontSize: 11,
       padding: '2px 6px',
-      borderRadius: 6,
+      borderRadius: 'var(--radius-sm)',
       background: 'rgba(255,255,255,0.14)',
       border: '1px solid rgba(255,255,255,0.2)'
     }
@@ -6894,7 +6943,9 @@ function StatTile({
       boxShadow: 'var(--shadow-e1)',
       padding: '16px 18px',
       fontFamily: 'var(--font-sans)',
-      borderTop: accent ? `3px solid ${accent}` : '1px solid var(--border)'
+      // Modernized-ACORN: the highlight marker is a subtle LEFT accent bar
+      // (matching the summary-card treatment), never a coloured top border.
+      borderLeft: accent ? `3px solid ${accent}` : '1px solid var(--border)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {

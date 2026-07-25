@@ -261,18 +261,22 @@ export default function RequirementDetail() {
 
       {!loading && !error && program && (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <ProgramHeader
-            code={program.code}
-            name={program.title}
-            programType={program.programType || "major"}
-            department={program.department}
-            totalCredits={program.totalCredits}
-            earned={enrolled ? earnedTotal : undefined}
-            enrolmentRequirements={program.enrolmentRequirements}
-            needsReparse={!program.requirementsLoaded}
-            reparsing={reparsing}
-            onReparse={handleReparse}
-          />
+          {/* The screen's single highlighted summary card (modernized-ACORN):
+              a teal left accent on the program hero only. */}
+          <Card style={{ borderLeft: "3px solid var(--accent)" }}>
+            <ProgramHeader
+              code={program.code}
+              name={program.title}
+              programType={program.programType || "major"}
+              department={program.department}
+              totalCredits={program.totalCredits}
+              earned={enrolled ? earnedTotal : undefined}
+              enrolmentRequirements={program.enrolmentRequirements}
+              needsReparse={!program.requirementsLoaded}
+              reparsing={reparsing}
+              onReparse={handleReparse}
+            />
+          </Card>
 
           {enrolled && upperLevelMins && (
             <Card>

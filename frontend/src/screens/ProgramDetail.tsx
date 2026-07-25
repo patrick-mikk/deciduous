@@ -7,6 +7,7 @@ import {
   RequirementGroupCard,
   POStCombinationValidator,
   Callout,
+  Card,
   EmptyState,
   Skeleton,
   Button,
@@ -298,27 +299,31 @@ export default function ProgramDetail() {
       />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        <ProgramHeader
-          code={program.code}
-          name={program.title}
-          programType={(program.programType || "major") as ProgramType}
-          department={program.department}
-          totalCredits={myProgramRef?.totalCredits ?? program.totalCredits}
-          earned={enrolled ? myProgramRef?.earnedCredits ?? 0 : undefined}
-          enrolmentRequirements={program.enrolmentRequirements || undefined}
-          needsReparse={!program.requirementsLoaded}
-          reparsing={reparsing}
-          onReparse={handleReparse}
-          onAdd={enrolled ? undefined : handleAdd}
-          enrolled={enrolled}
-        />
-        {enrolled && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -12 }}>
-            <Button variant="ghost" size="sm" icon="x" onClick={handleRemove}>
-              Remove from my programs
-            </Button>
-          </div>
-        )}
+        {/* The screen's single highlighted summary card (modernized-ACORN):
+            a teal left accent on the program hero only. */}
+        <Card style={{ borderLeft: "3px solid var(--accent)" }}>
+          <ProgramHeader
+            code={program.code}
+            name={program.title}
+            programType={(program.programType || "major") as ProgramType}
+            department={program.department}
+            totalCredits={myProgramRef?.totalCredits ?? program.totalCredits}
+            earned={enrolled ? myProgramRef?.earnedCredits ?? 0 : undefined}
+            enrolmentRequirements={program.enrolmentRequirements || undefined}
+            needsReparse={!program.requirementsLoaded}
+            reparsing={reparsing}
+            onReparse={handleReparse}
+            onAdd={enrolled ? undefined : handleAdd}
+            enrolled={enrolled}
+          />
+          {enrolled && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+              <Button variant="ghost" size="sm" icon="x" onClick={handleRemove}>
+                Remove from my programs
+              </Button>
+            </div>
+          )}
+        </Card>
 
         {reparseError && <Callout tone="danger" title="Requirement parsing failed">{reparseError}</Callout>}
 

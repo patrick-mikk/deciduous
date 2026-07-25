@@ -405,7 +405,9 @@ export default function Transcript() {
           )}
 
           <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-            <StatTile label="CGPA" value={(transcriptResp?.cgpa ?? 0).toFixed(2)} accent="var(--primary)" />
+            {/* The screen's single highlighted card (modernized-ACORN): a teal
+                left accent on the CGPA tile only. */}
+            <StatTile label="CGPA" value={(transcriptResp?.cgpa ?? 0).toFixed(2)} accent="var(--accent)" />
             <StatTile
               label="This session"
               value={thisSessionGroup?.sessionalGpa != null ? thisSessionGroup.sessionalGpa.toFixed(2) : "–"}
