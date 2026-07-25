@@ -6943,7 +6943,9 @@ function StatTile({
       boxShadow: 'var(--shadow-e1)',
       padding: '16px 18px',
       fontFamily: 'var(--font-sans)',
-      borderTop: accent ? `3px solid ${accent}` : '1px solid var(--border)'
+      // Modernized-ACORN: the highlight marker is a subtle LEFT accent bar
+      // (matching the summary-card treatment), never a coloured top border.
+      borderLeft: accent ? `3px solid ${accent}` : '1px solid var(--border)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {

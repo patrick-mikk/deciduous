@@ -132,7 +132,9 @@ export default function Requirements() {
 
       {!loading && !error && record && record.programs.length > 0 && audit && (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <Card>
+          {/* The screen's single highlighted summary card (modernized-ACORN):
+              a teal left accent on the degree-progress hero only. */}
+          <Card style={{ borderLeft: "3px solid var(--accent)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 18 }}>
               <ProgressRing value={Math.round((audit.totalEarned / 20) * 100)} size="md" tone="primary" sublabel="complete" />
               <div>
