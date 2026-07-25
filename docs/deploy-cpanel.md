@@ -20,6 +20,9 @@ Code pointers used throughout: [`backend/passenger_wsgi.py`](../backend/passenge
 
 ## 2. MySQL database (cPanel UI)
 
+> Detailed walkthrough with verification + troubleshooting:
+> [setup-mysql-cpanel.md](setup-mysql-cpanel.md). The short version:
+
 cPanel UI → **MySQL Databases**:
 
 1. Create a database (e.g. `cpaneluser_deciduous`).
