@@ -115,7 +115,10 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 | `CORS_ORIGIN` | yes | `https://deciduous.mikkelsen.ca` |
 | `PLANNER_CACHE_PATH` | strongly recommended | absolute path outside `public_html` and outside `/tmp`, e.g. `/home/cpaneluser/deciduous-data/cache.sqlite` — see step 9 |
 | `SESSION_COOKIE_SECURE` | no | defaults to `True` when `FLASK_ENV=production` (`backend/config_app.py:86-90`); only set explicitly to override |
-| `SESSION_LIFETIME_SECONDS` | no | login-session lifetime; defaults to 14 days (`backend/config_app.py:91-93`) |
+| `SESSION_LIFETIME_SECONDS` | no | remember-me cookie lifetime cap; defaults to 30 days. Per-session server-side expiry is 24h (default) / 30d (remember-me) in `backend/api/auth.py` |
+| `PASSKEY_RP_ID` | no | WebAuthn relying-party ID; defaults to the hostname of `PASSKEY_ORIGIN`/`CORS_ORIGIN` (`deciduous.mikkelsen.ca`) — set explicitly only if serving from multiple subdomains |
+| `PASSKEY_ORIGIN` | no | full origin the browser reports during passkey ceremonies; defaults to `CORS_ORIGIN` |
+| `PASSKEY_RP_NAME` | no | display name shown in the browser's passkey sheet; defaults to `Deciduous` |
 | `FRONTEND_DIST` | no | absolute path to the built SPA if it doesn't live at `<repo root>/frontend/dist` (`backend/app.py:139`) |
 | `GEMINI_API_KEY` | optional | see below |
 | `GEMINI_MODEL` | no | overrides the grouper's default Gemini model (`backend/data_sources/llm_grouper.py:260`); only meaningful with `GEMINI_API_KEY` set |
@@ -125,6 +128,8 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 > makes their encrypted transcript/plan data **permanently unreadable** — there
 > is no re-wrap/migration path today. Generate it once, store it somewhere
 > durable (password manager), and never regenerate it against a live database.
+> It also derives the server-side wrap that powers passkey sign-in (ADR-0006):
+> rotating it breaks passkey sign-in until users re-register a passkey.
 
 `GEMINI_API_KEY` (optional) powers the on-demand program-requirement grouper
 (`backend/data_sources/llm_grouper.py`, called from `POST

@@ -26,7 +26,7 @@ import secrets
 import bcrypt
 from flask import Blueprint, current_app, jsonify, request, session
 
-from backend.api import current_user, db_session, json_error, require_auth
+from backend.api import current_data_key, current_user, db_session, json_error, require_auth
 from backend.models_db import Session as SessionModel
 from backend.models_db import User
 from backend.security.crypto import generate_data_key, generate_salt, unwrap_data_key, wrap_data_key
@@ -35,7 +35,11 @@ bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _MIN_PASSWORD_LEN = 10
-_SESSION_LIFETIME = dt.timedelta(days=14)
+# Two session lifetimes (design: "Remember me for 30 days"). Without
+# remember-me the cookie is a browser-session cookie (gone on browser close)
+# and the DB row caps it at 24h; with it, a persistent 30-day session.
+_SESSION_LIFETIME_DEFAULT = dt.timedelta(hours=24)
+_SESSION_LIFETIME_REMEMBER = dt.timedelta(days=30)
 _MAX_FAILED_ATTEMPTS = 8
 _LOCKOUT = dt.timedelta(minutes=15)
 
@@ -44,13 +48,21 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
 
 
-def _start_session(user: User, data_key: bytes) -> None:
-    """Create a `Session` row and populate the signed cookie session."""
+def _start_session(user: User, data_key: bytes, remember: bool = False) -> None:
+    """Create a `Session` row and populate the signed cookie session.
+
+    `remember=False` (default): non-permanent cookie (dropped when the
+    browser closes) + a 24h server-side expiry. `remember=True`: permanent
+    cookie + 30-day server-side expiry. The DB row's `expires_at` is the
+    source of truth either way (`backend.api.current_user` checks it), so a
+    lingering cookie past expiry is inert.
+    """
+    lifetime = _SESSION_LIFETIME_REMEMBER if remember else _SESSION_LIFETIME_DEFAULT
     db = db_session()
     row = SessionModel(
         id=secrets.token_urlsafe(32),
         user_id=user.id,
-        expires_at=_now() + _SESSION_LIFETIME,
+        expires_at=_now() + lifetime,
         user_agent=(request.headers.get("User-Agent") or "")[:255],
         ip_address=request.remote_addr or "",
     )
@@ -58,7 +70,7 @@ def _start_session(user: User, data_key: bytes) -> None:
     db.commit()
 
     session.clear()
-    session.permanent = True
+    session.permanent = remember
     session["user_id"] = user.id
     session["session_id"] = row.id
     session["data_key"] = data_key.decode("ascii")
@@ -109,7 +121,7 @@ def signup():
     db.add(user)
     db.commit()
 
-    _start_session(user, data_key)
+    _start_session(user, data_key, remember=bool(data.get("rememberMe")))
     return jsonify({"user": _user_public(user)}), 201
 
 
@@ -148,7 +160,7 @@ def signin():
     user.locked_until = None
     db.commit()
 
-    _start_session(user, data_key)
+    _start_session(user, data_key, remember=bool(data.get("rememberMe")))
     return jsonify({"user": _user_public(user)})
 
 
@@ -167,20 +179,226 @@ def signout():
 
 @bp.route("/reset", methods=["POST"])
 def reset_request():
-    """Request a password reset.
+    """Reset a forgotten password using a recovery code.
 
-    Always returns 202 regardless of whether the email exists (no account
-    enumeration). NOTE (ADR-0005): resetting a password without a recovery
-    code cannot re-derive the old data key, so previously encrypted
-    transcript/plan rows become unreadable after a reset — the design (see
-    `design/screens/01-auth-and-onboarding.md`) surfaces that warning in the
-    UI. A recovery-code flow that re-wraps the data key is future work; this
-    endpoint is intentionally a stub (no email delivery yet).
+    Body: `{email, recoveryCode, newPassword}`. The recovery code (generated
+    while signed in via `POST /api/auth/recovery-code`) verifies against
+    `User.recovery_code_hash` and unwraps `recovery_wrapped_data_key`, so the
+    data key survives the reset and gets re-wrapped under the new password
+    (closing the ADR-0005 "reset loses your data" gap for users who saved a
+    code). Without a valid code this returns the same generic 401 whether the
+    email exists, the code is wrong, or no code was ever generated — no
+    account enumeration. Uses the same persistent lockout counters as signin.
+    Called without `recoveryCode` at all, it keeps the old stub behaviour
+    (202, no-op) so the "email me a reset link" flow can slot in later.
     """
-    return jsonify({"ok": True}), 202
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    # Normalize to the hashed form: uppercase, no spaces/dashes (the code is
+    # displayed as XXXX-XXXX-XXXX-XXXX but hashed without separators).
+    code = (data.get("recoveryCode") or "").strip().upper().replace(" ", "").replace("-", "")
+    new_password = data.get("newPassword") or ""
+
+    if not code:
+        return jsonify({"ok": True}), 202
+
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        return json_error(f"Password must be at least {_MIN_PASSWORD_LEN} characters.", 422)
+
+    generic_error = "That email and recovery code combination is not valid."
+    db = db_session()
+    user = db.query(User).filter_by(email=email).first()
+    if user is None or not user.recovery_code_hash or not user.recovery_wrapped_data_key:
+        return json_error(generic_error, 401)
+
+    if user.locked_until is not None and user.locked_until > _now():
+        return json_error("Too many failed attempts. Try again later.", 429)
+
+    if not bcrypt.checkpw(code.encode("utf-8"), bytes(user.recovery_code_hash)):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= _MAX_FAILED_ATTEMPTS:
+            user.locked_until = _now() + _LOCKOUT
+        db.commit()
+        return json_error(generic_error, 401)
+
+    pepper = current_app.config["DATA_KEY_PEPPER"]
+    data_key = unwrap_data_key(user.recovery_wrapped_data_key, code, user.recovery_salt or "", pepper)
+    if data_key is None:
+        return json_error(generic_error, 401)
+
+    salt = generate_salt()
+    user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
+    user.salt = salt
+    user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    _revoke_all_sessions(db, user.id)  # a reset invalidates every signed-in device
+    db.commit()
+
+    _start_session(user, data_key)
+    return jsonify({"user": _user_public(user)})
 
 
 @bp.route("/session", methods=["GET"])
 @require_auth
 def whoami():
     return jsonify({"user": _user_public(current_user())})
+
+
+# ---------------------------------------------------------------- sessions
+def _revoke_all_sessions(db, user_id: int, keep: str | None = None) -> None:
+    rows = db.query(SessionModel).filter_by(user_id=user_id, revoked_at=None).all()
+    for row in rows:
+        if keep is not None and row.id == keep:
+            continue
+        row.revoked_at = _now()
+
+
+def _session_public(row: SessionModel, current_id: str | None) -> dict:
+    return {
+        "id": row.id,
+        "current": row.id == current_id,
+        "createdAt": row.created_at.isoformat() + "Z",
+        "expiresAt": row.expires_at.isoformat() + "Z",
+        "userAgent": row.user_agent or "",
+        "ipAddress": row.ip_address or "",
+    }
+
+
+@bp.route("/sessions", methods=["GET"])
+@require_auth
+def list_sessions():
+    """Every ACTIVE session for the signed-in user (Settings → Security →
+    "Active sessions"), newest first, with the caller's own marked `current`."""
+    db = db_session()
+    user = current_user()
+    current_id = session.get("session_id")
+    rows = (
+        db.query(SessionModel)
+        .filter_by(user_id=user.id, revoked_at=None)
+        .order_by(SessionModel.created_at.desc())
+        .all()
+    )
+    active = [_session_public(r, current_id) for r in rows if r.is_active]
+    return jsonify({"sessions": active})
+
+
+@bp.route("/sessions/<session_id>", methods=["DELETE"])
+@require_auth
+def revoke_session(session_id: str):
+    """Revoke one of the caller's own sessions. Revoking the current one is
+    allowed and doubles as a sign-out (the cookie session is cleared too)."""
+    db = db_session()
+    user = current_user()
+    row = db.get(SessionModel, session_id)
+    if row is None or row.user_id != user.id:
+        return json_error("No such session.", 404)
+    if row.revoked_at is None:
+        row.revoked_at = _now()
+        db.commit()
+    if session.get("session_id") == session_id:
+        session.clear()
+    return jsonify({"ok": True})
+
+
+@bp.route("/sessions/revoke-others", methods=["POST"])
+@require_auth
+def revoke_other_sessions():
+    """"Sign out everywhere else": revoke every active session except this one."""
+    db = db_session()
+    user = current_user()
+    _revoke_all_sessions(db, user.id, keep=session.get("session_id"))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# ------------------------------------------------------- password & account
+@bp.route("/change-password", methods=["POST"])
+@require_auth
+def change_password():
+    """Change the signed-in user's password, re-wrapping the data key under
+    the new one (the key itself never changes, so encrypted rows are
+    untouched). Requires the current password even with a live session —
+    a stolen open laptop shouldn't be enough. Revokes every OTHER session."""
+    data = request.get_json(silent=True) or {}
+    current_password = data.get("currentPassword") or ""
+    new_password = data.get("newPassword") or ""
+
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        return json_error(f"Password must be at least {_MIN_PASSWORD_LEN} characters.", 422)
+
+    db = db_session()
+    user = current_user()
+    if not bcrypt.checkpw(current_password.encode("utf-8"), bytes(user.pw_hash)):
+        return json_error("Current password is incorrect.", 401)
+
+    pepper = current_app.config["DATA_KEY_PEPPER"]
+    data_key = unwrap_data_key(user.wrapped_data_key, current_password, user.salt, pepper)
+    if data_key is None:
+        return json_error("Current password is incorrect.", 401)
+
+    salt = generate_salt()
+    user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
+    user.salt = salt
+    user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    _revoke_all_sessions(db, user.id, keep=session.get("session_id"))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+_RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/L lookalikes
+
+
+def _generate_recovery_code() -> str:
+    groups = ["".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(4)) for _ in range(4)]
+    return "-".join(groups)
+
+
+@bp.route("/recovery-code", methods=["POST"])
+@require_auth
+def generate_recovery_code():
+    """Generate (or regenerate) the account's recovery code.
+
+    Returns the plaintext code EXACTLY ONCE — only its bcrypt hash and a
+    recovery-code-wrapped copy of the data key are stored, so a later
+    password reset with the code can re-wrap the key (see `reset_request`).
+    Regenerating replaces the previous code; the old one stops working.
+    Requires the live session's data key (always present on this route,
+    since every sign-in path carries it).
+    """
+    data_key = current_data_key()
+    if data_key is None:
+        return json_error("Session is missing its data key — sign in again.", 401)
+
+    code = _generate_recovery_code()
+    normalized = code.replace("-", "")
+    salt = generate_salt()
+    db = db_session()
+    user = current_user()
+    user.recovery_code_hash = bcrypt.hashpw(normalized.encode("utf-8"), bcrypt.gensalt())
+    user.recovery_salt = salt
+    user.recovery_wrapped_data_key = wrap_data_key(
+        data_key, normalized, salt, current_app.config["DATA_KEY_PEPPER"]
+    )
+    db.commit()
+    return jsonify({"recoveryCode": code})
+
+
+@bp.route("/account", methods=["DELETE"])
+@require_auth
+def delete_account():
+    """Permanently delete the account and everything under it (cascades to
+    sessions, transcript, plans, enrolments, shares, passkeys). Requires the
+    password as re-confirmation."""
+    data = request.get_json(silent=True) or {}
+    password = data.get("password") or ""
+
+    db = db_session()
+    user = current_user()
+    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
+        return json_error("Password is incorrect.", 401)
+
+    db.delete(user)
+    db.commit()
+    session.clear()
+    return jsonify({"ok": True})

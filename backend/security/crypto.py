@@ -81,6 +81,37 @@ def unwrap_data_key(wrapped: str, password: str, salt_b64: str, pepper: str) -> 
         return None
 
 
+# Fixed, versioned salt for the *server-side* KEK below. Unlike the per-user
+# password KEK, the input here (`DATA_KEY_PEPPER`) is a single high-entropy
+# server secret, not a guessable password, so a constant salt is fine — the
+# derivation just needs to be deterministic per process and distinct from any
+# per-user KEK.
+_SERVER_KEK_SALT = base64.urlsafe_b64encode(b"deciduous/server-kek/v1\0")
+
+
+def server_wrap_data_key(data_key: bytes, pepper: str) -> str:
+    """Wrap `data_key` with a KEK derived from the server pepper alone.
+
+    Used for passkey sign-in (ADR-0006): a WebAuthn assertion proves identity
+    but carries no password to derive the per-user KEK from, so users who
+    register a passkey get this additional wrap of the same data key. A stolen
+    DB dump still can't unwrap it (the pepper lives only in the environment),
+    but unlike the password wrap, a fully compromised *server* could — the
+    documented trade-off for passwordless sign-in. Only written for users who
+    opt into passkeys.
+    """
+    return Fernet(_derive_kek("", _SERVER_KEK_SALT.decode("ascii"), pepper)).encrypt(data_key).decode("ascii")
+
+
+def server_unwrap_data_key(wrapped: str, pepper: str) -> bytes | None:
+    """Unwrap a `server_wrap_data_key` token; None if the pepper is wrong/corrupt."""
+    kek = _derive_kek("", _SERVER_KEK_SALT.decode("ascii"), pepper)
+    try:
+        return Fernet(kek).decrypt(wrapped.encode("ascii"))
+    except InvalidToken:
+        return None
+
+
 def encrypt_field(plaintext: str | None, data_key: bytes) -> str | None:
     """Encrypt one column value with a user's (already-unwrapped) data key."""
     if plaintext is None:

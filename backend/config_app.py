@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 _INSTANCE_DIR = Path(__file__).resolve().parent / "instance"
 
@@ -77,6 +77,16 @@ class Config:
         # The SPA's origin, for CORS + cookie scoping. Vite's default dev port.
         self.CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "http://localhost:5173")
 
+        # WebAuthn passkeys (backend/api/passkeys.py). The RP ID must be the
+        # site's registrable domain (e.g. "deciduous.mikkelsen.ca"); the
+        # expected origin is the full scheme://host[:port] the browser reports.
+        # Both default from CORS_ORIGIN so local dev works with zero config.
+        self.PASSKEY_ORIGIN = os.environ.get("PASSKEY_ORIGIN") or self.CORS_ORIGIN
+        self.PASSKEY_RP_ID = (
+            os.environ.get("PASSKEY_RP_ID") or urlsplit(self.PASSKEY_ORIGIN).hostname or "localhost"
+        )
+        self.PASSKEY_RP_NAME = os.environ.get("PASSKEY_RP_NAME", "Deciduous")
+
         self.DEBUG = not is_production
         self.TESTING = False
 
@@ -88,7 +98,11 @@ class Config:
         self.SESSION_COOKIE_SECURE = _truthy(
             os.environ.get("SESSION_COOKIE_SECURE"), default=is_production
         )
+        # Cookie max-age for *permanent* (remember-me) sessions. The DB
+        # `Session.expires_at` row is the real source of truth per session
+        # (24h default / 30d remembered — backend/api/auth.py); this just caps
+        # how long the remembered cookie itself survives.
         self.PERMANENT_SESSION_LIFETIME = int(
-            os.environ.get("SESSION_LIFETIME_SECONDS", 60 * 60 * 24 * 14)
+            os.environ.get("SESSION_LIFETIME_SECONDS", 60 * 60 * 24 * 30)
         )
         self.JSON_SORT_KEYS = False

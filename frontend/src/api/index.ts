@@ -4,3 +4,5 @@ export { api, mockClient, httpClient, isMockApi, ensureCsrfToken, API_BASE } fro
 export type { ApiClient, CourseSearchParams, ProgramSearchParams, PlanValidationItem, PlanValidationResult } from "./client";
 export { loadGuestProfile, saveGuestProfile, clearGuestProfile } from "./guestProfile";
 export type { GuestProfile } from "./guestProfile";
+export * as authApi from "./auth";
+export type { AuthUser, Profile, ActiveSession, Passkey } from "./auth";

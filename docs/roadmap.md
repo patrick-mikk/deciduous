@@ -27,7 +27,10 @@ Build order for the degree planner. Backend first; React after the API is stable
 
 - **cPanel deploy**: MySQL provisioning, Passenger WSGI, React static build served at
   `deciduous.mikkelsen.ca`, AutoSSL, env vars, nightly cache-refresh cron.
-- Timetable **optimizer** polish; auth hardening (password reset + recovery-code flow, rate limits).
+- Timetable **optimizer** polish.
+- ~~Auth hardening~~ shipped: remember-me (30-day) sessions, passkey (WebAuthn) sign-in,
+  session management, password change with key re-wrap, recovery-code reset, account
+  deletion, profile endpoints. Remaining production items: [production-hardening.md](production-hardening.md).
 - Breadth data completeness for past (uncached) sessions; wire the frontend off mock to the live API.
 
 ## Scope notes

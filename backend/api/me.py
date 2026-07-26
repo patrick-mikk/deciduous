@@ -20,9 +20,9 @@ from collections import defaultdict
 from dataclasses import asdict
 from typing import Any
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
-from backend.api import current_data_key, current_user, db_session, require_auth
+from backend.api import current_data_key, current_user, db_session, json_error, require_auth
 from backend.api._audit import ProgramRow, TranscriptRow
 from backend.api._audit import program_progress_summary as _program_progress_summary
 from backend.api._audit import requirement_progress as _audit_requirement_progress
@@ -388,6 +388,56 @@ def student_record():
             "cgpa": cgpa(records).gpa or 0.0,
         }
     )
+
+
+def _profile_json(user) -> dict[str, Any]:
+    return {
+        "email": user.email,
+        "displayName": user.display_name or "",
+        "currentSession": user.current_session or "",
+        "expectedGrad": user.expected_grad or "",
+    }
+
+
+@bp.route("/profile", methods=["GET"])
+@require_auth
+def get_profile():
+    """`GET /api/me/profile` — the account's profile fields (Settings →
+    Profile). Non-sensitive account data, stored plaintext on `User`."""
+    return jsonify({"profile": _profile_json(current_user())})
+
+
+@bp.route("/profile", methods=["PUT"])
+@require_auth
+def update_profile():
+    """`PUT /api/me/profile` — update displayName / currentSession /
+    expectedGrad. Only keys present in the body are changed; email changes
+    are deliberately not supported here (that's an auth-level operation
+    needing re-verification, not a profile edit)."""
+    data = request.get_json(silent=True) or {}
+    db = db_session()
+    user = current_user()
+
+    if "displayName" in data:
+        name = (data.get("displayName") or "").strip()
+        if len(name) > 120:
+            return json_error("Display name is too long (max 120 characters).", 422)
+        user.display_name = name or None
+
+    if "currentSession" in data:
+        raw = (data.get("currentSession") or "").strip()
+        if raw and not _SESSION_CODE_OR_RANGE_RE.match(raw):
+            return json_error("currentSession must be a session code like 20269 or 20269-20271.", 422)
+        user.current_session = raw or None
+
+    if "expectedGrad" in data:
+        raw = (data.get("expectedGrad") or "").strip()
+        if raw and not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", raw):
+            return json_error("expectedGrad must be a YYYY-MM month.", 422)
+        user.expected_grad = raw or None
+
+    db.commit()
+    return jsonify({"profile": _profile_json(user)})
 
 
 @bp.route("/summary", methods=["GET"])

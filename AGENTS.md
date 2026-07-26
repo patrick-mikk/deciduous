@@ -51,8 +51,10 @@ docs/                    project-level structured docs (architecture, convention
 design/                  the design package (00-09 + screens/) and Claude Design output
 ```
 
-Current state: **full stack built** — data layer + Flask API + validators + React frontend.
-Remaining: cPanel deploy, timetable-optimizer polish, auth hardening (see docs/roadmap.md).
+Current state: **full stack built** — data layer + Flask API + validators + React frontend,
+including account/auth surface (remember-me sessions, passkeys, recovery codes, profile).
+Remaining: cPanel deploy, timetable-optimizer polish, production hardening
+(see docs/roadmap.md and docs/production-hardening.md).
 
 ## Commands
 
