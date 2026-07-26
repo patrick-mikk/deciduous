@@ -134,6 +134,21 @@ def test_manual_run_requires_bearer_secret(client, deploys):
     assert deploys(1) == ["deploy"]
 
 
+def test_non_ascii_signature_is_403_not_500(client, deploys):
+    # A header byte > 0x7F would make compare_digest raise TypeError; the fix
+    # compares bytes, so it cleanly rejects instead of 500ing this
+    # unauthenticated route.
+    body = _push_body()
+    resp = client.post(
+        "/api/deploy/webhook",
+        data=body,
+        headers={"X-Hub-Signature-256": "sha256=café", "X-GitHub-Event": "push", "Content-Type": "application/json"},
+    )
+    assert resp.status_code == 403
+    resp = client.post("/api/deploy/run", headers={"Authorization": "Bearer café"})
+    assert resp.status_code == 403
+
+
 def test_status_requires_bearer_secret(client, monkeypatch):
     monkeypatch.setattr(deploy_api, "read_state", lambda: {"status": "deployed"})
     assert client.get("/api/deploy/status").status_code == 403

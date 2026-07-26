@@ -154,15 +154,19 @@ export async function changePassword(currentPassword: string, newPassword: strin
   });
 }
 
-/** Returns the plaintext recovery code — shown to the user EXACTLY ONCE. */
-export async function generateRecoveryCode(): Promise<string> {
+/** Returns the plaintext recovery code — shown to the user EXACTLY ONCE.
+ * Requires the current password (re-auth before minting a recovery credential). */
+export async function generateRecoveryCode(password: string): Promise<string> {
   if (isMockApi || !API_BASE) {
     const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
     const group = () =>
       Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
     return delay([group(), group(), group(), group()].join("-"), 300);
   }
-  const res = await authFetch<{ recoveryCode?: string }>("/auth/recovery-code", { method: "POST" });
+  const res = await authFetch<{ recoveryCode?: string }>("/auth/recovery-code", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
   if (!res.recoveryCode) throw new Error("Couldn't generate a recovery code.");
   return res.recoveryCode;
 }
@@ -346,8 +350,10 @@ export async function deletePasskey(id: number): Promise<void> {
   await authFetch(`/auth/passkeys/${id}`, { method: "DELETE" });
 }
 
-/** Full registration ceremony: options -> navigator.credentials.create -> verify. */
-export async function registerPasskey(label: string): Promise<Passkey> {
+/** Full registration ceremony: options -> navigator.credentials.create ->
+ * verify. Requires the current password — the backend re-authenticates at the
+ * options step before starting the ceremony. */
+export async function registerPasskey(label: string, password: string): Promise<Passkey> {
   if (isMockApi || !API_BASE) {
     const passkey: Passkey = {
       id: mockState.nextPasskeyId++,
@@ -361,7 +367,7 @@ export async function registerPasskey(label: string): Promise<Passkey> {
 
   const options = await authFetch<WireCreationOptions>("/auth/passkeys/register/options", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ password }),
   });
   const publicKey: PublicKeyCredentialCreationOptions = {
     ...(options as unknown as PublicKeyCredentialCreationOptions),

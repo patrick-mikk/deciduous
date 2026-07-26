@@ -35,6 +35,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import bcrypt
 from flask import Blueprint, current_app, jsonify, request, session
 from webauthn import (
     generate_authentication_options,
@@ -44,7 +45,7 @@ from webauthn import (
     verify_registration_response,
 )
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
-from webauthn.helpers.exceptions import InvalidAuthenticationResponse, InvalidRegistrationResponse
+from webauthn.helpers.exceptions import WebAuthnException
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
     PublicKeyCredentialDescriptor,
@@ -94,8 +95,17 @@ def _credential_public(row: PasskeyCredential) -> dict:
 def register_options():
     db = db_session()
     user = current_user()
-    rp_id, rp_name, _origin = _rp()
 
+    # Re-authenticate before adding a passkey. A passkey is a passwordless
+    # sign-in credential that unlocks the account for up to 30 days and
+    # survives session revocation, so registering one from a merely-open
+    # session (a stolen laptop) would be a persistence backdoor — require the
+    # current password here, same posture as change_password/delete_account.
+    password = (request.get_json(silent=True) or {}).get("password") or ""
+    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
+        return json_error("Current password is incorrect.", 401)
+
+    rp_id, rp_name, _origin = _rp()
     existing = db.query(PasskeyCredential).filter_by(user_id=user.id).all()
     options = generate_registration_options(
         rp_id=rp_id,
@@ -108,10 +118,12 @@ def register_options():
         ],
         authenticator_selection=AuthenticatorSelectionCriteria(
             # Resident (discoverable) credentials, so sign-in needs no email
-            # prompt first; user verification preferred, not required, to keep
-            # older security keys usable.
+            # prompt first. User verification REQUIRED: since a passkey is the
+            # sole factor at sign-in (no password), the authenticator's own
+            # biometric/PIN is what stands in for the password — a passkey
+            # that could be used with mere possession is not acceptable here.
             resident_key=ResidentKeyRequirement.REQUIRED,
-            user_verification=UserVerificationRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.REQUIRED,
         ),
     )
     session[_REG_CHALLENGE_KEY] = bytes_to_base64url(options.challenge)
@@ -128,8 +140,8 @@ def register_verify():
     challenge_b64 = session.pop(_REG_CHALLENGE_KEY, None)
     if not challenge_b64:
         return json_error("No registration in progress — request options first.", 400)
-    if not credential:
-        return json_error("Missing credential.", 422)
+    if not isinstance(credential, dict) or not isinstance(credential.get("rawId"), str):
+        return json_error("Missing or malformed credential.", 422)
 
     data_key = current_data_key()
     if data_key is None:
@@ -142,8 +154,12 @@ def register_verify():
             expected_challenge=base64url_to_bytes(challenge_b64),
             expected_rp_id=rp_id,
             expected_origin=origin,
+            require_user_verification=True,
         )
-    except InvalidRegistrationResponse:
+    # WebAuthnException is the base of the whole family the parser/verifier can
+    # raise (InvalidJSONStructure, InvalidRegistrationResponse, InvalidCBORData,
+    # ...); catching only the leaf types let malformed JSON escape as a 500.
+    except WebAuthnException:
         return json_error("Passkey registration could not be verified.", 400)
 
     db = db_session()
@@ -221,7 +237,7 @@ def authenticate_options():
         # Empty allowCredentials => the browser offers any discoverable
         # passkey it holds for this RP (usernameless sign-in).
         allow_credentials=[],
-        user_verification=UserVerificationRequirement.PREFERRED,
+        user_verification=UserVerificationRequirement.REQUIRED,
     )
     session[_AUTH_CHALLENGE_KEY] = bytes_to_base64url(options.challenge)
     return _options_response(options)
@@ -253,9 +269,11 @@ def authenticate_verify():
             expected_origin=origin,
             credential_public_key=base64url_to_bytes(row.public_key),
             credential_current_sign_count=row.sign_count,
-            require_user_verification=False,
+            # Passwordless sign-in: the authenticator's user verification IS
+            # the factor, so require it (matches the REQUIRED registration).
+            require_user_verification=True,
         )
-    except InvalidAuthenticationResponse:
+    except WebAuthnException:
         return json_error(generic_error, 401)
 
     user = db.get(User, row.user_id)

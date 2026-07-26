@@ -77,8 +77,13 @@ def _signup(client, email="passkey@mail.utoronto.ca", password="correcthorsebatt
     assert resp.status_code == 201, resp.get_json()
 
 
-def _register_passkey(client, monkeypatch, label="MacBook Touch ID"):
-    resp = client.post("/api/auth/passkeys/register/options", headers=_csrf_headers(client))
+def _register_passkey(client, monkeypatch, label="MacBook Touch ID", password="correcthorsebattery"):
+    # register/options now re-authenticates with the current password.
+    resp = client.post(
+        "/api/auth/passkeys/register/options",
+        json={"password": password},
+        headers=_csrf_headers(client),
+    )
     assert resp.status_code == 200
     options = resp.get_json()
     assert options["challenge"] and options["rp"]["id"]
@@ -93,6 +98,33 @@ def _register_passkey(client, monkeypatch, label="MacBook Touch ID"):
     )
     assert resp.status_code == 201, resp.get_json()
     return resp.get_json()["passkey"]
+
+
+def test_register_options_requires_current_password(client):
+    _signup(client)
+    # No password / wrong password is rejected before any ceremony.
+    assert client.post("/api/auth/passkeys/register/options", headers=_csrf_headers(client)).status_code == 401
+    resp = client.post(
+        "/api/auth/passkeys/register/options",
+        json={"password": "wrong-password"},
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 401
+
+
+def test_malformed_credential_is_400_not_500(client, monkeypatch):
+    _signup(client)
+    client.post(
+        "/api/auth/passkeys/register/options",
+        json={"password": "correcthorsebattery"},
+        headers=_csrf_headers(client),
+    )
+    resp = client.post(
+        "/api/auth/passkeys/register/verify",
+        json={"credential": {"id": "x", "rawId": "x"}},  # no response block -> parser raises
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code in (400, 422)
 
 
 def _server_wrapped_key(client, email):

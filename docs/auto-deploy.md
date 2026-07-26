@@ -97,11 +97,18 @@ deploys itself.
 
 The same runner works as a poller — add a cPanel cron job:
 
+Use the app's **virtualenv** interpreter (not the system `python3`) so the
+deploy's `pip install` and schema step target the same environment the app
+imports from — the exact path is shown at the top of cPanel → Setup Python App
+(`docs/deploy-cpanel.md` step 9 makes the same point for the cache cron):
+
 ```
-*/5 * * * * cd ~/deciduous && /usr/bin/env python3 -m backend.scripts.deploy --if-changed >> ~/deploy-cron.log 2>&1
+*/5 * * * * cd ~/deciduous && /home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.deploy --if-changed >> ~/deploy-cron.log 2>&1
 ```
 
-`--if-changed` is silent when already up to date. The lock file
+`--if-changed` is silent when already up to date. The runner calls
+`load_env()` itself, so DB credentials in `~/deciduous/.env` are picked up
+even though cron doesn't inherit the Passenger app's environment. The lock file
 (`backend/instance/deploy.lock`) keeps cron and webhook deploys from
 overlapping; a lock older than 15 minutes is treated as stale and broken.
 

@@ -132,6 +132,18 @@ def run_deploy(branch: str) -> dict:
         steps.append({"name": name, "ok": ok, "output": output[-4000:]})
         return ok, output
 
+    # Populate os.environ from .env for the CLI/cron path (the webhook path's
+    # Flask process already did this in create_app). Without it, the DB_* gate
+    # below reads empty and the schema step is silently skipped under cron.
+    try:
+        from backend.config import load_env
+
+        load_env()
+    except Exception:  # noqa: BLE001 — .env is optional; missing it is fine
+        pass
+
+    prior = read_state()
+
     try:
         ok, old_sha = step("current-sha", ["git", "rev-parse", "HEAD"])
         if not ok:
@@ -146,17 +158,27 @@ def run_deploy(branch: str) -> dict:
             return state
         state["toSha"] = new_sha
 
-        if new_sha == old_sha:
+        # Short-circuit ONLY when the checkout is already at the target AND the
+        # last deploy of exactly this SHA fully SUCCEEDED. A deploy that died
+        # after `git reset` (HEAD already == origin) but before restart must
+        # still be retryable — otherwise every retry would report up-to-date
+        # and never run pip/schema/restart. All post-reset steps are idempotent.
+        already_deployed = bool(
+            prior and prior.get("status") == "deployed" and prior.get("toSha") == new_sha
+        )
+        if new_sha == old_sha and already_deployed:
             state["status"] = "up-to-date"
             return state
 
         if not step("reset", ["git", "reset", "--hard", f"origin/{branch}"])[0]:
             return state
 
-        ok, changed = step(
-            "changed-files", ["git", "diff", "--name-only", old_sha, new_sha]
-        )
-        if ok and "backend/requirements.txt" in changed.splitlines():
+        # Compare against the pre-reset SHA so a resumed/retried deploy (where
+        # old_sha already == new_sha) still re-checks requirements. `prior`'s
+        # fromSha is the true previous baseline in that case.
+        base_sha = old_sha if old_sha != new_sha else (prior or {}).get("fromSha", old_sha)
+        ok, changed = step("changed-files", ["git", "diff", "--name-only", base_sha, new_sha])
+        if not ok or "backend/requirements.txt" in changed.splitlines():
             if not step(
                 "pip-install",
                 [sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"],
@@ -169,6 +191,10 @@ def run_deploy(branch: str) -> dict:
         if all(os.environ.get(k) for k in ("DB_HOST", "DB_NAME", "DB_USER")):
             if not step("init-db", [sys.executable, "-m", "backend.scripts.init_db"])[0]:
                 return state
+        else:
+            steps.append(
+                {"name": "init-db", "ok": True, "output": "skipped: DB_HOST/DB_NAME/DB_USER not set (SQLite fallback self-migrates on boot)"}
+            )
 
         try:
             RESTART_PATH.parent.mkdir(parents=True, exist_ok=True)

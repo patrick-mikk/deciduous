@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
-import { AuthCard, Button, Callout, Input, PasswordField, StrengthMeter } from "@/ds";
+import { AuthCard, Button, Callout, Input, PasswordField } from "@/ds";
 import { authApi } from "@/api";
 
 /**
@@ -33,6 +33,10 @@ export default function ResetPassword() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [requested, setRequested] = React.useState(false);
+  // Set after a token reset whose encrypted data could NOT be preserved, so
+  // the outcome is shown here (a mid-navigation location-state notice on the
+  // dashboard was never read).
+  const [dataCleared, setDataCleared] = React.useState(false);
 
   function validNewPassword(): boolean {
     if (newPassword.length < 10) {
@@ -97,10 +101,13 @@ export default function ResetPassword() {
     setBusy(true);
     try {
       const { dataPreserved } = await authApi.confirmPasswordReset(token, newPassword);
-      navigate("/dashboard", {
-        replace: true,
-        state: dataPreserved ? undefined : { resetLostData: true },
-      });
+      if (dataPreserved) {
+        navigate("/dashboard", { replace: true });
+      } else {
+        // Reset succeeded but the old encryption key couldn't be recovered —
+        // show that outcome here before the user continues.
+        setDataCleared(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "This reset link didn't work — request a new one.");
     } finally {
@@ -116,6 +123,26 @@ export default function ResetPassword() {
       </Link>
     </>
   );
+
+  if (token && dataCleared) {
+    return (
+      <AuthCard title="Password reset" footer={footer}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Callout tone="success" title="Your password was reset">
+            You're signed in with your new password.
+          </Callout>
+          <Callout tone="warning" title="Encrypted data was cleared">
+            This account had no passkey or recovery code, so your previously encrypted transcript and
+            plan data couldn't be unlocked and has been cleared. You can re-import your record from
+            Settings. Set up a recovery code or passkey to protect against this next time.
+          </Callout>
+          <Button variant="primary" fullWidth onClick={() => navigate("/dashboard", { replace: true })}>
+            Continue to your planner
+          </Button>
+        </div>
+      </AuthCard>
+    );
+  }
 
   if (token) {
     return (
@@ -133,7 +160,6 @@ export default function ResetPassword() {
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
             showStrength
           />
-          <StrengthMeter password={newPassword} />
           <PasswordField
             label="Confirm new password"
             value={confirm}

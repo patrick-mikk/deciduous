@@ -277,8 +277,18 @@ def test_recovery_code_reset_preserves_data_key(client):
     with client.session_transaction() as sess:
         original_key = sess["data_key"]
 
+    # Minting a recovery code re-authenticates with the current password.
     headers = _csrf_headers(client)
-    resp = client.post("/api/auth/recovery-code", headers=headers)
+    assert client.post("/api/auth/recovery-code", headers=headers).status_code == 401
+    headers = _csrf_headers(client)
+    assert (
+        client.post(
+            "/api/auth/recovery-code", json={"password": "wrong"}, headers=headers
+        ).status_code
+        == 401
+    )
+    headers = _csrf_headers(client)
+    resp = client.post("/api/auth/recovery-code", json={"password": old_pw}, headers=headers)
     assert resp.status_code == 200
     code = resp.get_json()["recoveryCode"]
     assert len(code.replace("-", "")) == 16
@@ -335,6 +345,69 @@ def test_delete_account_requires_password_and_cascades(client):
     headers = _csrf_headers(client)
     resp = client.post("/api/auth/signin", json={"email": email, "password": password}, headers=headers)
     assert resp.status_code == 401  # account is gone
+
+
+# --------------------------------------------------- audit-hardening regressions
+def test_change_password_retires_the_recovery_code(client):
+    """A password change must invalidate a previously-issued recovery code —
+    otherwise it's a reset backdoor that survives the change."""
+    email, pw1, pw2, pw3 = "retire@mail.utoronto.ca", "correcthorsebattery", "second-password-9", "third-password-99"
+    _signup(client, email, pw1)
+
+    headers = _csrf_headers(client)
+    code = client.post("/api/auth/recovery-code", json={"password": pw1}, headers=headers).get_json()[
+        "recoveryCode"
+    ]
+
+    headers = _csrf_headers(client)
+    assert (
+        client.post(
+            "/api/auth/change-password",
+            json={"currentPassword": pw1, "newPassword": pw2},
+            headers=headers,
+        ).status_code
+        == 200
+    )
+
+    # The old recovery code no longer resets anything.
+    headers = _csrf_headers(client)
+    client.post("/api/auth/signout", headers=headers)
+    headers = _csrf_headers(client)
+    resp = client.post(
+        "/api/auth/reset",
+        json={"email": email, "recoveryCode": code, "newPassword": pw3},
+        headers=headers,
+    )
+    assert resp.status_code == 401
+
+
+def test_recovery_code_is_single_use(client):
+    email, pw, new1, new2 = "singleuse@mail.utoronto.ca", "correcthorsebattery", "after-reset-1234", "after-reset-5678"
+    _signup(client, email, pw)
+    headers = _csrf_headers(client)
+    code = client.post("/api/auth/recovery-code", json={"password": pw}, headers=headers).get_json()[
+        "recoveryCode"
+    ]
+    headers = _csrf_headers(client)
+    client.post("/api/auth/signout", headers=headers)
+
+    headers = _csrf_headers(client)
+    assert (
+        client.post(
+            "/api/auth/reset", json={"email": email, "recoveryCode": code, "newPassword": new1}, headers=headers
+        ).status_code
+        == 200
+    )
+    # Second use of the same code is rejected.
+    headers = _csrf_headers(client)
+    client.post("/api/auth/signout", headers=headers)
+    headers = _csrf_headers(client)
+    assert (
+        client.post(
+            "/api/auth/reset", json={"email": email, "recoveryCode": code, "newPassword": new2}, headers=headers
+        ).status_code
+        == 401
+    )
 
 
 # ------------------------------------------------------------------ profile

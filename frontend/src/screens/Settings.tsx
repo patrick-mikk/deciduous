@@ -17,7 +17,6 @@ import {
   Select,
   ShareLinkDialog,
   Skeleton,
-  StrengthMeter,
   Switch,
   Tabs,
   ThemeToggle,
@@ -127,15 +126,20 @@ export default function Settings() {
   const [passwordError, setPasswordError] = React.useState<string | null>(null);
 
   const [recoveryCode, setRecoveryCode] = React.useState<string | null>(null);
-  const [recoveryBusy, setRecoveryBusy] = React.useState(false);
 
   const [passkeys, setPasskeys] = React.useState<Passkey[] | null>(null);
   const [passkeyLabel, setPasskeyLabel] = React.useState("");
-  const [passkeyBusy, setPasskeyBusy] = React.useState(false);
-  const [passkeyError, setPasskeyError] = React.useState<string | null>(null);
 
   const [activeSessions, setActiveSessions] = React.useState<ActiveSession[] | null>(null);
   const [sessionsBusy, setSessionsBusy] = React.useState(false);
+  const [securityError, setSecurityError] = React.useState<string | null>(null);
+
+  // Re-auth prompt shared by "generate recovery code" and "add passkey" — both
+  // now require the current password (the backend re-authenticates).
+  const [reauth, setReauth] = React.useState<{ action: "recovery" | "passkey"; label: string } | null>(null);
+  const [reauthPassword, setReauthPassword] = React.useState("");
+  const [reauthBusy, setReauthBusy] = React.useState(false);
+  const [reauthError, setReauthError] = React.useState<string | null>(null);
 
   // ---- Data ----------------------------------------------------------------
   const [shareOpen, setShareOpen] = React.useState(false);
@@ -168,9 +172,21 @@ export default function Settings() {
   }, []);
 
   const refreshSecurity = React.useCallback(() => {
-    authApi.listPasskeys().then(setPasskeys).catch(() => setPasskeys([]));
-    authApi.listSessions().then(setActiveSessions).catch(() => setActiveSessions([]));
-  }, []);
+    // A 401 here means the session expired/was revoked — don't render an
+    // authoritative "you have no passkeys / no sessions" from a failed fetch
+    // (that would be a false claim in security UI). Surface it and bounce to
+    // sign-in; reserve `[]` for a real empty 200.
+    const onErr = (e: unknown) => {
+      if ((e as { status?: number } | null)?.status === 401) {
+        navigate("/signin", { replace: true });
+      } else {
+        setSecurityError(e instanceof Error ? e.message : "Couldn't load your security settings.");
+      }
+    };
+    setSecurityError(null);
+    authApi.listPasskeys().then(setPasskeys).catch(onErr);
+    authApi.listSessions().then(setActiveSessions).catch(onErr);
+  }, [navigate]);
 
   React.useEffect(() => {
     if (tab === "security" && (passkeys === null || activeSessions === null)) refreshSecurity();
@@ -266,35 +282,38 @@ export default function Settings() {
     }
   }
 
-  async function generateRecovery() {
-    if (recoveryBusy) return;
-    setRecoveryBusy(true);
-    try {
-      setRecoveryCode(await authApi.generateRecoveryCode());
-      setToast("Recovery code generated. Save it now — it won't be shown again.");
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : "Couldn't generate a recovery code.");
-    } finally {
-      setRecoveryBusy(false);
-    }
+  function openReauth(action: "recovery" | "passkey") {
+    setReauthPassword("");
+    setReauthError(null);
+    setReauth({ action, label: passkeyLabel.trim() || "Passkey" });
   }
 
-  async function addPasskey() {
-    if (passkeyBusy) return;
-    setPasskeyBusy(true);
-    setPasskeyError(null);
+  async function confirmReauth() {
+    if (!reauth || reauthBusy || !reauthPassword) return;
+    setReauthBusy(true);
+    setReauthError(null);
     try {
-      await authApi.registerPasskey(passkeyLabel.trim() || "Passkey");
-      setPasskeyLabel("");
-      setToast("Passkey added.");
-      refreshSecurity();
+      if (reauth.action === "recovery") {
+        setRecoveryCode(await authApi.generateRecoveryCode(reauthPassword));
+        setReauth(null);
+        setToast("Recovery code generated. Save it now — it won't be shown again.");
+      } else {
+        await authApi.registerPasskey(reauth.label, reauthPassword);
+        setReauth(null);
+        setPasskeyLabel("");
+        setToast("Passkey added.");
+        refreshSecurity();
+      }
     } catch (e) {
       const name = (e as { name?: string } | null)?.name;
-      if (name !== "NotAllowedError" && name !== "AbortError") {
-        setPasskeyError(e instanceof Error ? e.message : "Couldn't add a passkey.");
+      // A cancelled authenticator prompt isn't an error worth showing.
+      if (name === "NotAllowedError" || name === "AbortError") {
+        setReauth(null);
+      } else {
+        setReauthError(e instanceof Error ? e.message : "That didn't work — check your password and try again.");
       }
     } finally {
-      setPasskeyBusy(false);
+      setReauthBusy(false);
     }
   }
 
@@ -377,7 +396,12 @@ export default function Settings() {
               <Skeleton height={220} />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>
-                <Input label="Email" type="email" value={profile.email} disabled hint="Your sign-in email can't be changed here." />
+                <div>
+                  <Input label="Email" type="email" value={profile.email} disabled />
+                  <div style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", marginTop: 4 }}>
+                    Your sign-in email can't be changed here.
+                  </div>
+                </div>
                 {profile.verified ? (
                   <Callout tone="success">Email verified.</Callout>
                 ) : (
@@ -440,6 +464,14 @@ export default function Settings() {
 
         {tab === "security" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {securityError && (
+              <Callout tone="danger" title="Couldn't load your security settings">
+                {securityError}{" "}
+                <Button variant="link" size="sm" onClick={refreshSecurity}>
+                  Retry
+                </Button>
+              </Callout>
+            )}
             <Card>
               <div style={cardTitleStyle}>Change password</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 360 }}>
@@ -455,7 +487,6 @@ export default function Settings() {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
                   showStrength
                 />
-                <StrengthMeter password={newPassword} />
                 <Callout tone="info">
                   Your encrypted academic data is re-locked under the new password automatically — nothing
                   is lost. Every other signed-in device is signed out.
@@ -473,7 +504,7 @@ export default function Settings() {
                 <RecoveryCodeCard
                   code={recoveryCode}
                   onCopy={() => setToast("Recovery code copied.")}
-                  onRegenerate={generateRecovery}
+                  onRegenerate={() => openReauth("recovery")}
                 />
                 <div style={{ marginTop: 8 }}>
                   <Callout tone="warning" title="Save this code now">
@@ -490,7 +521,7 @@ export default function Settings() {
                   encrypted transcript and plan data. Generate one and keep it somewhere safe — it's
                   shown only once.
                 </p>
-                <Button variant="secondary" icon="key-round" loading={recoveryBusy} onClick={generateRecovery}>
+                <Button variant="secondary" icon="key-round" onClick={() => openReauth("recovery")}>
                   Generate recovery code
                 </Button>
               </Card>
@@ -503,14 +534,9 @@ export default function Settings() {
               ) : (
                 <>
                   <p style={{ margin: "0 0 12px", fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
-                    Sign in with Face ID, Touch ID, Windows Hello, or a security key — no password
-                    needed.
+                    Sign in with Face ID, Touch ID, Windows Hello, or a security key. Adding one asks
+                    for your current password first.
                   </p>
-                  {passkeyError && (
-                    <div style={{ marginBottom: 10 }}>
-                      <Callout tone="danger">{passkeyError}</Callout>
-                    </div>
-                  )}
                   {passkeys == null ? (
                     <Skeleton height={40} />
                   ) : (
@@ -547,7 +573,7 @@ export default function Settings() {
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPasskeyLabel(e.target.value)}
                       />
                     </div>
-                    <Button icon="key" loading={passkeyBusy} onClick={addPasskey}>
+                    <Button icon="key" onClick={() => openReauth("passkey")}>
                       Add passkey
                     </Button>
                   </div>
@@ -685,6 +711,34 @@ export default function Settings() {
             </Button>
             <Button variant="danger" loading={deleteBusy} disabled={!deletePassword} onClick={confirmDeleteAccount}>
               Delete my account
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={reauth !== null}
+        title={reauth?.action === "passkey" ? "Add a passkey" : "Generate a recovery code"}
+        onClose={() => !reauthBusy && setReauth(null)}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
+          {reauthError && <Callout tone="danger">{reauthError}</Callout>}
+          <Callout tone="info">
+            {reauth?.action === "passkey"
+              ? "Confirm your password, then your device will prompt for Face ID, Touch ID, or your security key."
+              : "Confirm your password to generate a new recovery code."}
+          </Callout>
+          <PasswordField
+            label="Current password"
+            value={reauthPassword}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReauthPassword(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Button variant="secondary" onClick={() => setReauth(null)} disabled={reauthBusy}>
+              Cancel
+            </Button>
+            <Button loading={reauthBusy} disabled={!reauthPassword} onClick={confirmReauth}>
+              {reauth?.action === "passkey" ? "Continue" : "Generate code"}
             </Button>
           </div>
         </div>

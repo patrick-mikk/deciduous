@@ -53,7 +53,12 @@ def _bearer_authorized() -> bool:
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         return False
-    return _secrets.compare_digest(header[len("Bearer "):].strip(), secret)
+    # Compare as bytes: compare_digest raises TypeError on non-ASCII str
+    # (Werkzeug decodes headers as latin-1), which would 500 an unauthenticated
+    # route instead of cleanly rejecting.
+    return _secrets.compare_digest(
+        header[len("Bearer "):].strip().encode("utf-8", "ignore"), secret.encode("utf-8")
+    )
 
 
 def _start_background_deploy(branch: str) -> None:
@@ -74,7 +79,9 @@ def webhook():
 
     signature = request.headers.get("X-Hub-Signature-256", "")
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), request.get_data(), hashlib.sha256).hexdigest()
-    if not signature or not hmac.compare_digest(signature, expected):
+    # Byte compare: a non-ASCII signature header would make compare_digest raise
+    # TypeError and 500 this unauthenticated route instead of returning 403.
+    if not signature or not hmac.compare_digest(signature.encode("utf-8", "ignore"), expected.encode("utf-8")):
         return json_error("Invalid webhook signature.", 403)
 
     event = request.headers.get("X-GitHub-Event", "")

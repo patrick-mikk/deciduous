@@ -127,6 +127,58 @@ def test_reset_request_emails_link_and_confirm_resets_password(client):
     assert resp.status_code == 401
 
 
+def test_emailed_reset_token_is_single_use(client):
+    """A redeemed reset link must not be replayable (it's bound to pw_hash,
+    which the first reset rotates)."""
+    email, pw1, pw2 = "singlelink@mail.utoronto.ca", "correcthorsebattery", "brand-new-passw0rd"
+    _signup(client, email, pw1)
+    client.post("/api/auth/signout", headers=_csrf_headers(client))
+    client.post("/api/auth/reset", json={"email": email}, headers=_csrf_headers(client))
+    token = _token_from_last_email("/reset")
+
+    assert (
+        client.post(
+            "/api/auth/reset/confirm", json={"token": token, "newPassword": pw2}, headers=_csrf_headers(client)
+        ).status_code
+        == 200
+    )
+    client.post("/api/auth/signout", headers=_csrf_headers(client))
+    # Replaying the same link is rejected.
+    assert (
+        client.post(
+            "/api/auth/reset/confirm",
+            json={"token": token, "newPassword": "attacker-chosen-99"},
+            headers=_csrf_headers(client),
+        ).status_code
+        == 401
+    )
+
+
+def test_change_password_invalidates_outstanding_reset_link(client):
+    email, pw1, pw2, pw3 = "invlink@mail.utoronto.ca", "correcthorsebattery", "changed-in-settings1", "attacker-9999"
+    _signup(client, email, pw1)
+    client.post("/api/auth/reset", json={"email": email}, headers=_csrf_headers(client))
+    token = _token_from_last_email("/reset")
+
+    # User changes password in Settings while the emailed link is still live.
+    assert (
+        client.post(
+            "/api/auth/change-password",
+            json={"currentPassword": pw1, "newPassword": pw2},
+            headers=_csrf_headers(client),
+        ).status_code
+        == 200
+    )
+    client.post("/api/auth/signout", headers=_csrf_headers(client))
+    # The pre-change link no longer works.
+    assert (
+        client.post(
+            "/api/auth/reset/confirm", json={"token": token, "newPassword": pw3}, headers=_csrf_headers(client)
+        ).status_code
+        == 401
+    )
+
+
 def test_reset_request_for_unknown_email_still_202_and_sends_nothing(client):
     resp = client.post(
         "/api/auth/reset", json={"email": "nobody@mail.utoronto.ca"}, headers=_csrf_headers(client)
@@ -151,7 +203,11 @@ def test_reset_confirm_preserves_data_key_when_account_has_a_passkey(client, mon
         credential_public_key = b"pk"
         sign_count = 0
 
-    client.post("/api/auth/passkeys/register/options", headers=_csrf_headers(client))
+    client.post(
+        "/api/auth/passkeys/register/options",
+        json={"password": "correcthorsebattery"},
+        headers=_csrf_headers(client),
+    )
     monkeypatch.setattr(passkeys_module, "verify_registration_response", lambda **kw: _Verified())
     cred_b64 = bytes_to_base64url(b"cred-reset-test")
     resp = client.post(

@@ -27,8 +27,9 @@ import bcrypt
 from flask import Blueprint, current_app, jsonify, request, session
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from backend.api import current_data_key, current_user, db_session, json_error, require_auth
+from backend.api import current_user, db_session, json_error, require_auth
 from backend.mailer import send_email
+from backend.models_db import PasskeyCredential
 from backend.models_db import Session as SessionModel
 from backend.models_db import User
 from backend.security.crypto import (
@@ -99,10 +100,27 @@ def _serializer(salt: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=salt)
 
 
+def _pw_fingerprint(user: User) -> str:
+    """A short digest of the current password hash — bound into RESET tokens
+    so they become single-use: `reset_confirm` and `change_password` both
+    rotate `pw_hash`, which changes this digest and thereby invalidates every
+    outstanding reset link (so a redeemed link can't be replayed, and
+    changing the password kills any link an attacker may hold)."""
+    import hashlib
+
+    return hashlib.sha256(bytes(user.pw_hash)).hexdigest()[:16]
+
+
 def _email_token(user: User, salt: str) -> str:
     # The email is in the payload so a token minted for one address can never
-    # verify/reset an account whose email has since changed.
-    return _serializer(salt).dumps({"uid": user.id, "email": user.email})
+    # verify/reset an account whose email has since changed. Reset tokens
+    # additionally carry a password fingerprint (`pv`) so they are single-use
+    # (see `_pw_fingerprint`); verification tokens don't, so a pending signup
+    # verification link keeps working across an early password change.
+    payload = {"uid": user.id, "email": user.email}
+    if salt == _RESET_SALT:
+        payload["pv"] = _pw_fingerprint(user)
+    return _serializer(salt).dumps(payload)
 
 
 def _load_email_token(token: str, salt: str, max_age: int) -> User | None:
@@ -114,6 +132,10 @@ def _load_email_token(token: str, salt: str, max_age: int) -> User | None:
         return None
     user = db_session().get(User, payload.get("uid"))
     if user is None or user.email != payload.get("email"):
+        return None
+    # Reset tokens are void once the bound password hash has changed (redeemed
+    # once, or changed via change-password) — this is what makes them one-shot.
+    if salt == _RESET_SALT and payload.get("pv") != _pw_fingerprint(user):
         return None
     return user
 
@@ -301,6 +323,11 @@ def reset_request():
     user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
     user.salt = salt
     user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    # Consume the recovery code — a code is single-use, so a leaked or
+    # shoulder-surfed code can't be replayed after the owner has used it.
+    user.recovery_code_hash = None
+    user.recovery_salt = None
+    user.recovery_wrapped_data_key = None
     user.failed_login_attempts = 0
     user.locked_until = None
     _revoke_all_sessions(db, user.id)  # a reset invalidates every signed-in device
@@ -341,16 +368,20 @@ def reset_confirm():
         if user.server_wrapped_data_key
         else None
     )
+    db = db_session()
     preserved = data_key is not None
     if not preserved:
         data_key = generate_data_key()
-        # Recovery wraps protect the OLD key — clear them so Settings offers a
-        # fresh code instead of silently keeping one that can't restore anything.
+        # Every wrap of the OLD (now-unrecoverable) key is dead weight — clear
+        # all of them so nothing keeps wrapping a discarded key: the recovery
+        # code, the passkey server wrap, and the passkey rows it unlocked
+        # (they can no longer reach the data, matching delete_passkey's
+        # "last passkey gone -> drop the server wrap" invariant).
         user.recovery_code_hash = None
         user.recovery_salt = None
         user.recovery_wrapped_data_key = None
-
-    db = db_session()
+        user.server_wrapped_data_key = None
+        db.query(PasskeyCredential).filter_by(user_id=user.id).delete()
     salt = generate_salt()
     user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
     user.salt = salt
@@ -498,6 +529,14 @@ def change_password():
     user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
     user.salt = salt
     user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    # Retire the recovery code: a password change should invalidate a
+    # previously-issued (or attacker-planted) recovery credential, which would
+    # otherwise survive as a password-reset backdoor. The user is prompted to
+    # generate a fresh one from Settings. (Outstanding emailed reset links die
+    # automatically — they're bound to the old pw_hash via `_pw_fingerprint`.)
+    user.recovery_code_hash = None
+    user.recovery_salt = None
+    user.recovery_wrapped_data_key = None
     _revoke_all_sessions(db, user.id, keep=session.get("session_id"))
     db.commit()
     return jsonify({"ok": True})
@@ -520,18 +559,29 @@ def generate_recovery_code():
     recovery-code-wrapped copy of the data key are stored, so a later
     password reset with the code can re-wrap the key (see `reset_request`).
     Regenerating replaces the previous code; the old one stops working.
-    Requires the live session's data key (always present on this route,
-    since every sign-in path carries it).
+
+    Requires the current password even with a live session (like
+    `change_password`/`delete_account`): a recovery code is a full
+    password-reset credential, so minting one from a merely-open session
+    would be a persistence backdoor a stolen laptop could plant.
     """
-    data_key = current_data_key()
+    data = request.get_json(silent=True) or {}
+    password = data.get("password") or ""
+
+    db = db_session()
+    user = current_user()
+    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
+        return json_error("Current password is incorrect.", 401)
+
+    # Derive the data key from the password rather than trusting the session
+    # copy — keeps the re-auth and the wrap consistent for the same secret.
+    data_key = unwrap_data_key(user.wrapped_data_key, password, user.salt, current_app.config["DATA_KEY_PEPPER"])
     if data_key is None:
-        return json_error("Session is missing its data key — sign in again.", 401)
+        return json_error("Current password is incorrect.", 401)
 
     code = _generate_recovery_code()
     normalized = code.replace("-", "")
     salt = generate_salt()
-    db = db_session()
-    user = current_user()
     user.recovery_code_hash = bcrypt.hashpw(normalized.encode("utf-8"), bcrypt.gensalt())
     user.recovery_salt = salt
     user.recovery_wrapped_data_key = wrap_data_key(
