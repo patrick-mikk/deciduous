@@ -57,6 +57,9 @@ class User(Base):
     recovery_wrapped_data_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     server_wrapped_data_key: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Set when the user clicks the emailed verification link (backend/api/auth.py).
+    verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(), nullable=True)
+
     # Profile (non-sensitive account data shown on Settings → Profile).
     display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     current_session: Mapped[str | None] = mapped_column(String(20), nullable=True)  # e.g. "20269"

@@ -393,6 +393,7 @@ def student_record():
 def _profile_json(user) -> dict[str, Any]:
     return {
         "email": user.email,
+        "verified": user.verified_at is not None,
         "displayName": user.display_name or "",
         "currentSession": user.current_session or "",
         "expectedGrad": user.expected_grad or "",

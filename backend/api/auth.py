@@ -25,11 +25,19 @@ import secrets
 
 import bcrypt
 from flask import Blueprint, current_app, jsonify, request, session
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from backend.api import current_data_key, current_user, db_session, json_error, require_auth
+from backend.mailer import send_email
 from backend.models_db import Session as SessionModel
 from backend.models_db import User
-from backend.security.crypto import generate_data_key, generate_salt, unwrap_data_key, wrap_data_key
+from backend.security.crypto import (
+    generate_data_key,
+    generate_salt,
+    server_unwrap_data_key,
+    unwrap_data_key,
+    wrap_data_key,
+)
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -77,7 +85,62 @@ def _start_session(user: User, data_key: bytes, remember: bool = False) -> None:
 
 
 def _user_public(user: User) -> dict:
-    return {"id": user.id, "email": user.email}
+    return {"id": user.id, "email": user.email, "verified": user.verified_at is not None}
+
+
+# ------------------------------------------------------------ email tokens
+_VERIFY_SALT = "verify-email-v1"
+_RESET_SALT = "password-reset-v1"
+_VERIFY_MAX_AGE = 60 * 60 * 24 * 3  # 3 days
+_RESET_MAX_AGE = 60 * 60  # 1 hour
+
+
+def _serializer(salt: str) -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=salt)
+
+
+def _email_token(user: User, salt: str) -> str:
+    # The email is in the payload so a token minted for one address can never
+    # verify/reset an account whose email has since changed.
+    return _serializer(salt).dumps({"uid": user.id, "email": user.email})
+
+
+def _load_email_token(token: str, salt: str, max_age: int) -> User | None:
+    try:
+        payload = _serializer(salt).loads(token, max_age=max_age)
+    except (BadSignature, SignatureExpired):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    user = db_session().get(User, payload.get("uid"))
+    if user is None or user.email != payload.get("email"):
+        return None
+    return user
+
+
+def _send_verification_email(user: User) -> bool:
+    link = f"{current_app.config['APP_BASE_URL']}/verify?token={_email_token(user, _VERIFY_SALT)}"
+    return send_email(
+        user.email,
+        "Verify your Deciduous email",
+        "Hi,\n\n"
+        "Confirm this is your email address to finish setting up your Deciduous "
+        f"degree-planner account:\n\n  {link}\n\n"
+        "The link works for 3 days. If you didn't create this account, you can "
+        "ignore this message.\n\n— Deciduous",
+    )
+
+
+def _send_reset_email(user: User) -> bool:
+    link = f"{current_app.config['APP_BASE_URL']}/reset?token={_email_token(user, _RESET_SALT)}"
+    return send_email(
+        user.email,
+        "Reset your Deciduous password",
+        "Hi,\n\n"
+        f"Someone asked to reset the password for this account:\n\n  {link}\n\n"
+        "The link works for 1 hour. If it wasn't you, ignore this message — "
+        "your password is unchanged.\n\n— Deciduous",
+    )
 
 
 @bp.route("/csrf", methods=["GET"])
@@ -121,6 +184,7 @@ def signup():
     db.add(user)
     db.commit()
 
+    _send_verification_email(user)  # best-effort; signup succeeds regardless
     _start_session(user, data_key, remember=bool(data.get("rememberMe")))
     return jsonify({"user": _user_public(user)}), 201
 
@@ -189,8 +253,12 @@ def reset_request():
     code). Without a valid code this returns the same generic 401 whether the
     email exists, the code is wrong, or no code was ever generated — no
     account enumeration. Uses the same persistent lockout counters as signin.
-    Called without `recoveryCode` at all, it keeps the old stub behaviour
-    (202, no-op) so the "email me a reset link" flow can slot in later.
+
+    Called WITHOUT `recoveryCode`, this is the "email me a reset link" flow:
+    if the email has an account, a signed, 1-hour reset link is sent via
+    `backend.mailer` (see `reset_confirm` for the redemption endpoint).
+    Always 202 either way — no account enumeration through timing-visible
+    branches beyond the unavoidable SMTP queueing.
     """
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
@@ -200,6 +268,9 @@ def reset_request():
     new_password = data.get("newPassword") or ""
 
     if not code:
+        user = db_session().query(User).filter_by(email=email).first()
+        if user is not None:
+            _send_reset_email(user)
         return jsonify({"ok": True}), 202
 
     if len(new_password) < _MIN_PASSWORD_LEN:
@@ -237,6 +308,92 @@ def reset_request():
 
     _start_session(user, data_key)
     return jsonify({"user": _user_public(user)})
+
+
+@bp.route("/reset/confirm", methods=["POST"])
+def reset_confirm():
+    """Redeem an emailed reset link: `{token, newPassword}`.
+
+    Data-key outcome (ADR-0005/0006), reported as `dataPreserved`:
+    - The account has a passkey (so `server_wrapped_data_key` exists): the
+      data key is recovered from that wrap and re-wrapped under the new
+      password — encrypted transcript/plan data SURVIVES.
+    - Otherwise the old data key is unrecoverable without the password or a
+      recovery code: a FRESH data key is issued, old encrypted values become
+      unreadable (they decrypt to empty, never garbage), and now-useless
+      recovery-code fields are cleared. The UI warns before this path.
+    Every session is revoked, then the caller is signed in.
+    """
+    data = request.get_json(silent=True) or {}
+    token = data.get("token") or ""
+    new_password = data.get("newPassword") or ""
+
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        return json_error(f"Password must be at least {_MIN_PASSWORD_LEN} characters.", 422)
+
+    user = _load_email_token(token, _RESET_SALT, _RESET_MAX_AGE)
+    if user is None:
+        return json_error("That reset link is invalid or has expired — request a new one.", 401)
+
+    pepper = current_app.config["DATA_KEY_PEPPER"]
+    data_key = (
+        server_unwrap_data_key(user.server_wrapped_data_key, pepper)
+        if user.server_wrapped_data_key
+        else None
+    )
+    preserved = data_key is not None
+    if not preserved:
+        data_key = generate_data_key()
+        # Recovery wraps protect the OLD key — clear them so Settings offers a
+        # fresh code instead of silently keeping one that can't restore anything.
+        user.recovery_code_hash = None
+        user.recovery_salt = None
+        user.recovery_wrapped_data_key = None
+
+    db = db_session()
+    salt = generate_salt()
+    user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
+    user.salt = salt
+    user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    # The link proves control of the mailbox — that's exactly what
+    # verification asserts, so count it.
+    if user.verified_at is None:
+        user.verified_at = _now()
+    _revoke_all_sessions(db, user.id)
+    db.commit()
+
+    _start_session(user, data_key)
+    return jsonify({"user": _user_public(user), "dataPreserved": preserved})
+
+
+# ------------------------------------------------------- email verification
+@bp.route("/verify", methods=["POST"])
+def verify_email():
+    """Redeem an emailed verification link: `{token}`. Public — the link may
+    be opened in a browser with no session; verifying never signs anyone in."""
+    data = request.get_json(silent=True) or {}
+    user = _load_email_token(data.get("token") or "", _VERIFY_SALT, _VERIFY_MAX_AGE)
+    if user is None:
+        return json_error("That verification link is invalid or has expired.", 401)
+    if user.verified_at is None:
+        user.verified_at = _now()
+        db_session().commit()
+    return jsonify({"ok": True, "email": user.email})
+
+
+@bp.route("/verify/request", methods=["POST"])
+@require_auth
+def resend_verification():
+    """Re-send the verification email for the signed-in account."""
+    user = current_user()
+    if user.verified_at is not None:
+        return jsonify({"ok": True, "alreadyVerified": True})
+    sent = _send_verification_email(user)
+    if not sent:
+        return json_error("Email sending isn't configured on this server yet.", 503)
+    return jsonify({"ok": True})
 
 
 @bp.route("/session", methods=["GET"])

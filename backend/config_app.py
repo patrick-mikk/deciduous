@@ -87,6 +87,21 @@ class Config:
         )
         self.PASSKEY_RP_NAME = os.environ.get("PASSKEY_RP_NAME", "Deciduous")
 
+        # Outbound SMTP (backend/mailer.py) — on cPanel, the site mailbox
+        # (e.g. deciduous@mikkelsen.ca via the host's mail server). Left unset,
+        # email sending is a logged no-op and email-dependent flows degrade
+        # gracefully (verification banner stays, reset links can't be emailed).
+        self.SMTP_HOST = os.environ.get("SMTP_HOST")
+        self.SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))  # 465 SSL; 587 -> STARTTLS
+        self.SMTP_USER = os.environ.get("SMTP_USER")
+        self.SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
+        self.MAIL_FROM = os.environ.get("MAIL_FROM") or self.SMTP_USER
+        self.MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "Deciduous")
+
+        # Absolute base URL used in emailed links (verify / reset). Defaults to
+        # the SPA origin, which is correct for the single-origin production setup.
+        self.APP_BASE_URL = (os.environ.get("APP_BASE_URL") or self.CORS_ORIGIN).rstrip("/")
+
         self.DEBUG = not is_production
         self.TESTING = False
 

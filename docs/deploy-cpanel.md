@@ -120,6 +120,13 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 | `PASSKEY_ORIGIN` | no | full origin the browser reports during passkey ceremonies; defaults to `CORS_ORIGIN` |
 | `PASSKEY_RP_NAME` | no | display name shown in the browser's passkey sheet; defaults to `Deciduous` |
 | `FRONTEND_DIST` | no | absolute path to the built SPA if it doesn't live at `<repo root>/frontend/dist` (`backend/app.py:139`) |
+| `SMTP_HOST` | for email flows | the cPanel mail server, e.g. `mail.mikkelsen.ca` — unset, email sending is a logged no-op and the app still works (verification banner stays; emailed reset links can't be sent) |
+| `SMTP_PORT` | no | defaults to `465` (implicit SSL); set `587` for STARTTLS |
+| `SMTP_USER` | with SMTP_HOST | the mailbox, e.g. `deciduous@mikkelsen.ca` |
+| `SMTP_PASSWORD` | with SMTP_HOST | that mailbox's password |
+| `MAIL_FROM` | no | From address; defaults to `SMTP_USER` |
+| `MAIL_FROM_NAME` | no | From display name; defaults to `Deciduous` |
+| `APP_BASE_URL` | no | absolute base for emailed verify/reset links; defaults to `CORS_ORIGIN` |
 | `GEMINI_API_KEY` | optional | see below |
 | `GEMINI_MODEL` | no | overrides the grouper's default Gemini model (`backend/data_sources/llm_grouper.py:260`); only meaningful with `GEMINI_API_KEY` set |
 

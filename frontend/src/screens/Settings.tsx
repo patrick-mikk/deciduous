@@ -118,6 +118,7 @@ export default function Settings() {
   const [profileSaving, setProfileSaving] = React.useState(false);
   const [sessions, setSessions] = React.useState<SessionCode[] | null>(null);
   const [signingOut, setSigningOut] = React.useState(false);
+  const [verifyBusy, setVerifyBusy] = React.useState(false);
 
   // ---- Security ------------------------------------------------------------
   const [currentPassword, setCurrentPassword] = React.useState("");
@@ -216,6 +217,24 @@ export default function Settings() {
       setProfileError(e instanceof Error ? e.message : "Couldn't save your profile.");
     } finally {
       setProfileSaving(false);
+    }
+  }
+
+  async function resendVerification() {
+    if (verifyBusy) return;
+    setVerifyBusy(true);
+    try {
+      const { alreadyVerified } = await authApi.resendVerificationEmail();
+      if (alreadyVerified) {
+        setProfile((p) => (p ? { ...p, verified: true } : p));
+        setToast("You're already verified.");
+      } else {
+        setToast("Verification email sent — check your inbox.");
+      }
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Couldn't send the verification email.");
+    } finally {
+      setVerifyBusy(false);
     }
   }
 
@@ -359,6 +378,21 @@ export default function Settings() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>
                 <Input label="Email" type="email" value={profile.email} disabled hint="Your sign-in email can't be changed here." />
+                {profile.verified ? (
+                  <Callout tone="success">Email verified.</Callout>
+                ) : (
+                  <Callout
+                    tone="warning"
+                    title="Email not verified"
+                    action={
+                      <Button variant="secondary" size="sm" loading={verifyBusy} onClick={resendVerification}>
+                        Resend email
+                      </Button>
+                    }
+                  >
+                    Check your inbox for the verification link, or resend it.
+                  </Callout>
+                )}
                 <Input
                   label="Name"
                   value={profile.displayName}

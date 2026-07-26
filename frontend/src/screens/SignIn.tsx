@@ -28,7 +28,6 @@ export default function SignIn() {
   const [attempts, setAttempts] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [passkeyLoading, setPasskeyLoading] = React.useState(false);
-  const [showRecoveryNote, setShowRecoveryNote] = React.useState(false);
 
   const rateLimited = attempts >= RATE_LIMIT_ATTEMPTS;
   const passkeysAvailable = authApi.passkeysSupported();
@@ -125,18 +124,11 @@ export default function SignIn() {
               type="button"
               variant="link"
               size="sm"
-              onClick={() => setShowRecoveryNote((v) => !v)}
+              onClick={() => navigate("/reset")}
             >
               Forgot password?
             </Button>
           </div>
-          {showRecoveryNote && (
-            <Callout tone="warning" title="You'll need your recovery code">
-              Resetting your password re-wraps your encrypted academic data using the recovery code
-              from Settings → Security. Without a recovery code, a reset makes previously encrypted
-              data unreadable.
-            </Callout>
-          )}
         </div>
 
         <Checkbox

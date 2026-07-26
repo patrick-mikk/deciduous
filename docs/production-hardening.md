@@ -23,13 +23,17 @@ change; unchecked items are the actual remaining plan.
   forgotten-password reset no longer destroys encrypted data (closes the
   ADR-0005 gap).
 - [x] **Account deletion** — password-confirmed, cascades to all user data.
-- [ ] **Email verification on signup** — needed before public launch to stop
-  signups squatting someone else's address. cPanel exposes SMTP; add a
-  `verified_at` column + a signed, expiring token link. Until it ships,
-  consider gating share links to verified accounts only.
-- [ ] **Email-based password reset** — the `/auth/reset` no-code branch is
-  still a stub; wire it to SMTP with the same warning the UI already shows
-  (no recovery code ⇒ encrypted data is lost on reset).
+- [x] **Email verification on signup** — signed 3-day token links over SMTP
+  (`backend/mailer.py`, stdlib smtplib; configure `SMTP_*` env vars for the
+  `deciduous@mikkelsen.ca` mailbox). `users.verified_at` + `/api/auth/verify`
+  + resend; a redeemed reset link also counts as verification. Remaining
+  follow-up: decide what (if anything) to gate on unverified accounts —
+  share links are the natural candidate.
+- [x] **Email-based password reset** — `/auth/reset` (no code) emails a
+  1-hour signed link; `/auth/reset/confirm` redeems it. Preserves the
+  encrypted data key when the account has a passkey (via the ADR-0006
+  server wrap); otherwise issues a fresh key with the UI warning shown
+  up front, and reports `dataPreserved` either way.
 - [ ] **IP-level rate limiting** — per-account lockout exists and is
   multi-process-safe, but signup/reset/csrf endpoints have no per-IP
   throttle. On shared hosting, do it in `.htaccess`/mod_security or a tiny

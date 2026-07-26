@@ -26,6 +26,7 @@ export interface AuthUser {
 
 export interface Profile {
   email: string;
+  verified: boolean;
   displayName: string;
   currentSession: string;
   expectedGrad: string;
@@ -80,6 +81,7 @@ const mockState = {
   user: { id: 1, email: "demo@mail.utoronto.ca" } as AuthUser,
   profile: {
     email: "demo@mail.utoronto.ca",
+    verified: true,
     displayName: "Priya Sharma",
     currentSession: "",
     expectedGrad: "2027-06",
@@ -177,6 +179,50 @@ export async function resetPasswordWithRecoveryCode(
   });
 }
 
+/** "Email me a reset link" — always resolves (202) whether or not the email
+ * has an account, by design (no account enumeration). */
+export async function requestPasswordResetEmail(email: string): Promise<void> {
+  if (isMockApi || !API_BASE) return delay(undefined, 400);
+  await authFetch("/auth/reset", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+/** Redeem an emailed reset link. `dataPreserved` tells whether the encrypted
+ * academic data survived (true when the account had a passkey — ADR-0006). */
+export async function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<{ user: AuthUser; dataPreserved: boolean }> {
+  if (isMockApi || !API_BASE) {
+    await delay(null, 400);
+    return { user: { ...mockState.user }, dataPreserved: true };
+  }
+  const res = await authFetch<{ user?: AuthUser; dataPreserved?: boolean }>("/auth/reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token, newPassword }),
+  });
+  if (!res.user) throw new Error("Password reset failed.");
+  return { user: res.user, dataPreserved: res.dataPreserved === true };
+}
+
+/** Redeem an emailed verification link; resolves to the verified address. */
+export async function verifyEmail(token: string): Promise<string> {
+  if (isMockApi || !API_BASE) return delay(mockState.profile.email, 300);
+  const res = await authFetch<{ email?: string }>("/auth/verify", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+  return typeof res.email === "string" ? res.email : "";
+}
+
+export async function resendVerificationEmail(): Promise<{ alreadyVerified: boolean }> {
+  if (isMockApi || !API_BASE) return delay({ alreadyVerified: true }, 300);
+  const res = await authFetch<{ alreadyVerified?: boolean }>("/auth/verify/request", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return { alreadyVerified: res.alreadyVerified === true };
+}
+
 export async function deleteAccount(password: string): Promise<void> {
   if (isMockApi || !API_BASE) return delay(undefined, 400);
   await authFetch("/auth/account", { method: "DELETE", body: JSON.stringify({ password }) });
@@ -187,6 +233,7 @@ function normalizeProfile(raw: unknown): Profile {
   const p = (raw && typeof raw === "object" ? raw : {}) as Partial<Profile>;
   return {
     email: typeof p.email === "string" ? p.email : "",
+    verified: p.verified === true,
     displayName: typeof p.displayName === "string" ? p.displayName : "",
     currentSession: typeof p.currentSession === "string" ? p.currentSession : "",
     expectedGrad: typeof p.expectedGrad === "string" ? p.expectedGrad : "",
