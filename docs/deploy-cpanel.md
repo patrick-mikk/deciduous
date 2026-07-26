@@ -127,6 +127,8 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 | `MAIL_FROM` | no | From address; defaults to `SMTP_USER` |
 | `MAIL_FROM_NAME` | no | From display name; defaults to `Deciduous` |
 | `APP_BASE_URL` | no | absolute base for emailed verify/reset links; defaults to `CORS_ORIGIN` |
+| `DEPLOY_WEBHOOK_SECRET` | for auto-deploy | shared secret for the GitHub webhook / manual deploy trigger — see [auto-deploy.md](auto-deploy.md); unset, the `/api/deploy/*` routes are disabled |
+| `DEPLOY_BRANCH` | no | branch the server self-updates from; defaults to `deploy` (published by the GitHub Action) |
 | `GEMINI_API_KEY` | optional | see below |
 | `GEMINI_MODEL` | no | overrides the grouper's default Gemini model (`backend/data_sources/llm_grouper.py:260`); only meaningful with `GEMINI_API_KEY` set |
 

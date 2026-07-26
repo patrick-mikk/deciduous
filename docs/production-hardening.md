@@ -95,6 +95,13 @@ change; unchecked items are the actual remaining plan.
 
 ## Phase E — Observability & operations
 
+- [x] **Auto-deploy from GitHub** — push to `main` → CI tests + frontend
+  build → `deploy` branch → HMAC-verified webhook pulls it on the server and
+  restarts Passenger (`backend/api/deploy.py`, `backend/scripts/deploy.py`,
+  `.github/workflows/deploy-branch.yml`; setup in
+  [auto-deploy.md](auto-deploy.md)). No SSH in the update loop; failed CI
+  leaves the live site on the previous good build.
+
 - [ ] **Structured request logging** — one line per request (method, path,
   status, ms, user id-or-anon) to Passenger's log; no PII beyond the user id.
 - [ ] **Error alerting** — the JSON 500 handler already logs tracebacks;

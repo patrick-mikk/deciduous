@@ -35,7 +35,10 @@ from backend.dev_auth import register_dev_auth_bypass
 from backend.extensions import create_all, init_db
 
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-_CSRF_EXEMPT_PATHS = {"/api/auth/csrf"}
+# /api/deploy/*: GitHub webhooks can't do the double-submit cookie dance;
+# those routes authenticate with an HMAC signature / Bearer secret instead
+# (backend/api/deploy.py) — strictly stronger than CSRF for a cookieless caller.
+_CSRF_EXEMPT_PATHS = {"/api/auth/csrf", "/api/deploy/webhook", "/api/deploy/run"}
 
 # `frontend/dist` is a filesystem concern of this entry point (where the
 # built SPA lives on disk), not an app-behaviour setting, so it's read

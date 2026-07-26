@@ -102,6 +102,13 @@ class Config:
         # the SPA origin, which is correct for the single-origin production setup.
         self.APP_BASE_URL = (os.environ.get("APP_BASE_URL") or self.CORS_ORIGIN).rstrip("/")
 
+        # Auto-deploy from GitHub (backend/api/deploy.py, docs/auto-deploy.md).
+        # Unset secret ⇒ the /api/deploy/* routes all 503 (feature off).
+        # DEPLOY_BRANCH is what the server tracks — "deploy" is the branch the
+        # GitHub Action publishes (main + built frontend/dist).
+        self.DEPLOY_WEBHOOK_SECRET = os.environ.get("DEPLOY_WEBHOOK_SECRET")
+        self.DEPLOY_BRANCH = os.environ.get("DEPLOY_BRANCH", "deploy")
+
         self.DEBUG = not is_production
         self.TESTING = False
 
