@@ -15,8 +15,9 @@ import {
   Callout,
   POStCombinationValidator,
 } from "@/ds";
-import { api, creditFromCode } from "@/api";
+import { api, creditFromCode, isAuthError } from "@/api";
 import type { EnrolledProgramRef, Program, ProgramType, RequirementProgress } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Screen — routed at "/programs" (design/screens/03-programs-and-courses.md,
@@ -31,6 +32,13 @@ import type { EnrolledProgramRef, Program, ProgramType, RequirementProgress } fr
 const PAGE_SIZE = 20;
 
 type TabKey = "browse" | "mine";
+
+/** Outcome of an add/remove/reorder attempt, when it's worth telling the user
+ * about. `guest` is the account-optional 401 case (friendly nudge, info tone);
+ * `error` is a genuine failure (danger tone). */
+type ActionNotice =
+  | { kind: "guest"; title: string; message: string }
+  | { kind: "error"; title: string; message: string };
 
 const TYPE_OPTIONS: { value: ProgramType; label: string }[] = [
   { value: "", label: "All types" },
@@ -128,7 +136,18 @@ export default function Programs() {
   const [myPrograms, setMyPrograms] = React.useState<Program[]>([]);
   const [myLoading, setMyLoading] = React.useState(true);
   const [myError, setMyError] = React.useState<string | null>(null);
-  const [myActionError, setMyActionError] = React.useState<string | null>(null);
+  /**
+   * Result of the last add/remove/reorder attempt. Rendered ABOVE the tab
+   * switch (not inside the "My programs" branch) — the previous `myActionError`
+   * Callout lived only in that branch, so an "Add" pressed on the *Browse* tab
+   * set it and then rendered nothing at all: the reported "clicking Add does
+   * nothing" bug. Every action a guest can reach from Browse must report back
+   * in the view they're actually looking at.
+   */
+  const [actionNotice, setActionNotice] = React.useState<ActionNotice | null>(null);
+  /** No session at all — every `/api/me/*` call 401s. Not an error: accounts
+   * are optional (see App.tsx's "no route guard anywhere" note). */
+  const [isGuest, setIsGuest] = React.useState(false);
   const [dragCode, setDragCode] = React.useState<string | null>(null);
   // Scopes the aria-label lookup `focusPriorityButton` does after a keyboard
   // reorder — see its comment below for why a DOM query is needed at all.
@@ -158,8 +177,17 @@ export default function Programs() {
           );
         });
       })
-      .catch(() => {
-        if (!cancelled) setMyError("Couldn't load your enrolled programs.");
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // A guest has no session, so all three /api/me calls 401 together.
+        // That's the expected signed-out state, not a load failure — show the
+        // sign-up nudge instead of a red "couldn't load" banner.
+        if (isAuthError(err)) {
+          setIsGuest(true);
+          setMyError(null);
+        } else {
+          setMyError("Couldn't load your enrolled programs.");
+        }
       })
       .finally(() => {
         if (!cancelled) setMyLoading(false);
@@ -217,22 +245,44 @@ export default function Programs() {
   }
 
   async function addProgram(program: Program) {
-    setMyActionError(null);
+    setActionNotice(null);
     try {
       await api.addMyProgram(program.code);
       setMyPrograms((prev) => (prev.some((p) => p.code === program.code) ? prev : [...prev, program]));
-    } catch {
-      setMyActionError(`Couldn't add ${program.code}. It may conflict with a program you're already enrolled in.`);
+    } catch (err: unknown) {
+      if (isAuthError(err)) {
+        setIsGuest(true);
+        setActionNotice({
+          kind: "guest",
+          title: "Create an account to add programs",
+          message: `Browsing the catalog doesn't need an account, but ${program.code} has to be saved to one before it can count toward your degree audit.`,
+        });
+      } else {
+        setActionNotice({
+          kind: "error",
+          title: "Couldn't update your programs",
+          message: `Couldn't add ${program.code}. It may conflict with a program you're already enrolled in.`,
+        });
+      }
     }
   }
 
   async function removeProgram(code: string) {
-    setMyActionError(null);
+    setActionNotice(null);
     try {
       await api.removeMyProgram(code);
       setMyPrograms((prev) => prev.filter((p) => p.code !== code));
-    } catch {
-      setMyActionError(`Couldn't remove ${code}. Try again.`);
+    } catch (err: unknown) {
+      if (isAuthError(err)) {
+        setIsGuest(true);
+        setActionNotice({
+          kind: "guest",
+          title: "Create an account to manage programs",
+          message: "You're browsing as a guest, so there are no saved programs to remove yet.",
+        });
+      } else {
+        setActionNotice({ kind: "error", title: "Couldn't update your programs", message: `Couldn't remove ${code}. Try again.` });
+      }
     }
   }
 
@@ -241,12 +291,21 @@ export default function Programs() {
   async function persistOrder(next: Program[]) {
     const previous = myPrograms;
     setMyPrograms(next);
-    setMyActionError(null);
+    setActionNotice(null);
     try {
       await api.reorderMyPrograms(next.map((p) => p.code));
-    } catch {
+    } catch (err: unknown) {
       setMyPrograms(previous);
-      setMyActionError("Couldn't save the new order. Try again.");
+      if (isAuthError(err)) {
+        setIsGuest(true);
+        setActionNotice({
+          kind: "guest",
+          title: "Create an account to save program priority",
+          message: "Program order is part of your saved record, so it needs an account to stick.",
+        });
+      } else {
+        setActionNotice({ kind: "error", title: "Couldn't update your programs", message: "Couldn't save the new order. Try again." });
+      }
     }
   }
 
@@ -343,6 +402,18 @@ export default function Programs() {
       />
 
       <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Rendered OUTSIDE the tab switch on purpose: "Add" lives on the
+            Browse tab, so its result has to be visible there too (see
+            `actionNotice`'s declaration). */}
+        {actionNotice?.kind === "guest" && (
+          <GuestCallout title={actionNotice.title}>{actionNotice.message}</GuestCallout>
+        )}
+        {actionNotice?.kind === "error" && (
+          <Callout tone="danger" title={actionNotice.title}>
+            {actionNotice.message}
+          </Callout>
+        )}
+
         {tab === "browse" ? (
           <>
             <FilterBar onClear={filtersActive ? clearFilters : undefined}>
@@ -461,11 +532,6 @@ export default function Programs() {
                 {myError}
               </Callout>
             )}
-            {myActionError && (
-              <Callout tone="danger" title="Couldn't update your programs">
-                {myActionError}
-              </Callout>
-            )}
             {!myError && myPrograms.length > 0 && (
               <POStCombinationValidator valid={combo.valid} message={combo.message} notes={combo.notes} />
             )}
@@ -476,12 +542,21 @@ export default function Programs() {
                 ))}
               </div>
             ) : !myError && myPrograms.length === 0 ? (
-              <EmptyState
-                icon="graduation-cap"
-                title="No programs yet"
-                description="Add a Specialist, Major, or Minor from Browse to start tracking your degree combination."
-                action={<Button onClick={() => setTab("browse")}>Browse programs</Button>}
-              />
+              isGuest ? (
+                // A guest has no saved record at all — say so plainly instead
+                // of implying they simply haven't picked anything yet.
+                <GuestCallout title="Create an account to keep a program list">
+                  You're browsing as a guest. Search and requirement breakdowns are all open to you, but a saved list
+                  of Specialists, Majors, and Minors needs an account.
+                </GuestCallout>
+              ) : (
+                <EmptyState
+                  icon="graduation-cap"
+                  title="No programs yet"
+                  description="Add a Specialist, Major, or Minor from Browse to start tracking your degree combination."
+                  action={<Button onClick={() => setTab("browse")}>Browse programs</Button>}
+                />
+              )
             ) : (
               !myError && (
                 // A native <ol> conveys list membership + position ("item 2

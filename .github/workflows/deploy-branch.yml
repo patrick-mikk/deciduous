@@ -37,11 +37,14 @@ jobs:
       - name: Run tests (stable subset)
         env:
           PYTHONUTF8: "1"
-        # Excluded: test_programs.py + test_timetable.py need untracked local
-        # fixture corpora; "live_smoke" tests hit real UofT endpoints.
+        # Excluded: test_timetable.py needs an untracked local fixture
+        # (fixtures/ttb_getPageableCourses_sample.json, never committed);
+        # "live_smoke" tests hit real UofT endpoints.
+        # test_programs.py IS included — its corpus-dependent tests skip
+        # themselves when the gitignored corpus is absent, so the program-type
+        # classification regression tests run here.
         run: >
           python -m pytest backend/tests -q
-          --ignore=backend/tests/test_programs.py
           --ignore=backend/tests/test_timetable.py
           -k "not live_smoke"
 

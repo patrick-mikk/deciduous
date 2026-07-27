@@ -14,8 +14,9 @@ import {
   Skeleton,
   Callout,
 } from "@/ds";
-import { api } from "@/api";
+import { api, isAuthError } from "@/api";
 import type { Alert, BreadthData, BreadthEvaluation, DegreeAuditData, Program, StudentRecord, Summary } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 import "./Dashboard.css";
 
 /**
@@ -43,6 +44,9 @@ interface DashboardData {
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
+  /** Signed out: every `/api/me/*` call this screen makes 401s. Distinct from
+   * "error" so the user gets the sign-up nudge, not `API error 401: {...}`. */
+  | { status: "guest" }
   | { status: "ready"; data: DashboardData };
 
 interface ProgramRow {
@@ -211,6 +215,10 @@ export default function Dashboard() {
         },
       });
     } catch (err) {
+      if (isAuthError(err)) {
+        setState({ status: "guest" });
+        return;
+      }
       setState({
         status: "error",
         message: err instanceof Error ? err.message : "Failed to load the dashboard.",
@@ -248,6 +256,13 @@ export default function Dashboard() {
         >
           {state.message}
         </Callout>
+      )}
+
+      {state.status === "guest" && (
+        <GuestCallout title="Create an account to see your degree audit">
+          The dashboard reads your saved transcript and programs, so there's nothing to show while you're browsing as
+          a guest. You can still search courses and programs, and build a plan, without an account.
+        </GuestCallout>
       )}
 
       {state.status === "ready" && state.data.record.programs.length === 0 && state.data.record.transcript.length === 0 && (

@@ -123,3 +123,22 @@ overlapping; a lock older than 15 minutes is treated as stale and broken.
   files on disk with old code in memory; the status endpoint makes that
   visible, and `POST /api/deploy/run` retries the whole sequence.
 - Two triggers race → the second returns `locked` and does nothing.
+
+## What a deploy does NOT do
+
+A deploy ships **code**, not data. It never touches the course/program cache
+(`PLANNER_CACHE_PATH`), because a full catalog pull on every push would hammer
+the UofT endpoints we're deliberately gentle with (see AGENTS.md, "Boundaries").
+
+So a change to how upstream data is *parsed or classified* — anything under
+`backend/data_sources/` — ships as code but keeps serving the previously cached
+values until the cache is rebuilt. The nightly cache-refresh cron
+(`docs/deploy-cpanel.md` step 9) picks it up within a day; to see it
+immediately, run the refresh by hand:
+
+```
+$ /home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.refresh_cache
+```
+
+`upsert_programs` is `INSERT OR REPLACE` keyed on program code, so a refresh
+rewrites every cached row rather than only adding new ones.
