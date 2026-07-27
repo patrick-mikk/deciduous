@@ -75,16 +75,55 @@ _TOTAL_CREDITS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The complete ArtSci POSt type taxonomy (design/09-uoft-degree-rules.md sec. 2).
+# ALL FIVE prefixes must be listed: an unmapped prefix yields an empty
+# `Program.program_type`, and the frontend's `p.programType || "major"` badge
+# fallback then renders it as "MAJOR" - which is exactly how ASCER/ASFOC
+# programs shipped mislabelled ("Certificate in French Language" ASCER0120
+# tagged MAJOR). Keep this in sync with the identical maps in
+# `backend/planner/course_code.py` and `backend/api/programs.py` (each module
+# keeps its own copy deliberately, so they stay decoupled).
 _PROGRAM_TYPE_BY_PREFIX = {
     "ASSPE": "specialist",
     "ASMAJ": "major",
     "ASMIN": "minor",
+    "ASFOC": "focus",
+    "ASCER": "certificate",
 }
 
+# Last-resort classification from the program TITLE, for a code whose prefix is
+# not in the map above (a new/renamed ArtSci prefix, or a non-"AS" division).
+# Ordered most- to least-specific so "Focus in ... Major" reads as a focus.
+# Titles follow the Calendar's own wording, e.g. "Certificate in Business
+# Fundamentals", "Focus in Artificial Intelligence", "Sociology Major".
+_PROGRAM_TYPE_TITLE_PATTERNS = (
+    ("certificate", re.compile(r"\bcertificates?\b", re.IGNORECASE)),
+    ("focus", re.compile(r"\bfocus(?:es)?\b", re.IGNORECASE)),
+    ("specialist", re.compile(r"\bspecialists?\b", re.IGNORECASE)),
+    ("major", re.compile(r"\bmajors?\b", re.IGNORECASE)),
+    ("minor", re.compile(r"\bminors?\b", re.IGNORECASE)),
+)
 
-def _program_type_from_code(code: str) -> str:
-    """Map a program code's 5-char prefix (e.g. "ASMAJ") to a program_type."""
-    return _PROGRAM_TYPE_BY_PREFIX.get(code[:5], "")
+
+def _program_type_from_title(title: str) -> str:
+    """Classify from the program title's own type word, or "" if it has none."""
+    if not title:
+        return ""
+    for program_type, pattern in _PROGRAM_TYPE_TITLE_PATTERNS:
+        if pattern.search(title):
+            return program_type
+    return ""
+
+
+def _program_type_from_code(code: str, title: str = "") -> str:
+    """Map a program code's 5-char prefix (e.g. "ASMAJ") to a program_type.
+
+    Falls back to the title's own type word when the prefix is unrecognised,
+    so an unknown prefix degrades to a best guess rather than to "" (which the
+    UI would render as "MAJOR").
+    """
+    mapped = _PROGRAM_TYPE_BY_PREFIX.get(code[:5].upper(), "")
+    return mapped or _program_type_from_title(title)
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -766,7 +805,7 @@ class ProgramClient:
         return Program(
             code=code,
             title=title,
-            program_type=_program_type_from_code(code),
+            program_type=_program_type_from_code(code, title),
             department=department,
             department_url=department_url,
             enrolment_requirements=enrolment_requirements,

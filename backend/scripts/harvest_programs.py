@@ -138,7 +138,7 @@ def _parse_row(row) -> dict | None:
     return {
         "code": code,
         "title": title,
-        "program_type": _program_type_from_code(code),
+        "program_type": _program_type_from_code(code, title),
         "subject_area": "",  # filled in later from the JSON:API pass, best-effort
         "completion_html": completion_html,
         "enrolment_html": enrolment_html,

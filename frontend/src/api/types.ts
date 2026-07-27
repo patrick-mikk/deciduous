@@ -76,7 +76,10 @@ export interface RequirementGroup {
   notes: string; // group-level note
 }
 
-export type ProgramType = "specialist" | "major" | "minor" | "";
+/** The five ArtSci POSt types (design/09-uoft-degree-rules.md sec. 2), keyed off
+ * the program code's prefix server-side (ASSPE/ASMAJ/ASMIN/ASFOC/ASCER).
+ * "" only for a code the backend could not classify. */
+export type ProgramType = "specialist" | "major" | "minor" | "focus" | "certificate" | "";
 
 export interface Program {
   code: string; // "ASMAJ1305A"
