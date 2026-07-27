@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api } from "@/api";
+import { api, isAuthError } from "@/api";
 import type { Course, PlanCourse, PlanValidationIssue, Program, SessionCode, StudentRecord } from "@/api";
 import {
   creditFromCode,
@@ -10,6 +10,7 @@ import {
   remainingRequirementMatches,
   isExcludedByTaken,
 } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 import {
   AutoPlanPanel,
   Button,
@@ -82,6 +83,10 @@ interface ToastItem {
   message: string;
 }
 
+/** Stand-in record for a signed-out visitor — the plan board itself is
+ * client-local, so everything but seeding and server validation still works. */
+const EMPTY_RECORD: StudentRecord = { programs: [], transcript: [], requirementProgress: {}, cgpa: 0 };
+
 const PLAN_STORAGE_KEY = "deciduous:plan:v1";
 const YEAR_OPTIONS = [2, 3, 4, 5];
 // How many ranked remaining-requirement courses the rail fetches for its
@@ -152,6 +157,9 @@ export default function Plan() {
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
+  /** Signed out: the record and server-side validation are unavailable, but the
+   * board is client-local and stays fully usable. */
+  const [isGuest, setIsGuest] = React.useState(false);
 
   const [programDetails, setProgramDetails] = React.useState<Program[]>([]);
   const [courseDetails, setCourseDetails] = React.useState<Map<string, Course | null>>(new Map());
@@ -183,7 +191,10 @@ export default function Plan() {
   // driven by the local `computeIssues` approximation (still useful as
   // instant feedback while dragging); this state instead drives the
   // page-level "N issues" pill and the ValidationSummary panel.
-  type ValidationStatus = "idle" | "loading" | "success" | "error";
+  /** "guest" = `POST /api/plan/validate` is `@require_auth`, so a signed-out
+   * visitor can build a plan but can't have it server-validated. Distinct from
+   * "error": nothing is broken, the check just needs an account. */
+  type ValidationStatus = "idle" | "loading" | "success" | "error" | "guest";
   const [validationStatus, setValidationStatus] = React.useState<ValidationStatus>("idle");
   const [validationIssues, setValidationIssues] = React.useState<PlanValidationIssue[]>([]);
   const [validationError, setValidationError] = React.useState<string | null>(null);
@@ -229,7 +240,18 @@ export default function Plan() {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([api.getMyRecord(), api.getSessions().catch(() => [] as SessionCode[])])
+    // The board is client-local (see this file's header note — `PUT /api/plan`
+    // was never wired up), so a guest can plan perfectly well; only the record
+    // that seeds it needs an account. Degrade its 401 to an empty record rather
+    // than blanking the whole screen behind a raw error banner.
+    Promise.all([
+      api.getMyRecord().catch((e: unknown) => {
+        if (!isAuthError(e)) throw e;
+        if (!cancelled) setIsGuest(true);
+        return EMPTY_RECORD;
+      }),
+      api.getSessions().catch(() => [] as SessionCode[]),
+    ])
       .then(([rec, sess]) => {
         if (cancelled) return;
         setRecord(rec);
@@ -377,6 +399,13 @@ export default function Plan() {
       })
       .catch((e: unknown) => {
         if (validationRequestId.current !== id) return;
+        if (isAuthError(e)) {
+          // Signed out — the board still works, only the server-side check is
+          // unavailable. Surfaced by the guest banner above, not as an error.
+          setValidationIssues([]);
+          setValidationStatus("guest");
+          return;
+        }
         setValidationError(e instanceof Error ? e.message : "Couldn't validate your plan.");
         setValidationStatus("error");
       });
@@ -745,7 +774,9 @@ export default function Plan() {
 
   function handleValidateClick() {
     if (validationStatus === "loading") return;
-    if (validationStatus === "error") {
+    if (validationStatus === "guest") {
+      pushToast("warning", "Create a free account to have your plan checked against prerequisites and requirements.");
+    } else if (validationStatus === "error") {
       pushToast("danger", validationError ?? "We couldn't check your plan just now.");
     } else if (validationIssues.length === 0) {
       pushToast("success", "Your plan looks good.");
@@ -888,6 +919,15 @@ export default function Plan() {
           </div>
         }
       />
+
+      {isGuest && !loadError && (
+        <div style={{ marginBottom: 20 }}>
+          <GuestCallout title="Create an account to save and check your plan">
+            You can build a full term-by-term plan as a guest — it's kept in this browser only. An account saves it
+            and checks it against prerequisites, exclusions, and your program requirements.
+          </GuestCallout>
+        </div>
+      )}
 
       {loadError && (
         <div style={{ marginBottom: 20 }}>

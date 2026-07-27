@@ -1,8 +1,9 @@
 import * as React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { api, remainingRequirementMatches, countsTowardPhrase, isExcludedByTaken } from "@/api";
+import { api, remainingRequirementMatches, countsTowardPhrase, isExcludedByTaken, isAuthError } from "@/api";
 import type { Course, Program, SessionCode, StudentRecord } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 import {
   Button,
   Callout,
@@ -44,6 +45,10 @@ import {
 // ---------------------------------------------------------------------------
 // Local types + client-side scenario storage
 // ---------------------------------------------------------------------------
+
+/** Stand-in record for a signed-out visitor — the board is client-local, so
+ * everything except tray seeding and suggestion ranking still works. */
+const EMPTY_RECORD: StudentRecord = { programs: [], transcript: [], requirementProgress: {}, cgpa: 0 };
 
 export interface ScenarioVM {
   id: string;
@@ -260,6 +265,9 @@ export default function Timetable() {
   // ---- Core data ----
   const [sessions, setSessions] = React.useState<SessionCode[]>([]);
   const [record, setRecord] = React.useState<StudentRecord | null>(null);
+  /** Signed out: `getMyRecord` 401'd, so the tray/suggestions have nothing to
+   * seed from. The board still works — see the loader below. */
+  const [isGuest, setIsGuest] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -303,7 +311,20 @@ export default function Timetable() {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([api.getSessions(), api.getMyRecord()])
+    // The board itself is entirely client-local (see this file's header note —
+    // `PUT /api/plan/:term/sections` was never wired up), so a signed-out
+    // visitor can genuinely use this screen. Only `getMyRecord` needs an
+    // account, and only to seed the tray and rank suggestions — so its 401 is
+    // handled separately from `getSessions` and degraded to an empty record
+    // instead of taking the whole timetable down with a raw error banner.
+    Promise.all([
+      api.getSessions(),
+      api.getMyRecord().catch((e: unknown) => {
+        if (!isAuthError(e)) throw e;
+        if (!cancelled) setIsGuest(true);
+        return EMPTY_RECORD;
+      }),
+    ])
       .then(([sess, rec]) => {
         if (cancelled) return;
         setSessions(sess);
@@ -730,6 +751,15 @@ export default function Timetable() {
           </div>
         }
       />
+
+      {isGuest && !loadError && (
+        <div style={{ marginBottom: 20 }}>
+          <GuestCallout title="Create an account to save this timetable">
+            You can build and export a timetable as a guest — it's kept in this browser only. An account saves it
+            across devices and pre-fills the tray from your plan.
+          </GuestCallout>
+        </div>
+      )}
 
       {loadError && (
         <div style={{ marginBottom: 20 }}>

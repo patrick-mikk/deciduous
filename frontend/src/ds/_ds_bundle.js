@@ -6494,6 +6494,16 @@ const TYPE = {
     label: 'Minor',
     color: 'var(--accent)',
     bg: 'var(--info-bg)'
+  },
+  focus: {
+    label: 'Focus',
+    color: 'var(--br2)',
+    bg: 'var(--br2-bg)'
+  },
+  certificate: {
+    label: 'Certificate',
+    color: 'var(--br4)',
+    bg: 'var(--br4-bg)'
   }
 };
 
@@ -6631,7 +6641,9 @@ try { (() => {
 const TYPE_LABEL = {
   specialist: 'Specialist',
   major: 'Major',
-  minor: 'Minor'
+  minor: 'Minor',
+  focus: 'Focus',
+  certificate: 'Certificate'
 };
 
 /** Program detail hero: name, code, type, department, total credits, enrolment callout, ring, actions. */

@@ -387,6 +387,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * "This call failed only because nobody is signed in."
+ *
+ * Every `/api/me/*`, `/api/plan/*`, `/api/import/*`, `POST /api/share` and
+ * `/api/timetable/optimize` route is `@require_auth` on the backend, so a
+ * guest visitor (there are no route guards — see frontend/src/App.tsx) reaches
+ * screens whose save/add/share actions can only ever 401. That is a normal,
+ * expected state for this app (accounts are optional by design — see
+ * Onboarding.tsx), NOT an error worth showing a red "something went wrong"
+ * banner for.
+ *
+ * Call sites use this to branch to the shared "create an account" nudge
+ * (`@/components/GuestCallout`) instead of surfacing a raw
+ * `API error 401: {...}` string — or, worse, swallowing the rejection and
+ * leaving the button looking dead.
+ */
+export function isAuthError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
+
 interface HttpOpts {
   /**
    * What a 404 should resolve to. `"array"` (the default) preserves the
