@@ -12,8 +12,9 @@ import {
   Skeleton,
   Button,
 } from "@/ds";
-import { api, creditFromCode } from "@/api";
+import { api, creditFromCode, isAuthError } from "@/api";
 import type { EnrolledProgramRef, Program, ProgramType, RequirementGroup, RequirementProgress } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Screen — routed at "/programs/:code" (design/screens/03-programs-and-courses.md,
@@ -152,6 +153,11 @@ export default function ProgramDetail() {
   const [enrolledPrograms, setEnrolledPrograms] = React.useState<Program[]>([]);
   const [progressByCode, setProgressByCode] = React.useState<Record<string, RequirementProgress[]>>({});
   const [comboLoading, setComboLoading] = React.useState(true);
+  /** Guest nudge / failure text for the Add / Remove buttons below. */
+  const [enrolNotice, setEnrolNotice] = React.useState<
+    { kind: "guest"; title: string; message: string } | { kind: "error"; message: string } | null
+  >(null);
+  const [enrolBusy, setEnrolBusy] = React.useState(false);
 
   // The program itself.
   React.useEffect(() => {
@@ -216,16 +222,71 @@ export default function ProgramDetail() {
       .finally(() => setReparsing(false));
   }
 
-  function handleAdd() {
-    if (!program) return;
+  /**
+   * Enrol / unenrol. These used to flip `enrolled` in local state ONLY, never
+   * calling the API — so the header switched to "Enrolled" and the change
+   * vanished on the next reload, for signed-in students as much as guests.
+   * They now go through the same `api.addMyProgram`/`removeMyProgram` that
+   * Programs.tsx uses, applied optimistically and rolled back on failure, with
+   * a guest's 401 reported as the shared sign-up nudge rather than as a
+   * success (or as a raw `API error 401:` string).
+   */
+  async function handleAdd() {
+    if (!program || enrolBusy) return;
+    const target = program;
+    setEnrolBusy(true);
+    setEnrolNotice(null);
     setEnrolled(true);
-    setEnrolledPrograms((prev) => (prev.some((p) => p.code === program.code) ? prev : [...prev, program]));
+    setEnrolledPrograms((prev) => (prev.some((p) => p.code === target.code) ? prev : [...prev, target]));
+    try {
+      await api.addMyProgram(target.code);
+    } catch (err: unknown) {
+      setEnrolled(false);
+      setEnrolledPrograms((prev) => prev.filter((p) => p.code !== target.code));
+      setEnrolNotice(
+        isAuthError(err)
+          ? {
+              kind: "guest",
+              title: "Create an account to add programs",
+              message: `Anyone can read ${target.code}'s requirements, but adding it to your degree audit needs somewhere to save it.`,
+            }
+          : {
+              kind: "error",
+              message: backendErrorMessage(
+                err,
+                `Couldn't add ${target.code}. It may conflict with a program you're already enrolled in.`,
+              ),
+            },
+      );
+    } finally {
+      setEnrolBusy(false);
+    }
   }
 
-  function handleRemove() {
-    if (!program) return;
+  async function handleRemove() {
+    if (!program || enrolBusy) return;
+    const target = program;
+    setEnrolBusy(true);
+    setEnrolNotice(null);
     setEnrolled(false);
-    setEnrolledPrograms((prev) => prev.filter((p) => p.code !== program.code));
+    setEnrolledPrograms((prev) => prev.filter((p) => p.code !== target.code));
+    try {
+      await api.removeMyProgram(target.code);
+    } catch (err: unknown) {
+      setEnrolled(true);
+      setEnrolledPrograms((prev) => (prev.some((p) => p.code === target.code) ? prev : [...prev, target]));
+      setEnrolNotice(
+        isAuthError(err)
+          ? {
+              kind: "guest",
+              title: "Create an account to manage programs",
+              message: "You're browsing as a guest, so there's no saved enrolment to remove yet.",
+            }
+          : { kind: "error", message: backendErrorMessage(err, `Couldn't remove ${target.code}. Try again.`) },
+      );
+    } finally {
+      setEnrolBusy(false);
+    }
   }
 
   // ---- Loading / not-found / error states ----------------------------------
@@ -324,6 +385,15 @@ export default function ProgramDetail() {
             </div>
           )}
         </Card>
+
+        {enrolNotice?.kind === "guest" && (
+          <GuestCallout title={enrolNotice.title}>{enrolNotice.message}</GuestCallout>
+        )}
+        {enrolNotice?.kind === "error" && (
+          <Callout tone="danger" title="Couldn't update your programs">
+            {enrolNotice.message}
+          </Callout>
+        )}
 
         {reparseError && <Callout tone="danger" title="Requirement parsing failed">{reparseError}</Callout>}
 

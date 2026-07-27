@@ -23,8 +23,9 @@ import {
   ThemeToggle,
   Toast,
 } from "@/ds";
-import { api } from "@/api";
+import { api, isAuthError } from "@/api";
 import type { SessionCode } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 import { useTheme } from "@/theme/ThemeProvider";
 
 /**
@@ -88,6 +89,9 @@ export default function Settings() {
 
   const [shareOpen, setShareOpen] = React.useState(false);
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
+  /** `POST /api/share` is `@require_auth` — a guest gets a 401. Shown as the
+   * shared sign-up nudge on the Data tab, not as "couldn't generate a link". */
+  const [shareNeedsAccount, setShareNeedsAccount] = React.useState(false);
 
   const [density, setDensity] = useLocalStorage<"comfortable" | "compact">("deciduous:density", "comfortable");
   const [leafMotion, setLeafMotion] = useLocalStorage<boolean>("deciduous:leaf-motion", true);
@@ -122,11 +126,21 @@ export default function Settings() {
 
   function openShare() {
     setShareOpen(true);
+    setShareNeedsAccount(false);
     if (!shareUrl) {
       api
         .createShareLink()
         .then((r) => setShareUrl(r.url))
-        .catch(() => setToast("Couldn't generate a share link."));
+        .catch((err: unknown) => {
+          if (isAuthError(err)) {
+            // Don't strand the visitor in a dialog showing an empty link —
+            // close it and explain on the tab behind it.
+            setShareOpen(false);
+            setShareNeedsAccount(true);
+            return;
+          }
+          setToast("Couldn't generate a share link.");
+        });
     }
   }
 
@@ -242,6 +256,11 @@ export default function Settings() {
 
         {tab === "data" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {shareNeedsAccount && (
+              <GuestCallout title="Create an account to share your plan">
+                A share link points at a saved plan, so there's nothing to publish while you're browsing as a guest.
+              </GuestCallout>
+            )}
             <Card>
               <div style={{ fontSize: "var(--text-h3)", fontWeight: "var(--weight-bold)", color: "var(--text)", marginBottom: 12 }}>
                 Import & export

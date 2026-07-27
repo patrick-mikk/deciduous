@@ -19,8 +19,9 @@ import {
   StatTile,
   Toast,
 } from "@/ds";
-import { api, GRADE_SCALE, resolveGradePoints } from "@/api";
+import { api, GRADE_SCALE, isAuthError, resolveGradePoints } from "@/api";
 import type { StudentRecord, TranscriptCourse, TranscriptCourseStatus, TranscriptResponse } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Transcript (design/screens/05-transcript-settings-share.md "Transcript"):
@@ -42,7 +43,9 @@ import type { StudentRecord, TranscriptCourse, TranscriptCourseStatus, Transcrip
  * `computeGpa` did (see AGENTS.md / the CGPA-mismatch fix).
  */
 
-type LoadStatus = "loading" | "ready" | "error";
+/** "guest" = signed out; `/api/me/*` 401s. Kept distinct from "error" so the
+ * screen shows the sign-up nudge instead of a raw `API error 401:` string. */
+type LoadStatus = "loading" | "ready" | "error" | "guest";
 
 // Special (non-GPA) grades — design: "render as chips, excluded from GPA."
 const SPECIAL_GRADES = new Set(["CR", "NCR", "P", "LWD", "FZ", "SDF", "INC", "DNW"]);
@@ -151,6 +154,10 @@ export default function Transcript() {
         setStatus("ready");
       })
       .catch((e: unknown) => {
+        if (isAuthError(e)) {
+          setStatus("guest");
+          return;
+        }
         setError(e instanceof Error ? e.message : "Failed to load transcript.");
         setStatus("error");
       });
@@ -338,6 +345,18 @@ export default function Transcript() {
           ))}
         </div>
         <Skeleton height={280} />
+      </>
+    );
+  }
+
+  if (status === "guest") {
+    return (
+      <>
+        <PageHeader title="Transcript" />
+        <GuestCallout title="Create an account to keep a transcript">
+          Your marks are encrypted and stored against your account, so there's no transcript to show while you're
+          browsing as a guest.
+        </GuestCallout>
       </>
     );
   }
