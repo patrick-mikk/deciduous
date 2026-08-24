@@ -5,7 +5,13 @@ itself. After the one-time setup below, you never SSH in to update files.
 
 ## How it works
 
+The same Action gates pull requests and publishes from `main` — the checks
+that decide whether a PR is mergeable are the ones that decide whether the
+live site updates, so nothing reaches production having passed a weaker bar:
+
 ```
+pull request → backend tests + frontend typecheck/build   (gate only, no publish)
+
 push to main
   └─ GitHub Action (.github/workflows/deploy-branch.yml)
        ├─ backend tests (stable subset)          ── failure = live site untouched

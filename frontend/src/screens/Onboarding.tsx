@@ -2,7 +2,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 
 import { API_BASE, api, ensureCsrfToken, loadGuestProfile, saveGuestProfile } from "@/api";
-import type { Program, SessionCode } from "@/api";
+import type { GuestCourse, Program, SessionCode } from "@/api";
 import {
   Button,
   Callout,
@@ -176,21 +176,27 @@ function validateCombination(programs: Program[]): ComboResult {
 
 interface ImportPdfResult {
   courseCount?: number;
+  /** False when the visitor has no account — the parse came back unsaved and
+   * `courses` is the only copy (stored in `guestProfile`). */
+  saved?: boolean;
+  courses?: GuestCourse[];
 }
 
 /**
  * `POST /api/import/pdf` (backend/api/import_.py) — multipart `file` field,
  * same double-submit CSRF header as SignUp.tsx's direct fetch to
- * `/auth/signup`. The route is `@require_auth`, so a guest visitor (the norm
- * on this screen) gets a 401 back; that's surfaced as the "AUTH_REQUIRED"
- * error message so the credits step can show the "create an account" nudge
- * instead of a generic failure.
+ * `/auth/signup`.
+ *
+ * Account-optional: the route parses for anyone and only the *write* needs a
+ * session, so a guest gets `saved: false` with the parsed `courses` rather
+ * than a 401. Importing is the whole point of this step; making it the one
+ * thing a guest couldn't do turned the step into a dead end.
  */
 async function importDegreeExplorerPdf(file: File): Promise<ImportPdfResult> {
   if (!API_BASE) {
     // Mock adapter opted in (`VITE_API_BASE=mock`) — simulate so the step still renders.
     await new Promise((resolve) => setTimeout(resolve, 500));
-    return { courseCount: 24 };
+    return { courseCount: 24, saved: false, courses: [] };
   }
   const form = new FormData();
   form.append("file", file);
@@ -200,7 +206,6 @@ async function importDegreeExplorerPdf(file: File): Promise<ImportPdfResult> {
     headers: { "X-CSRF-Token": await ensureCsrfToken() },
     body: form,
   });
-  if (res.status === 401) throw new Error("AUTH_REQUIRED");
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error((body && (body.error || body.message)) || "Couldn't import that PDF.");
@@ -346,11 +351,15 @@ export default function Onboarding() {
 
   // ---- Step 3: existing credits ---------------------------------------------
   const [creditsChoice, setCreditsChoice] = React.useState<"undecided" | "manual" | "skip">("undecided");
-  const [importStatus, setImportStatus] = React.useState<"idle" | "uploading" | "success" | "auth-error" | "error">(
-    "idle",
-  );
+  const [importStatus, setImportStatus] = React.useState<"idle" | "uploading" | "success" | "error">("idle");
   const [importCourseCount, setImportCourseCount] = React.useState<number | null>(null);
+  const [importSaved, setImportSaved] = React.useState(true);
   const [importErrorMessage, setImportErrorMessage] = React.useState<string | null>(null);
+  /** Guest-imported courses, so Finish's `persistGuestProfile` can carry them
+   * through instead of overwriting the profile the credits step just wrote. */
+  const [importedCourses, setImportedCourses] = React.useState<GuestCourse[] | null>(
+    () => loadGuestProfile()?.courses ?? null,
+  );
 
   async function handleImportPdf(file: File) {
     setImportStatus("uploading");
@@ -358,14 +367,24 @@ export default function Onboarding() {
     try {
       const result = await importDegreeExplorerPdf(file);
       setImportCourseCount(typeof result.courseCount === "number" ? result.courseCount : null);
+      // `saved: false` = parsed for a guest and not written server-side, so the
+      // response is the only copy. Persist it locally *before* reporting
+      // success, or a reload loses the import the UI just claimed to have.
+      const saved = result.saved !== false;
+      if (!saved) {
+        const courses = result.courses ?? [];
+        setImportedCourses(courses);
+        saveGuestProfile({
+          programs: myPrograms,
+          startSession: (startSession || null) as SessionCode | null,
+          courses,
+        });
+      }
+      setImportSaved(saved);
       setImportStatus("success");
     } catch (err) {
-      if (err instanceof Error && err.message === "AUTH_REQUIRED") {
-        setImportStatus("auth-error");
-      } else {
-        setImportErrorMessage(err instanceof Error ? err.message : "Couldn't import that PDF.");
-        setImportStatus("error");
-      }
+      setImportErrorMessage(err instanceof Error ? err.message : "Couldn't import that PDF.");
+      setImportStatus("error");
     }
   }
 
@@ -385,7 +404,14 @@ export default function Onboarding() {
   const [syncErrorMessage, setSyncErrorMessage] = React.useState<string | null>(null);
 
   function persistGuestProfile() {
-    saveGuestProfile({ programs: myPrograms, startSession: startSession || null });
+    // `courses` must be carried through: this runs on Finish, after the credits
+    // step may have stored a guest import, and writing the profile without it
+    // would silently drop the PDF the visitor just uploaded.
+    saveGuestProfile({
+      programs: myPrograms,
+      startSession: (startSession || null) as SessionCode | null,
+      ...(importedCourses ? { courses: importedCourses } : {}),
+    });
   }
 
   function goToLanding() {
@@ -579,19 +605,21 @@ export default function Onboarding() {
             </div>
           )}
 
-          {importStatus === "auth-error" && (
+          {/* Guests get the import itself — this is the optional follow-up, shown
+              *after* it succeeded, never in place of it. */}
+          {importStatus === "success" && !importSaved && (
             <div style={{ marginTop: "var(--space-3)" }}>
               <Callout
                 tone="info"
-                title="Create an account to save imported credits"
+                title="Saved on this device"
                 action={
                   <Button size="sm" variant="primary" onClick={handleCreateAccount}>
                     Create account
                   </Button>
                 }
               >
-                You're browsing as a guest, so there's nowhere to save an import yet. Create a free account, then
-                re-import from Settings.
+                Your credits are kept in this browser, so they'll be gone if you clear your data or switch devices.
+                Creating a free account keeps them — you won't need to import again.
               </Callout>
             </div>
           )}
