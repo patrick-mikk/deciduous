@@ -28,6 +28,11 @@ Build order for the degree planner. Backend first; React after the API is stable
 - **cPanel deploy**: MySQL provisioning, Passenger WSGI, React static build served at
   `deciduous.mikkelsen.ca`, AutoSSL, env vars, nightly cache-refresh cron.
 - Timetable **optimizer** polish; auth hardening (password reset + recovery-code flow, rate limits).
+- **Rate-limit the import parse routes.** `POST /api/import/pdf` and
+  `/api/import/capture` parse for guests by design (an account-optional
+  onboarding step can't require a session — `backend/api/import_.py`), which
+  makes them the only unauthenticated CPU-bound uploads in the app. The 8 MB
+  cap bounds one request; a per-IP limit is what's still missing.
 - Breadth data completeness for past (uncached) sessions; wire the frontend off mock to the live API.
 
 ## Scope notes

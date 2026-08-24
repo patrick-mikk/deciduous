@@ -12,10 +12,32 @@ import type { Program, SessionCode } from "./types";
 
 const STORAGE_KEY = "deciduous:guest-profile:v1";
 
+/**
+ * One imported course, as `POST /api/import/pdf` returns it to a guest
+ * (`saved: false`). Mirrors the server's `_preview` shape in
+ * `backend/api/import_.py` — kept structural rather than reusing the
+ * transcript row type, because a guest's rows have no server id yet.
+ */
+export interface GuestCourse {
+  code: string;
+  title: string | null;
+  credits: number;
+  session: string | null;
+  status: string;
+  grade: string | null;
+  mark: number | null;
+}
+
 export interface GuestProfile {
   programs: Program[];
   /** The session (term) the student *started* at UofT — see Onboarding.tsx's term step. */
   startSession: SessionCode | null;
+  /**
+   * Credits imported from an Academic History PDF before the visitor had an
+   * account. The server parses but refuses to persist without a session, so
+   * this is the only copy until `SignUp.tsx` syncs it into a new account.
+   */
+  courses?: GuestCourse[];
   /**
    * @deprecated Pre-startSession profiles stored the student's *current* term
    * here instead. No longer written by `saveGuestProfile`, but the field (and
@@ -37,6 +59,8 @@ export function loadGuestProfile(): GuestProfile | null {
       // back to it rather than losing the student's choice on next load.
       startSession: parsed.startSession ?? parsed.session ?? null,
       session: parsed.session ?? null,
+      // Absent on every profile saved before imports worked for guests.
+      courses: Array.isArray(parsed.courses) ? parsed.courses : undefined,
     };
   } catch {
     return null;
