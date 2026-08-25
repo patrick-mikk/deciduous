@@ -115,6 +115,9 @@ export default function Settings() {
   // ---- Profile -------------------------------------------------------------
   const [profile, setProfile] = React.useState<Profile | null>(null);
   const [profileError, setProfileError] = React.useState<string | null>(null);
+  /** `GET /api/me/profile` is `@require_auth` — a guest gets a 401. Shown as
+   * the shared sign-up nudge, not as "couldn't load your profile". */
+  const [profileNeedsAccount, setProfileNeedsAccount] = React.useState(false);
   const [profileSaving, setProfileSaving] = React.useState(false);
   const [sessions, setSessions] = React.useState<SessionCode[] | null>(null);
   const [signingOut, setSigningOut] = React.useState(false);
@@ -165,7 +168,15 @@ export default function Settings() {
     authApi
       .getProfile()
       .then((p) => !cancelled && setProfile(p))
-      .catch((e: unknown) => !cancelled && setProfileError(e instanceof Error ? e.message : "Failed to load profile."));
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        // A guest has no profile to load, which isn't an error — the raw
+        // `API error 401: {...}` string used to land in the danger Callout
+        // below. Appearance/Notifications are localStorage-backed and work
+        // fine without an account, so the screen stays usable either way.
+        if (isAuthError(e)) setProfileNeedsAccount(true);
+        else setProfileError(e instanceof Error ? e.message : "Failed to load profile.");
+      });
     api
       .getSessions()
       .then((s) => !cancelled && setSessions(s))
@@ -406,7 +417,12 @@ export default function Settings() {
                 <Callout tone="danger">{profileError}</Callout>
               </div>
             )}
-            {profile == null ? (
+            {profileNeedsAccount ? (
+              <GuestCallout title="Create an account to set up your profile">
+                Your name, start term, and expected graduation live on your account. Appearance and notification
+                settings work without one.
+              </GuestCallout>
+            ) : profile == null ? (
               <Skeleton height={220} />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>

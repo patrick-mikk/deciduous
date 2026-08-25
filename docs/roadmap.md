@@ -31,6 +31,11 @@ Build order for the degree planner. Backend first; React after the API is stable
 - ~~Auth hardening~~ shipped: remember-me (30-day) sessions, passkey (WebAuthn) sign-in,
   session management, password change with key re-wrap, recovery-code reset, account
   deletion, profile endpoints. Remaining production items: [production-hardening.md](production-hardening.md).
+- **Rate-limit the import parse routes.** `POST /api/import/pdf` and
+  `/api/import/capture` parse for guests by design (an account-optional
+  onboarding step can't require a session — `backend/api/import_.py`), which
+  makes them the only unauthenticated CPU-bound uploads in the app. The 8 MB
+  cap bounds one request; a per-IP limit is what's still missing.
 - Breadth data completeness for past (uncached) sessions; wire the frontend off mock to the live API.
 
 ## Scope notes

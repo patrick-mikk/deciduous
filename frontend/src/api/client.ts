@@ -73,6 +73,7 @@ import type {
   TranscriptResponse,
   TranscriptSessionGroup,
 } from "./types";
+import type { GuestCourse } from "./guestProfile";
 
 export interface CourseSearchParams {
   q?: string;
@@ -156,6 +157,16 @@ export interface ApiClient {
   removeMyProgram(code: string): Promise<void>;
   /** Persists the given display order; `codes` must be every enrolled program code, reordered. */
   reorderMyPrograms(codes: string[]): Promise<void>;
+
+  /**
+   * `POST /api/import/courses` — persist an import a guest made before they
+   * had an account (see `guestProfile.courses`). Called once from SignUp.tsx;
+   * the PDF itself is gone by then, so only the parsed result can be replayed.
+   */
+  importStoredCourses(payload: {
+    courses: GuestCourse[];
+    programs: { code: string; title?: string }[];
+  }): Promise<void>;
 
   // Share
   createShareLink(): Promise<{ token: string; url: string }>;
@@ -303,6 +314,7 @@ export const mockClient: ApiClient = {
   getMyAlerts: () => delay(mock.mockAlerts),
 
   getMyPrograms: () => delay(mock.mockStudentRecord.programs),
+  importStoredCourses: () => delay(undefined).then(() => undefined),
   addMyProgram: async (code) => {
     await delay(null);
     if (mock.mockStudentRecord.programs.some((p) => p.code === code)) return;
@@ -1196,6 +1208,10 @@ export const httpClient: ApiClient = {
   // for exactly this case. `fallback404: "throw"` lets real errors surface.
   addMyProgram: (code) =>
     http("/me/programs", { method: "POST", body: JSON.stringify({ code }) }, { fallback404: "throw" }).then(
+      () => undefined,
+    ),
+  importStoredCourses: (payload) =>
+    http("/import/courses", { method: "POST", body: JSON.stringify(payload) }, { fallback404: "throw" }).then(
       () => undefined,
     ),
   removeMyProgram: (code) =>

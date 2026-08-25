@@ -71,6 +71,23 @@ export default function SignUp() {
     try {
       await authApi.signUp(email, password, true);
       const guestProfile = loadGuestProfile();
+
+      // Credits imported before signing up live only in localStorage (the
+      // import routes parse for guests but refuse to persist). Hand them over
+      // first: if this fails we keep the profile, so the import is never lost
+      // to a successful-but-partial sync below.
+      let coursesSynced = true;
+      if (guestProfile?.courses && guestProfile.courses.length > 0) {
+        try {
+          await api.importStoredCourses({
+            courses: guestProfile.courses,
+            programs: guestProfile.programs.map((p) => ({ code: p.code, title: p.title })),
+          });
+        } catch {
+          coursesSynced = false;
+        }
+      }
+
       if (guestProfile && guestProfile.programs.length > 0) {
         const results = await Promise.allSettled(guestProfile.programs.map((p) => api.addMyProgram(p.code)));
         // Keep any programs whose sync failed in the guest profile rather than
@@ -79,12 +96,24 @@ export default function SignUp() {
         // success. (A rejected add is most often a 409 "already enrolled",
         // which is effectively success, but a real failure shouldn't lose data.)
         const failed = guestProfile.programs.filter((_, i) => results[i].status === "rejected");
-        if (failed.length > 0) {
-          saveGuestProfile({ ...guestProfile, programs: failed });
+        // Only clear once BOTH halves landed — clearing on program success
+        // alone would drop a still-unsynced import along with the profile.
+        if (failed.length > 0 || !coursesSynced) {
+          saveGuestProfile({
+            ...guestProfile,
+            programs: failed,
+            ...(coursesSynced ? { courses: undefined } : {}),
+          });
         } else {
           clearGuestProfile();
         }
         navigate("/dashboard", { replace: true });
+      } else if (guestProfile?.courses && guestProfile.courses.length > 0) {
+        // Imported credits but picked no programs — still a returning visitor
+        // with real data, so send them to their record, not back through the
+        // tutorial. Keep the profile if the hand-off failed.
+        if (coursesSynced) clearGuestProfile();
+        navigate("/transcript", { replace: true });
       } else {
         navigate("/onboarding", { replace: true });
       }

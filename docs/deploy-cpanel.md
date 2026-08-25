@@ -181,17 +181,39 @@ $ npm run build
 ```
 
 Upload the contents of `frontend/dist/` to the path Flask serves from: either
-`~/deciduous/frontend/dist` (the default `_register_spa` looks for,
+`<repo root>/frontend/dist` (the default `_register_spa` looks for,
 `backend/app.py:40`) or wherever `FRONTEND_DIST` (step 5) points. If no build
 is present at startup, `_register_spa` logs one line and registers nothing —
 `GET /` 404s and the app stays API-only (`backend/app.py:140-146`).
 
-The build's API base comes from `frontend/src/api/client.ts:164`:
-`VITE_API_BASE` if explicitly set at build time, else `/api` for any
-production build (`import.meta.env.PROD`), else `undefined` (mock adapter) in
-dev. A plain `npm run build` with no `VITE_API_BASE` is what you want here —
-it bakes in `/api`, which is same-origin against this same Flask process, no
-env var needed at build time.
+Upload files only — don't leave a previous build's hashed asset alongside the
+new one. `index.html` references exactly one JS and one CSS file by content
+hash, so stale siblings are dead weight (and confusing when debugging):
+
+```
+$ ssh user@host 'ls ~/<app dir>/frontend/dist/assets/'
+$ grep -o 'assets/[^"]*' frontend/dist/index.html    # the only two that matter
+```
+
+Permissions after an SFTP upload default to owner-only, which Passenger can't
+serve. This is all public static content, so: `chmod 755` the `dist` and
+`assets` directories, `chmod 644` the files.
+
+### API base — plain `npm run build` is what you want
+
+`frontend/src/api/client.ts:346` resolves `VITE_API_BASE` when set, and
+otherwise defaults **every** build to the relative path `/api` — same-origin
+against this same Flask process, so no build-time env var is needed here.
+
+The offline demo adapter is opt-in only (`VITE_API_BASE=mock`) and renders
+seeded sample transcripts/programs/GPA. Because Vite inlines env vars at build
+time, a stray `frontend/.env` left from local UI work would bake that into
+`dist/` and serve fake data to every visitor. `vite.config.ts` now refuses such
+a build outright; if you ever need to confirm a bundle by hand:
+
+```
+$ grep -c '"mock"' frontend/dist/assets/*.js    # 0 = clean production build
+```
 
 ## 8. AutoSSL / HTTPS
 
@@ -264,7 +286,8 @@ $ mkdir -p ~/deciduous/tmp && touch ~/deciduous/tmp/restart.txt
 |---|---|
 | Blank page / `GET /` 404s | `frontend/dist` missing at the expected path, or `FRONTEND_DIST` points somewhere wrong — check `stderr.log` for the "No frontend build at ..." info line (`backend/app.py:141-146`) |
 | 500 on every request | `FLASK_SECRET_KEY` or `DATA_KEY_PEPPER` unset with `FLASK_ENV=production` (raises `RuntimeError` at boot, `backend/config_app.py:63-75`); or MySQL schema not initialized yet — run step 6 |
-| App loads but shows seeded/fake data instead of real accounts | Frontend was built without production mode (e.g. `vite dev` bundle uploaded, or `VITE_API_BASE` pointed somewhere unexpected) so `API_BASE` never resolved and the mock adapter is active (`frontend/src/api/client.ts:160-266`) — rebuild with plain `npm run build` |
+| App loads but shows seeded/fake data plus a "Demo data" banner | `VITE_API_BASE=mock` was set (usually a leftover `frontend/.env`) when the bundle was built, so the offline adapter got inlined (`frontend/src/api/client.ts:346`). Delete the `.env`, `rm -rf dist`, rebuild, re-upload, and delete the old hashed asset on the server. `vite.config.ts` now fails this build up front, so a bundle built after that guard landed can't be in this state |
+| New build uploaded but the browser shows the old UI | Either the stale hashed asset is still on the server and `index.html` wasn't replaced, or it's a browser cache — hard-refresh (Ctrl+Shift+R) and confirm `index.html` names the hash you just built |
 | Course/program search looks stale | Nightly cron (step 9) isn't running, or `PLANNER_CACHE_PATH` was unset when the cron ran so the cache landed in the OS temp dir and got wiped (`backend/extensions.py:90-98`) — check the cron log and confirm the env var is set in **both** the app and cron environments |
 
 See also: [ADR-0002](decisions/0002-mysql-over-sqlite.md) (MySQL),
