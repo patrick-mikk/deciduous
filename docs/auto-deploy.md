@@ -49,7 +49,7 @@ git fetch origin deploy && git checkout deploy
 ### 2. Server: set the secret
 
 Generate a secret and add it to the cPanel Python-app environment variables
-(same screen as the `DB_*` vars — see [deploy-cpanel.md](deploy-cpanel.md)):
+(same screen as the DB/SMTP vars — see [deploy-cpanel.md](deploy-cpanel.md)):
 
 ```
 python -c "import secrets; print(secrets.token_urlsafe(48))"

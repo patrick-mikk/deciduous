@@ -17,25 +17,26 @@ import {
   Select,
   ShareLinkDialog,
   Skeleton,
-  StrengthMeter,
   Switch,
   Tabs,
   ThemeToggle,
   Toast,
 } from "@/ds";
-import { api, isAuthError } from "@/api";
-import type { SessionCode } from "@/api";
+import { api, authApi, isAuthError } from "@/api";
+import type { ActiveSession, Passkey, Profile, SessionCode } from "@/api";
 import { GuestCallout } from "@/components/GuestCallout";
 import { useTheme } from "@/theme/ThemeProvider";
 
 /**
  * Settings (design/screens/05-transcript-settings-share.md "Settings"),
- * tabbed: Profile / Security / Data / Appearance / Notifications. Only
- * Appearance (theme/density/leaf-motion) and Notifications persist anywhere
- * real (localStorage) — the typed ApiClient has no profile/password/
- * notification-preference endpoints yet, so those tabs demo the interaction
- * with local component state and a confirmation Toast rather than pretending
- * to call a backend that doesn't exist.
+ * tabbed: Profile / Security / Data / Appearance / Notifications.
+ *
+ * Profile, Security (password change, recovery code, passkeys, active
+ * sessions), and account deletion are wired to the real backend through
+ * `src/api/auth.ts` (`authApi`) — in mock mode (`VITE_API_BASE=mock`) that
+ * module simulates every round trip, so the screen still works offline.
+ * Appearance and Notifications persist to localStorage (client-side
+ * preferences by design).
  */
 
 type TabKey = "profile" | "security" | "data" | "appearance" | "notifications";
@@ -63,10 +64,46 @@ function useLocalStorage<T>(key: string, initial: T): [T, (v: T) => void] {
   return [value, set];
 }
 
-function randomRecoveryCode(): string {
-  const groups = Array.from({ length: 3 }, () => Math.random().toString(36).slice(2, 6).toUpperCase());
-  return groups.join("-");
+function formatWhen(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
+/** "Chrome on Windows"-style summary from a raw User-Agent string. */
+function describeUserAgent(ua: string): string {
+  if (!ua) return "Unknown device";
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /OPR\//.test(ua)
+      ? "Opera"
+      : /Firefox\//.test(ua)
+        ? "Firefox"
+        : /Chrome\//.test(ua)
+          ? "Chrome"
+          : /Safari\//.test(ua)
+            ? "Safari"
+            : "Browser";
+  const os = /Windows/.test(ua)
+    ? "Windows"
+    : /Mac OS X|Macintosh/.test(ua)
+      ? "macOS"
+      : /iPhone|iPad/.test(ua)
+        ? "iOS"
+        : /Android/.test(ua)
+          ? "Android"
+          : /Linux/.test(ua)
+            ? "Linux"
+            : "";
+  return os ? `${browser} on ${os}` : browser;
+}
+
+const cardTitleStyle: React.CSSProperties = {
+  fontSize: "var(--text-h3)",
+  fontWeight: "var(--weight-bold)" as React.CSSProperties["fontWeight"],
+  color: "var(--text)",
+  marginBottom: 12,
+};
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -75,24 +112,51 @@ export default function Settings() {
   const [tab, setTab] = React.useState<TabKey>("profile");
   const [toast, setToast] = React.useState<string | null>(null);
 
+  // ---- Profile -------------------------------------------------------------
+  const [profile, setProfile] = React.useState<Profile | null>(null);
+  const [profileError, setProfileError] = React.useState<string | null>(null);
+  /** `GET /api/me/profile` is `@require_auth` — a guest gets a 401. Shown as
+   * the shared sign-up nudge, not as "couldn't load your profile". */
+  const [profileNeedsAccount, setProfileNeedsAccount] = React.useState(false);
+  const [profileSaving, setProfileSaving] = React.useState(false);
   const [sessions, setSessions] = React.useState<SessionCode[] | null>(null);
-  const [sessionsError, setSessionsError] = React.useState<string | null>(null);
+  const [signingOut, setSigningOut] = React.useState(false);
+  const [verifyBusy, setVerifyBusy] = React.useState(false);
 
-  const [name, setName] = React.useState("Priya Sharma");
-  const [email, setEmail] = React.useState("priya.sharma@mail.utoronto.ca");
-  const [currentSession, setCurrentSession] = React.useState("");
-  const [expectedGrad, setExpectedGrad] = React.useState("2027-06");
-
+  // ---- Security ------------------------------------------------------------
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
-  const [recoveryCode, setRecoveryCode] = React.useState(() => randomRecoveryCode());
+  const [passwordBusy, setPasswordBusy] = React.useState(false);
+  const [passwordError, setPasswordError] = React.useState<string | null>(null);
 
+  const [recoveryCode, setRecoveryCode] = React.useState<string | null>(null);
+
+  const [passkeys, setPasskeys] = React.useState<Passkey[] | null>(null);
+  const [passkeyLabel, setPasskeyLabel] = React.useState("");
+
+  const [activeSessions, setActiveSessions] = React.useState<ActiveSession[] | null>(null);
+  const [sessionsBusy, setSessionsBusy] = React.useState(false);
+  const [securityError, setSecurityError] = React.useState<string | null>(null);
+
+  // Re-auth prompt shared by "generate recovery code" and "add passkey" — both
+  // now require the current password (the backend re-authenticates).
+  const [reauth, setReauth] = React.useState<{ action: "recovery" | "passkey"; label: string } | null>(null);
+  const [reauthPassword, setReauthPassword] = React.useState("");
+  const [reauthBusy, setReauthBusy] = React.useState(false);
+  const [reauthError, setReauthError] = React.useState<string | null>(null);
+
+  // ---- Data ----------------------------------------------------------------
   const [shareOpen, setShareOpen] = React.useState(false);
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deletePassword, setDeletePassword] = React.useState("");
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
   /** `POST /api/share` is `@require_auth` — a guest gets a 401. Shown as the
    * shared sign-up nudge on the Data tab, not as "couldn't generate a link". */
   const [shareNeedsAccount, setShareNeedsAccount] = React.useState(false);
 
+  // ---- Appearance / notifications (localStorage by design) -----------------
   const [density, setDensity] = useLocalStorage<"comfortable" | "compact">("deciduous:density", "comfortable");
   const [leafMotion, setLeafMotion] = useLocalStorage<boolean>("deciduous:leaf-motion", true);
   const [notifyDeadlines, setNotifyDeadlines] = useLocalStorage<boolean>("deciduous:notify-deadlines", true);
@@ -100,14 +164,48 @@ export default function Settings() {
   const [notifySeats, setNotifySeats] = useLocalStorage<boolean>("deciduous:notify-seats", false);
 
   React.useEffect(() => {
+    let cancelled = false;
+    authApi
+      .getProfile()
+      .then((p) => !cancelled && setProfile(p))
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        // A guest has no profile to load, which isn't an error — the raw
+        // `API error 401: {...}` string used to land in the danger Callout
+        // below. Appearance/Notifications are localStorage-backed and work
+        // fine without an account, so the screen stays usable either way.
+        if (isAuthError(e)) setProfileNeedsAccount(true);
+        else setProfileError(e instanceof Error ? e.message : "Failed to load profile.");
+      });
     api
       .getSessions()
-      .then((s) => {
-        setSessions(s);
-        setCurrentSession((prev) => prev || s[s.length - 1] || "");
-      })
-      .catch((e: unknown) => setSessionsError(e instanceof Error ? e.message : "Failed to load sessions."));
+      .then((s) => !cancelled && setSessions(s))
+      .catch(() => !cancelled && setSessions([]));
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const refreshSecurity = React.useCallback(() => {
+    // A 401 here means the session expired/was revoked — don't render an
+    // authoritative "you have no passkeys / no sessions" from a failed fetch
+    // (that would be a false claim in security UI). Surface it and bounce to
+    // sign-in; reserve `[]` for a real empty 200.
+    const onErr = (e: unknown) => {
+      if ((e as { status?: number } | null)?.status === 401) {
+        navigate("/signin", { replace: true });
+      } else {
+        setSecurityError(e instanceof Error ? e.message : "Couldn't load your security settings.");
+      }
+    };
+    setSecurityError(null);
+    authApi.listPasskeys().then(setPasskeys).catch(onErr);
+    authApi.listSessions().then(setActiveSessions).catch(onErr);
+  }, [navigate]);
+
+  React.useEffect(() => {
+    if (tab === "security" && (passkeys === null || activeSessions === null)) refreshSecurity();
+  }, [tab, passkeys, activeSessions, refreshSecurity]);
 
   React.useEffect(() => {
     if (!toast) return;
@@ -144,6 +242,157 @@ export default function Settings() {
     }
   }
 
+  async function saveProfile() {
+    if (!profile || profileSaving) return;
+    setProfileSaving(true);
+    setProfileError(null);
+    try {
+      const saved = await authApi.updateProfile({
+        displayName: profile.displayName,
+        currentSession: profile.currentSession,
+        expectedGrad: profile.expectedGrad,
+      });
+      setProfile(saved);
+      setToast("Profile updated.");
+    } catch (e) {
+      setProfileError(e instanceof Error ? e.message : "Couldn't save your profile.");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function resendVerification() {
+    if (verifyBusy) return;
+    setVerifyBusy(true);
+    try {
+      const { alreadyVerified } = await authApi.resendVerificationEmail();
+      if (alreadyVerified) {
+        setProfile((p) => (p ? { ...p, verified: true } : p));
+        setToast("You're already verified.");
+      } else {
+        setToast("Verification email sent — check your inbox.");
+      }
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Couldn't send the verification email.");
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await authApi.signOut();
+      navigate("/signin", { replace: true });
+    } catch {
+      setSigningOut(false);
+      setToast("Couldn't sign out. Try again.");
+    }
+  }
+
+  async function submitPasswordChange() {
+    if (passwordBusy || !currentPassword || !newPassword) return;
+    setPasswordBusy(true);
+    setPasswordError(null);
+    try {
+      await authApi.changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setToast("Password updated. Other devices were signed out.");
+    } catch (e) {
+      setPasswordError(e instanceof Error ? e.message : "Couldn't update your password.");
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
+  function openReauth(action: "recovery" | "passkey") {
+    setReauthPassword("");
+    setReauthError(null);
+    setReauth({ action, label: passkeyLabel.trim() || "Passkey" });
+  }
+
+  async function confirmReauth() {
+    if (!reauth || reauthBusy || !reauthPassword) return;
+    setReauthBusy(true);
+    setReauthError(null);
+    try {
+      if (reauth.action === "recovery") {
+        setRecoveryCode(await authApi.generateRecoveryCode(reauthPassword));
+        setReauth(null);
+        setToast("Recovery code generated. Save it now — it won't be shown again.");
+      } else {
+        await authApi.registerPasskey(reauth.label, reauthPassword);
+        setReauth(null);
+        setPasskeyLabel("");
+        setToast("Passkey added.");
+        refreshSecurity();
+      }
+    } catch (e) {
+      const name = (e as { name?: string } | null)?.name;
+      // A cancelled authenticator prompt isn't an error worth showing.
+      if (name === "NotAllowedError" || name === "AbortError") {
+        setReauth(null);
+      } else {
+        setReauthError(e instanceof Error ? e.message : "That didn't work — check your password and try again.");
+      }
+    } finally {
+      setReauthBusy(false);
+    }
+  }
+
+  async function removePasskey(id: number) {
+    try {
+      await authApi.deletePasskey(id);
+      setToast("Passkey removed.");
+      refreshSecurity();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Couldn't remove that passkey.");
+    }
+  }
+
+  async function revokeSession(id: string, isCurrent: boolean) {
+    try {
+      await authApi.revokeSession(id);
+      if (isCurrent) {
+        navigate("/signin", { replace: true });
+        return;
+      }
+      setToast("Session revoked.");
+      refreshSecurity();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Couldn't revoke that session.");
+    }
+  }
+
+  async function revokeOthers() {
+    if (sessionsBusy) return;
+    setSessionsBusy(true);
+    try {
+      await authApi.revokeOtherSessions();
+      setToast("Signed out everywhere else.");
+      refreshSecurity();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Couldn't revoke other sessions.");
+    } finally {
+      setSessionsBusy(false);
+    }
+  }
+
+  async function confirmDeleteAccount() {
+    if (deleteBusy || !deletePassword) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await authApi.deleteAccount(deletePassword);
+      navigate("/", { replace: true });
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Couldn't delete your account.");
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <>
       <PageHeader title="Settings" subtitle="Account, data, appearance, and notification preferences." />
@@ -163,41 +412,100 @@ export default function Settings() {
       <div style={{ marginTop: 20 }}>
         {tab === "profile" && (
           <Card>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>
-              <Input label="Name" value={name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)} />
-              <Input label="Email" type="email" value={email} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)} />
-              {sessionsError ? (
-                <Callout tone="danger">{sessionsError}</Callout>
-              ) : sessions == null ? (
-                <Skeleton height={62} />
-              ) : (
-                <Select
-                  label="Current session"
-                  value={currentSession}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCurrentSession(e.target.value)}
-                  options={sessions.map((s) => ({ label: s, value: s }))}
-                />
-              )}
-              <Input
-                label="Expected graduation"
-                type="month"
-                value={expectedGrad}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExpectedGrad(e.target.value)}
-              />
-              <div>
-                <Button onClick={() => setToast("Profile updated.")}>Save profile</Button>
+            {profileError && (
+              <div style={{ marginBottom: 12 }}>
+                <Callout tone="danger">{profileError}</Callout>
               </div>
-            </div>
+            )}
+            {profileNeedsAccount ? (
+              <GuestCallout title="Create an account to set up your profile">
+                Your name, start term, and expected graduation live on your account. Appearance and notification
+                settings work without one.
+              </GuestCallout>
+            ) : profile == null ? (
+              <Skeleton height={220} />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>
+                <div>
+                  <Input label="Email" type="email" value={profile.email} disabled />
+                  <div style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", marginTop: 4 }}>
+                    Your sign-in email can't be changed here.
+                  </div>
+                </div>
+                {profile.verified ? (
+                  <Callout tone="success">Email verified.</Callout>
+                ) : (
+                  <Callout
+                    tone="warning"
+                    title="Email not verified"
+                    action={
+                      <Button variant="secondary" size="sm" loading={verifyBusy} onClick={resendVerification}>
+                        Resend email
+                      </Button>
+                    }
+                  >
+                    Check your inbox for the verification link, or resend it.
+                  </Callout>
+                )}
+                <Input
+                  label="Name"
+                  value={profile.displayName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setProfile({ ...profile, displayName: e.target.value })
+                  }
+                />
+                {sessions == null ? (
+                  <Skeleton height={62} />
+                ) : (
+                  <Select
+                    label="Current session"
+                    value={profile.currentSession}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                      setProfile({ ...profile, currentSession: e.target.value })
+                    }
+                    options={[
+                      { label: "Not set", value: "" },
+                      ...sessions
+                        .filter((s) => s === profile.currentSession || true)
+                        .map((s) => ({ label: s, value: s })),
+                    ]}
+                  />
+                )}
+                <Input
+                  label="Expected graduation"
+                  type="month"
+                  value={profile.expectedGrad}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setProfile({ ...profile, expectedGrad: e.target.value })
+                  }
+                />
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Button onClick={saveProfile} loading={profileSaving}>
+                    Save profile
+                  </Button>
+                  <Button variant="secondary" icon="log-out" onClick={handleSignOut} loading={signingOut}>
+                    Sign out
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
         {tab === "security" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {securityError && (
+              <Callout tone="danger" title="Couldn't load your security settings">
+                {securityError}{" "}
+                <Button variant="link" size="sm" onClick={refreshSecurity}>
+                  Retry
+                </Button>
+              </Callout>
+            )}
             <Card>
-              <div style={{ fontSize: "var(--text-h3)", fontWeight: "var(--weight-bold)", color: "var(--text)", marginBottom: 12 }}>
-                Change password
-              </div>
+              <div style={cardTitleStyle}>Change password</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 360 }}>
+                {passwordError && <Callout tone="danger">{passwordError}</Callout>}
                 <PasswordField
                   label="Current password"
                   value={currentPassword}
@@ -209,47 +517,139 @@ export default function Settings() {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
                   showStrength
                 />
-                <StrengthMeter password={newPassword} />
                 <Callout tone="info">
-                  Changing your password re-encrypts your academic data with your recovery code. Keep it somewhere safe first.
+                  Your encrypted academic data is re-locked under the new password automatically — nothing
+                  is lost. Every other signed-in device is signed out.
                 </Callout>
                 <div>
-                  <Button
-                    disabled={!currentPassword || !newPassword}
-                    onClick={() => {
-                      setCurrentPassword("");
-                      setNewPassword("");
-                      setToast("Password updated.");
-                    }}
-                  >
+                  <Button disabled={!currentPassword || !newPassword} loading={passwordBusy} onClick={submitPasswordChange}>
                     Update password
                   </Button>
                 </div>
               </div>
             </Card>
 
-            <RecoveryCodeCard
-              code={recoveryCode}
-              onCopy={() => setToast("Recovery code copied.")}
-              onRegenerate={() => {
-                setRecoveryCode(randomRecoveryCode());
-                setToast("Recovery code regenerated. The old code no longer works.");
-              }}
-            />
+            {recoveryCode ? (
+              <div>
+                <RecoveryCodeCard
+                  code={recoveryCode}
+                  onCopy={() => setToast("Recovery code copied.")}
+                  onRegenerate={() => openReauth("recovery")}
+                />
+                <div style={{ marginTop: 8 }}>
+                  <Callout tone="warning" title="Save this code now">
+                    This is the only time it's shown — only a hash is stored. With it, a forgotten
+                    password can be reset without losing your encrypted data.
+                  </Callout>
+                </div>
+              </div>
+            ) : (
+              <Card>
+                <div style={cardTitleStyle}>Recovery code</div>
+                <p style={{ margin: "0 0 12px", fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
+                  A recovery code lets you reset a forgotten password without losing access to your
+                  encrypted transcript and plan data. Generate one and keep it somewhere safe — it's
+                  shown only once.
+                </p>
+                <Button variant="secondary" icon="key-round" onClick={() => openReauth("recovery")}>
+                  Generate recovery code
+                </Button>
+              </Card>
+            )}
 
             <Card>
-              <div style={{ fontSize: "var(--text-h3)", fontWeight: "var(--weight-bold)", color: "var(--text)", marginBottom: 12 }}>
-                Active sessions
-              </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0" }}>
-                <div>
-                  <div style={{ fontSize: "var(--text-body)", color: "var(--text)" }}>This device</div>
-                  <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>Current session</div>
-                </div>
-                <Button variant="secondary" size="sm" disabled>
-                  Current
+              <div style={cardTitleStyle}>Passkeys</div>
+              {!authApi.passkeysSupported() ? (
+                <Callout tone="info">This browser doesn't support passkeys.</Callout>
+              ) : (
+                <>
+                  <p style={{ margin: "0 0 12px", fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
+                    Sign in with Face ID, Touch ID, Windows Hello, or a security key. Adding one asks
+                    for your current password first.
+                  </p>
+                  {passkeys == null ? (
+                    <Skeleton height={40} />
+                  ) : (
+                    passkeys.map((p) => (
+                      <div
+                        key={p.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 0",
+                          borderBottom: "1px solid var(--border)",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: "var(--text-body)", color: "var(--text)" }}>{p.label}</div>
+                          <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
+                            Added {formatWhen(p.createdAt)}
+                            {p.lastUsedAt ? ` · last used ${formatWhen(p.lastUsedAt)}` : ""}
+                          </div>
+                        </div>
+                        <Button variant="secondary" size="sm" onClick={() => removePasskey(p.id)}>
+                          Remove
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginTop: 12, maxWidth: 420 }}>
+                    <div style={{ flex: 1 }}>
+                      <Input
+                        label="Name this device"
+                        placeholder="e.g. MacBook Touch ID"
+                        value={passkeyLabel}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPasskeyLabel(e.target.value)}
+                      />
+                    </div>
+                    <Button icon="key" onClick={() => openReauth("passkey")}>
+                      Add passkey
+                    </Button>
+                  </div>
+                </>
+              )}
+            </Card>
+
+            <Card>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <div style={{ ...cardTitleStyle, marginBottom: 0 }}>Active sessions</div>
+                <Button variant="secondary" size="sm" loading={sessionsBusy} onClick={revokeOthers}>
+                  Sign out other devices
                 </Button>
               </div>
+              {activeSessions == null ? (
+                <Skeleton height={60} />
+              ) : activeSessions.length === 0 ? (
+                <Callout tone="info">No active sessions found.</Callout>
+              ) : (
+                activeSessions.map((s) => (
+                  <div
+                    key={s.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 0",
+                      borderBottom: "1px solid var(--border)",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: "var(--text-body)", color: "var(--text)" }}>
+                        {describeUserAgent(s.userAgent)}
+                        {s.current ? " — this device" : ""}
+                      </div>
+                      <div style={{ fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
+                        Signed in {formatWhen(s.createdAt)} · expires {formatWhen(s.expiresAt)}
+                        {s.ipAddress ? ` · ${s.ipAddress}` : ""}
+                      </div>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => revokeSession(s.id, s.current)}>
+                      {s.current ? "Sign out" : "Revoke"}
+                    </Button>
+                  </div>
+                ))
+              )}
             </Card>
           </div>
         )}
@@ -262,9 +662,7 @@ export default function Settings() {
               </GuestCallout>
             )}
             <Card>
-              <div style={{ fontSize: "var(--text-h3)", fontWeight: "var(--weight-bold)", color: "var(--text)", marginBottom: 12 }}>
-                Import & export
-              </div>
+              <div style={cardTitleStyle}>Import & export</div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <Button variant="secondary" icon="upload" onClick={() => navigate("/onboarding")}>
                   Re-import record
@@ -279,9 +677,11 @@ export default function Settings() {
             <Divider label="Danger zone" />
 
             <DangerZone
+              description="Deletes your account and every transcript entry, plan, and share link under it. This cannot be undone."
               onDelete={() => {
-                setToast("Account deletion requested (demo).");
-                navigate("/");
+                setDeleteError(null);
+                setDeletePassword("");
+                setDeleteOpen(true);
               }}
             />
           </div>
@@ -327,6 +727,56 @@ export default function Settings() {
             setToast("Share link revoked.");
           }}
         />
+      </Dialog>
+
+      <Dialog open={deleteOpen} title="Confirm account deletion" onClose={() => !deleteBusy && setDeleteOpen(false)}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
+          {deleteError && <Callout tone="danger">{deleteError}</Callout>}
+          <Callout tone="danger" title="This is permanent">
+            Your account and all encrypted academic data will be deleted immediately.
+          </Callout>
+          <PasswordField
+            label="Enter your password to confirm"
+            value={deletePassword}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDeletePassword(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>
+              Cancel
+            </Button>
+            <Button variant="danger" loading={deleteBusy} disabled={!deletePassword} onClick={confirmDeleteAccount}>
+              Delete my account
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={reauth !== null}
+        title={reauth?.action === "passkey" ? "Add a passkey" : "Generate a recovery code"}
+        onClose={() => !reauthBusy && setReauth(null)}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
+          {reauthError && <Callout tone="danger">{reauthError}</Callout>}
+          <Callout tone="info">
+            {reauth?.action === "passkey"
+              ? "Confirm your password, then your device will prompt for Face ID, Touch ID, or your security key."
+              : "Confirm your password to generate a new recovery code."}
+          </Callout>
+          <PasswordField
+            label="Current password"
+            value={reauthPassword}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReauthPassword(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Button variant="secondary" onClick={() => setReauth(null)} disabled={reauthBusy}>
+              Cancel
+            </Button>
+            <Button loading={reauthBusy} disabled={!reauthPassword} onClick={confirmReauth}>
+              {reauth?.action === "passkey" ? "Continue" : "Generate code"}
+            </Button>
+          </div>
+        </div>
       </Dialog>
 
       {toast && (

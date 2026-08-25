@@ -14,6 +14,9 @@ PyMySQL==1.1.1
 bcrypt==4.2.1
 cryptography==48.0.1
 pdfplumber==0.11.10
+itsdangerous==2.2.0    # signed email tokens (verify/reset links); already a Flask dependency, pinned because backend/api/auth.py imports it directly
+webauthn==2.2.0        # passkey (WebAuthn) server-side ceremony verification
+pyOpenSSL==26.2.0      # webauthn dependency. Must be pinned against `cryptography` above: 25.0.0 caps at cryptography<45 and 26.1.0 at <48, so both fail to resolve against 48.0.1; 26.2.0 allows <49. 26.3.0+ requires cryptography>=49 and would force that pin up.
 
 # --- tests (dev) ---
 pytest==9.0.3

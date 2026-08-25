@@ -115,8 +115,18 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 | `CORS_ORIGIN` | yes | `https://deciduous.mikkelsen.ca` |
 | `PLANNER_CACHE_PATH` | strongly recommended | absolute path outside `public_html` and outside `/tmp`, e.g. `/home/cpaneluser/deciduous-data/cache.sqlite` — see step 9 |
 | `SESSION_COOKIE_SECURE` | no | defaults to `True` when `FLASK_ENV=production` (`backend/config_app.py:86-90`); only set explicitly to override |
-| `SESSION_LIFETIME_SECONDS` | no | login-session lifetime; defaults to 14 days (`backend/config_app.py:91-93`) |
+| `SESSION_LIFETIME_SECONDS` | no | remember-me cookie lifetime cap; defaults to 30 days. Per-session server-side expiry is 24h (default) / 30d (remember-me) in `backend/api/auth.py` |
+| `PASSKEY_RP_ID` | no | WebAuthn relying-party ID; defaults to the hostname of `PASSKEY_ORIGIN`/`CORS_ORIGIN` (`deciduous.mikkelsen.ca`) — set explicitly only if serving from multiple subdomains |
+| `PASSKEY_ORIGIN` | no | full origin the browser reports during passkey ceremonies; defaults to `CORS_ORIGIN` |
+| `PASSKEY_RP_NAME` | no | display name shown in the browser's passkey sheet; defaults to `Deciduous` |
 | `FRONTEND_DIST` | no | absolute path to the built SPA if it doesn't live at `<repo root>/frontend/dist` (`backend/app.py:139`) |
+| `SMTP_HOST` | for email flows | the cPanel mail server, e.g. `mail.mikkelsen.ca` — unset, email sending is a logged no-op and the app still works (verification banner stays; emailed reset links can't be sent) |
+| `SMTP_PORT` | no | defaults to `465` (implicit SSL); set `587` for STARTTLS |
+| `SMTP_USER` | with SMTP_HOST | the mailbox, e.g. `deciduous@mikkelsen.ca` |
+| `SMTP_PASSWORD` | with SMTP_HOST | that mailbox's password |
+| `MAIL_FROM` | no | From address; defaults to `SMTP_USER` |
+| `MAIL_FROM_NAME` | no | From display name; defaults to `Deciduous` |
+| `APP_BASE_URL` | no | absolute base for emailed verify/reset links; defaults to `CORS_ORIGIN` |
 | `DEPLOY_WEBHOOK_SECRET` | for auto-deploy | shared secret for the GitHub webhook / manual deploy trigger — see [auto-deploy.md](auto-deploy.md); unset, the `/api/deploy/*` routes are disabled |
 | `DEPLOY_BRANCH` | no | branch the server self-updates from; defaults to `deploy` (published by the GitHub Action) |
 | `GEMINI_API_KEY` | optional | see below |
@@ -127,6 +137,8 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 > makes their encrypted transcript/plan data **permanently unreadable** — there
 > is no re-wrap/migration path today. Generate it once, store it somewhere
 > durable (password manager), and never regenerate it against a live database.
+> It also derives the server-side wrap that powers passkey sign-in (ADR-0006):
+> rotating it breaks passkey sign-in until users re-register a passkey.
 
 `GEMINI_API_KEY` (optional) powers the on-demand program-requirement grouper
 (`backend/data_sources/llm_grouper.py`, called from `POST

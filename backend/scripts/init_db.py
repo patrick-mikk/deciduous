@@ -9,12 +9,12 @@ Usage (from the repo root)::
 
     python -m backend.scripts.init_db
 
-Idempotent: this just calls `backend.extensions.create_all`, i.e.
-`SQLAlchemy.MetaData.create_all`, which only issues DDL for tables that don't
-already exist yet (`CREATE TABLE IF NOT EXISTS` semantics) — running this
-script again after the tables exist is a no-op for them. It does NOT migrate
-schema changes to tables that already exist; that would need a real migration
-step, out of scope here.
+Idempotent: this calls `backend.extensions.create_all`, which issues DDL only
+for tables that don't exist yet (`CREATE TABLE IF NOT EXISTS` semantics) and
+then adds any missing *nullable* columns to existing tables (see
+`backend/extensions.py::_add_missing_columns`) — running this script again is
+a no-op once the schema is current. Larger migrations (renames, type changes,
+NOT NULL additions) still need a hand-written step.
 
 Refuses to run against the local SQLite dev fallback (i.e. when `DB_HOST` /
 `DB_NAME` / `DB_USER` are not all set — see `backend/config_app.py`) unless

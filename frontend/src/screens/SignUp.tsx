@@ -4,8 +4,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { AuthCard, Input, PasswordField, Button, Checkbox, Callout } from "@/ds";
 import {
   api,
-  API_BASE,
-  ensureCsrfToken,
+  authApi,
   isMockApi,
   loadGuestProfile,
   saveGuestProfile,
@@ -15,11 +14,10 @@ import {
 /**
  * Sign up (design/screens/01-auth-and-onboarding.md, flow F1 step 1-2).
  *
- * Same "no auth endpoint on ApiClient yet" situation as SignIn.tsx: posts to
- * `${API_BASE}/auth/signup` (resolved in `src/api/client.ts` -- `VITE_API_BASE`,
- * else `/api` in production builds, else unset in dev) when a backend is
- * configured, otherwise simulates the round trip so the flow renders and
- * completes offline.
+ * Account creation goes through `src/api/auth.ts` (`authApi.signUp`), which
+ * handles the CSRF handshake and simulates the round trip in mock/offline
+ * mode. New accounts are remembered for 30 days by default (you just created
+ * the account on this device); the SignIn screen offers the explicit choice.
  *
  * Onboarding no longer requires an account (Onboarding.tsx), so a visitor
  * may already have a guest profile (programs + term) saved in localStorage
@@ -38,23 +36,6 @@ function scorePassword(pw: string): number {
   if (/\d/.test(pw)) s++;
   if (/[^A-Za-z0-9]/.test(pw)) s++;
   return Math.min(4, s);
-}
-
-async function signUp(email: string, password: string): Promise<void> {
-  if (API_BASE) {
-    const res = await fetch(`${API_BASE}/auth/signup`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": await ensureCsrfToken() },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error((body && (body.error || body.message)) || "Couldn't create your account.");
-    }
-    return;
-  }
-  await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
 export default function SignUp() {
@@ -88,7 +69,7 @@ export default function SignUp() {
 
     setLoading(true);
     try {
-      await signUp(email, password);
+      await authApi.signUp(email, password, true);
       const guestProfile = loadGuestProfile();
 
       // Credits imported before signing up live only in localStorage (the

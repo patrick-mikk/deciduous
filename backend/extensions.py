@@ -73,14 +73,49 @@ def get_session() -> Session:
 
 
 def create_all(app: Flask) -> None:
-    """Create all tables — used for the local SQLite dev fallback only.
+    """Create all missing tables AND add missing nullable columns.
 
-    Production (MySQL, ADR-0002) is expected to be provisioned via an explicit
-    migration/init step, not an implicit `create_all` on every boot.
+    Called on boot for the local SQLite dev fallback, and by
+    `backend/scripts/init_db.py` for production MySQL. `MetaData.create_all`
+    only creates absent tables; `_add_missing_columns` then covers the one
+    schema-evolution case this project actually has (new *nullable* columns on
+    an existing table, e.g. `users.display_name`), idempotently, on both
+    SQLite and MySQL. Anything beyond that (renames, type changes, NOT NULL
+    additions) still needs a hand-written migration.
     """
     import backend.models_db  # noqa: F401  (imported for side effect: registers model metadata on Base)
 
     Base.metadata.create_all(bind=_engine)
+    _add_missing_columns(app)
+
+
+def _add_missing_columns(app: Flask) -> None:
+    """Issue `ALTER TABLE ... ADD COLUMN` for model columns absent from an
+    existing table. Only nullable columns are added (safe on populated tables
+    with no default-backfill question); a missing non-nullable column is
+    logged loudly instead of guessed at."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(_engine)
+    with _engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {col["name"] for col in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                if not column.nullable:
+                    app.logger.error(
+                        "Table %r is missing NON-NULLABLE column %r — refusing to auto-add; "
+                        "write an explicit migration.",
+                        table.name,
+                        column.name,
+                    )
+                    continue
+                col_type = column.type.compile(_engine.dialect)
+                conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {col_type}"))
+                app.logger.info("Added missing column %s.%s (%s)", table.name, column.name, col_type)
 
 
 def get_course_cache() -> SqliteCache:

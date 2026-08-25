@@ -5,6 +5,8 @@ import { AppLayout } from "@/layouts/AppLayout";
 import Landing from "@/screens/Landing";
 import SignIn from "@/screens/SignIn";
 import SignUp from "@/screens/SignUp";
+import ResetPassword from "@/screens/ResetPassword";
+import VerifyEmail from "@/screens/VerifyEmail";
 import Share from "@/screens/Share";
 
 import Onboarding from "@/screens/Onboarding";
@@ -45,6 +47,8 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/signin" element={<SignIn />} />
       <Route path="/signup" element={<SignUp />} />
+      <Route path="/reset" element={<ResetPassword />} />
+      <Route path="/verify" element={<VerifyEmail />} />
       <Route path="/share/:token" element={<Share />} />
       <Route path="/onboarding" element={<Onboarding />} />
 

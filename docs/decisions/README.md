@@ -14,3 +14,4 @@ Copy [`0000-template.md`](0000-template.md), number sequentially, keep it to a p
 | [0003](0003-no-selenium-http-data-layer.md) | HTTP data layer, no Selenium | Accepted |
 | [0004](0004-cookie-sessions-over-jwt.md) | httpOnly cookie sessions (not JWT) | Accepted |
 | [0005](0005-fernet-per-user-encryption.md) | Fernet per-user encryption at rest | Accepted |
+| [0006](0006-passkey-server-wrapped-data-key.md) | Server-wrapped data key for passkey sign-in | Accepted |

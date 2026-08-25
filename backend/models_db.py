@@ -32,7 +32,18 @@ def _utcnow() -> dt.datetime:
 class User(Base):
     """An account. `wrapped_data_key` is the Fernet key that encrypts this
     user's sensitive fields, itself encrypted with a password-derived key
-    (see `backend/security/crypto.py`)."""
+    (see `backend/security/crypto.py`).
+
+    Additional wraps of the SAME data key (each nullable, created lazily):
+    - `server_wrapped_data_key` — wrapped with the server-side KEK derived
+      from `DATA_KEY_PEPPER` (`crypto.server_wrap_data_key`). Written when the
+      user registers their first passkey, because a passkey sign-in has no
+      password to derive the KEK from (ADR-0006 documents the trade-off).
+    - `recovery_wrapped_data_key` — wrapped with a KEK derived from the
+      user's recovery code (`recovery_salt`), so a password reset with the
+      code can re-wrap instead of losing data (`recovery_code_hash` verifies
+      the code itself).
+    """
 
     __tablename__ = "users"
 
@@ -42,6 +53,17 @@ class User(Base):
     salt: Mapped[str] = mapped_column(String(64), nullable=False)
     wrapped_data_key: Mapped[str] = mapped_column(Text, nullable=False)
     recovery_code_hash: Mapped[bytes | None] = mapped_column(LargeBinary(60), nullable=True)
+    recovery_salt: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    recovery_wrapped_data_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    server_wrapped_data_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Set when the user clicks the emailed verification link (backend/api/auth.py).
+    verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(), nullable=True)
+
+    # Profile (non-sensitive account data shown on Settings → Profile).
+    display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    current_session: Mapped[str | None] = mapped_column(String(20), nullable=True)  # e.g. "20269"
+    expected_grad: Mapped[str | None] = mapped_column(String(10), nullable=True)  # e.g. "2027-06"
 
     # Persistent (multi-process-safe) sign-in rate limiting.
     failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -63,6 +85,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     shares: Mapped[list["Share"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    passkeys: Mapped[list["PasskeyCredential"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Session(Base):
@@ -86,6 +111,31 @@ class Session(Base):
     @property
     def is_active(self) -> bool:
         return self.revoked_at is None and self.expires_at > _utcnow()
+
+
+class PasskeyCredential(Base):
+    """A registered WebAuthn passkey (`backend/api/passkeys.py`).
+
+    `credential_id` and `public_key` are stored base64url-encoded (the wire
+    format the `webauthn` library and the browser both speak) rather than raw
+    bytes, so no encode/decode round-trips through the DB driver are needed.
+    The private key never leaves the user's authenticator; this row alone
+    cannot sign anything.
+    """
+
+    __tablename__ = "passkey_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    credential_id: Mapped[str] = mapped_column(String(512), nullable=False, unique=True, index=True)
+    public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    sign_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    transports: Mapped[str | None] = mapped_column(String(255), nullable=True)  # comma-joined
+    label: Mapped[str] = mapped_column(String(120), nullable=False, default="Passkey")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(), nullable=False, default=_utcnow)
+    last_used_at: Mapped[dt.datetime | None] = mapped_column(DateTime(), nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="passkeys")
 
 
 class TranscriptEntry(Base):
