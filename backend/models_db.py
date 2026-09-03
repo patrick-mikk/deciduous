@@ -60,6 +60,12 @@ class User(Base):
     # Set when the user clicks the emailed verification link (backend/api/auth.py).
     verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(), nullable=True)
 
+    # Last time a "email me a reset link" request actually sent mail. The
+    # request is unauthenticated, so without this one address can be
+    # mail-bombed and each call spawns a 20s-timeout SMTP thread in the
+    # Passenger worker (backend/api/auth.py::_send_reset_email).
+    reset_email_sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime(), nullable=True)
+
     # Profile (non-sensitive account data shown on Settings → Profile).
     display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     current_session: Mapped[str | None] = mapped_column(String(20), nullable=True)  # e.g. "20269"

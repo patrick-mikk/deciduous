@@ -54,7 +54,7 @@ from webauthn.helpers.structs import (
 )
 
 from backend.api import current_data_key, current_user, db_session, json_error, require_auth
-from backend.api.auth import _start_session
+from backend.api.auth import _reauth_or_error, _start_session
 from backend.models_db import PasskeyCredential, User
 from backend.security.crypto import server_unwrap_data_key, server_wrap_data_key
 
@@ -101,9 +101,12 @@ def register_options():
     # survives session revocation, so registering one from a merely-open
     # session (a stolen laptop) would be a persistence backdoor — require the
     # current password here, same posture as change_password/delete_account.
+    # Shares `auth.py`'s lockout accounting, so this prompt can't be used as
+    # an unthrottled password oracle by whoever holds the session cookie.
     password = (request.get_json(silent=True) or {}).get("password") or ""
-    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
-        return json_error("Current password is incorrect.", 401)
+    denied = _reauth_or_error(db, user, password, "Current password is incorrect.")
+    if denied is not None:
+        return denied
 
     rp_id, rp_name, _origin = _rp()
     existing = db.query(PasskeyCredential).filter_by(user_id=user.id).all()

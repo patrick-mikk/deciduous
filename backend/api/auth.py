@@ -51,6 +51,8 @@ _SESSION_LIFETIME_DEFAULT = dt.timedelta(hours=24)
 _SESSION_LIFETIME_REMEMBER = dt.timedelta(days=30)
 _MAX_FAILED_ATTEMPTS = 8
 _LOCKOUT = dt.timedelta(minutes=15)
+#: Minimum gap between "email me a reset link" sends for one account.
+_RESET_EMAIL_INTERVAL = dt.timedelta(minutes=2)
 
 
 def _now() -> dt.datetime:
@@ -290,8 +292,20 @@ def reset_request():
     new_password = data.get("newPassword") or ""
 
     if not code:
-        user = db_session().query(User).filter_by(email=email).first()
-        if user is not None:
+        db = db_session()
+        user = db.query(User).filter_by(email=email).first()
+        # Throttled per account: this branch is unauthenticated and each send
+        # spawns a daemon SMTP thread with a 20s timeout, so an unthrottled
+        # loop both mail-bombs the address and exhausts threads in the
+        # Passenger worker. Silently skipping (rather than erroring) keeps the
+        # response identical for every input -- the 202 below must not reveal
+        # whether the address exists, nor whether one was recently sent.
+        if user is not None and (
+            user.reset_email_sent_at is None
+            or user.reset_email_sent_at <= _now() - _RESET_EMAIL_INTERVAL
+        ):
+            user.reset_email_sent_at = _now()
+            db.commit()
             _send_reset_email(user)
         return jsonify({"ok": True}), 202
 
@@ -517,8 +531,9 @@ def change_password():
 
     db = db_session()
     user = current_user()
-    if not bcrypt.checkpw(current_password.encode("utf-8"), bytes(user.pw_hash)):
-        return json_error("Current password is incorrect.", 401)
+    denied = _reauth_or_error(db, user, current_password, "Current password is incorrect.")
+    if denied is not None:
+        return denied
 
     pepper = current_app.config["DATA_KEY_PEPPER"]
     data_key = unwrap_data_key(user.wrapped_data_key, current_password, user.salt, pepper)
@@ -543,6 +558,53 @@ def change_password():
 
 
 _RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/L lookalikes
+
+
+#: Sentinel distinguishing "wrong password" (401) from a lockout message (429).
+_WRONG_PASSWORD = "\x00wrong-password"
+
+
+def _reauth_password(db, user, password: str) -> str | None:
+    """Re-verify `password` for an already-signed-in user, under the same
+    lockout the sign-in path enforces.
+
+    A session cookie proves you were authenticated once; it does not license
+    unlimited password guessing. Change-password, recovery-code minting,
+    account deletion and passkey registration all re-ask for the password
+    precisely because they are the actions a stolen session shouldn't be able
+    to take -- so each has to count failures against
+    `User.failed_login_attempts` / `locked_until` exactly like `signin`,
+    otherwise the re-auth prompt is an unthrottled oracle.
+
+    Returns None on success, the `_WRONG_PASSWORD` sentinel for a bad
+    password, or a human-readable lockout message. Callers should use
+    `_reauth_or_error`, which turns those into the right status codes.
+    """
+    if user.locked_until is not None and user.locked_until > _now():
+        return "Too many failed attempts. Try again later."
+    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= _MAX_FAILED_ATTEMPTS:
+            user.locked_until = _now() + _LOCKOUT
+        db.commit()
+        return _WRONG_PASSWORD
+    if user.failed_login_attempts or user.locked_until is not None:
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        db.commit()
+    return None
+
+
+def _reauth_or_error(db, user, password: str, wrong_message: str):
+    """`_reauth_password` plus the JSON response shaping every caller wants:
+    429 for a lockout, 401 with `wrong_message` for a bad password, None to
+    proceed."""
+    outcome = _reauth_password(db, user, password)
+    if outcome is None:
+        return None
+    if outcome is _WRONG_PASSWORD:
+        return json_error(wrong_message, 401)
+    return json_error(outcome, 429)
 
 
 def _generate_recovery_code() -> str:
@@ -570,8 +632,9 @@ def generate_recovery_code():
 
     db = db_session()
     user = current_user()
-    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
-        return json_error("Current password is incorrect.", 401)
+    denied = _reauth_or_error(db, user, password, "Current password is incorrect.")
+    if denied is not None:
+        return denied
 
     # Derive the data key from the password rather than trusting the session
     # copy — keeps the re-auth and the wrap consistent for the same secret.
@@ -602,8 +665,9 @@ def delete_account():
 
     db = db_session()
     user = current_user()
-    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
-        return json_error("Password is incorrect.", 401)
+    denied = _reauth_or_error(db, user, password, "Password is incorrect.")
+    if denied is not None:
+        return denied
 
     db.delete(user)
     db.commit()
