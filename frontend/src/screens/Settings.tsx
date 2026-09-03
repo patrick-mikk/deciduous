@@ -203,9 +203,22 @@ export default function Settings() {
     authApi.listSessions().then(setActiveSessions).catch(onErr);
   }, [navigate]);
 
+  // Fire once per entry into the Security tab. Keying this on `passkeys` /
+  // `activeSessions` instead spun forever whenever one call succeeded and the
+  // other failed non-401: the success set a fresh array identity, re-running
+  // the effect, while the failure left its state `null` so the guard stayed
+  // true. A ref that resets on leaving the tab keeps the retry-on-revisit
+  // behaviour without the loop.
+  const securityRequested = React.useRef(false);
   React.useEffect(() => {
-    if (tab === "security" && (passkeys === null || activeSessions === null)) refreshSecurity();
-  }, [tab, passkeys, activeSessions, refreshSecurity]);
+    if (tab !== "security") {
+      securityRequested.current = false;
+      return;
+    }
+    if (securityRequested.current) return;
+    securityRequested.current = true;
+    refreshSecurity();
+  }, [tab, refreshSecurity]);
 
   React.useEffect(() => {
     if (!toast) return;
@@ -299,7 +312,17 @@ export default function Settings() {
       await authApi.changePassword(currentPassword, newPassword);
       setCurrentPassword("");
       setNewPassword("");
-      setToast("Password updated. Other devices were signed out.");
+      // The server retires the recovery code on a password change
+      // (auth.py::change_password). Leaving the just-generated one on screen
+      // under "Save this code now" invites saving a dead code — which only
+      // surfaces later, at a reset, when it can't recover the data key.
+      const hadRecoveryCode = recoveryCode !== null;
+      setRecoveryCode(null);
+      setToast(
+        hadRecoveryCode
+          ? "Password updated. Other devices were signed out, and your recovery code was retired — generate a new one."
+          : "Password updated. Other devices were signed out.",
+      );
     } catch (e) {
       setPasswordError(e instanceof Error ? e.message : "Couldn't update your password.");
     } finally {
@@ -465,9 +488,15 @@ export default function Settings() {
                     }
                     options={[
                       { label: "Not set", value: "" },
-                      ...sessions
-                        .filter((s) => s === profile.currentSession || true)
-                        .map((s) => ({ label: s, value: s })),
+                      // Keep a stored term that `getSessions()` no longer lists
+                      // (an older session code) as a real option — otherwise the
+                      // Select falls back to "Not set" while state still holds
+                      // the old value, and saving silently clears it. The
+                      // previous `|| true` filter was a no-op that dropped it.
+                      ...(profile.currentSession && !sessions.includes(profile.currentSession as SessionCode)
+                        ? [{ label: profile.currentSession, value: profile.currentSession }]
+                        : []),
+                      ...sessions.map((s) => ({ label: s, value: s })),
                     ]}
                   />
                 )}

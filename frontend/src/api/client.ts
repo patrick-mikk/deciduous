@@ -416,7 +416,13 @@ export class ApiError extends Error {
  * leaving the button looking dead.
  */
 export function isAuthError(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 401;
+  // Two clients throw 401s and they don't share a type: `http()` below raises
+  // `ApiError`, while `api/auth.ts::authFetch` raises a plain Error carrying a
+  // `status` field. Matching only `ApiError` silently missed every authApi
+  // 401, so a guest got the raw "Authentication required." instead of the
+  // sign-up nudge. Match on the shape, not the class.
+  if (err instanceof ApiError) return err.status === 401;
+  return typeof err === "object" && err !== null && (err as { status?: number }).status === 401;
 }
 
 interface HttpOpts {
