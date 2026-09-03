@@ -11,6 +11,10 @@ for the project overview and agent instructions; this tree holds the detail that
 | [roadmap.md](roadmap.md) | what's built, what's next, phase order |
 | [decisions/](decisions/) | why a choice was made (ADRs) — read before reversing one |
 | [../backend/docs/TTB_API_REFERENCE.md](../backend/docs/TTB_API_REFERENCE.md) | the Timetable Builder API contract |
+| [auto-deploy.md](auto-deploy.md) | **to ship a change** — how push-to-`main` reaches the live site, the first cutover, and rollback |
+| [deploy-cpanel.md](deploy-cpanel.md) | to stand a server up from scratch: MySQL, Passenger, env vars, cron, smoke tests |
+| [setup-mysql-cpanel.md](setup-mysql-cpanel.md) | the MySQL half of that, step by step, with troubleshooting |
+| [production-hardening.md](production-hardening.md) | what's left before this is safe for many real users |
 
 ## Maintaining these docs
 

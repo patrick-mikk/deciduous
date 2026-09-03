@@ -58,6 +58,10 @@ reason to put it under the docroot.
 $ git clone <repo-url> ~/deciduous
 ```
 
+Once auto-deploy is set up this clone tracks the `deploy` branch rather than
+`main`, and updates itself — see
+[auto-deploy.md](auto-deploy.md#one-time-setup-the-first-cutover).
+
 Create `~/deciduous/.env` (git-ignored — see `.gitignore` — and never
 committed) for the values in step 5. Keeping it outside `public_html` means
 it's never directly fetchable even if Passenger's routing is ever
@@ -171,6 +175,17 @@ fallback (`backend/scripts/init_db.py:72-79`); pass `--allow-sqlite` only if
 that's genuinely what you want (e.g. a throwaway smoke test).
 
 ## 7. Frontend build
+
+> **Superseded once auto-deploy is on.** CI builds the SPA and commits it to
+> the `deploy` branch, so a server tracking `deploy` already has
+> `frontend/dist` on disk and never needs this upload
+> ([auto-deploy.md](auto-deploy.md)). Keep reading only for the initial
+> bring-up before cutover, or to build by hand if the Action is unavailable.
+>
+> The two are mutually exclusive on one checkout: `frontend/dist/` is
+> gitignored on `main` but tracked on `deploy`, so a hand-uploaded build sits
+> exactly where the tracked files land and blocks `git checkout deploy` until
+> it is removed. The cutover steps cover that.
 
 cPanel has no Node — build on your dev machine and upload the result:
 
