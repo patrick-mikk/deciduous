@@ -85,6 +85,51 @@ cPanel UI → **Setup Python App** → Create Application:
 root on `sys.path` and calls `backend.app.create_app()` (`backend/passenger_wsgi.py:1-17`);
 all real setup happens inside `create_app`.
 
+> **Two cPanel behaviours will bite you here, in this order.**
+>
+> **Passenger always loads `passenger_wsgi.py` in the application root**, never
+> the path you typed into "Application startup file". Creating the app writes
+> cPanel's own stub there (plus an empty `public/`), which serves the
+> "It works! Python v3.12.x" page instead of your app — and, because this repo
+> tracks `backend/passenger_wsgi.py`, cPanel will also **overwrite that tracked
+> file** with the same stub if you point it there. Restore it afterwards
+> (`git checkout -- backend/passenger_wsgi.py`).
+>
+> The right end state is cPanel's own generated root loader, which imports the
+> startup file rather than being it:
+>
+> ```python
+> import os, sys
+> sys.path.insert(0, os.path.dirname(__file__))
+> from importlib.machinery import SourceFileLoader
+> wsgi = SourceFileLoader('wsgi', 'backend/passenger_wsgi.py').load_module()
+> application = wsgi.application
+> ```
+>
+> cPanel regenerates that file whenever the startup file is set, so the fix is
+> to set it correctly rather than to hand-write a shim:
+>
+> ```
+> cloudlinux-selector set --json --interpreter python --app-root deciduous --domain <domain> --startup-file backend/passenger_wsgi.py
+> ```
+>
+> **Never set `--startup-file passenger_wsgi.py`** (the bare root filename). The
+> loader would `load_module()` itself, and every request dies with
+> `RecursionError: maximum recursion depth exceeded` behind a bare 500.
+>
+> The root `passenger_wsgi.py` stays **untracked** — deploys `git reset --hard`,
+> which leaves untracked files alone but would clobber a tracked one.
+>
+> **The document root must be traversable by the web server.** cPanel writes the
+> Passenger `.htaccess` into the *document root* of the Application URL, which is
+> a different directory from the application root. If that directory is mode
+> `700` (a plain `git clone` or `mkdir` leaves it that way), LiteSpeed/Apache
+> can't read the `.htaccess` at all and every request 404s **before** Passenger
+> is ever consulted — no `stderr.log` is written, which makes it look like a
+> routing problem rather than a permissions one. `chmod 755` it (cPanel's own
+> docroots are `750` with group `nobody`, but the group change needs privileges
+> a cPanel user doesn't have).
+
 After creating the app, cPanel shows an "Enter to the virtual environment"
 command — run it, then install dependencies inside that venv:
 
@@ -257,11 +302,14 @@ $ /home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.refre
 Then add the real nightly cron (cPanel UI → **Cron Jobs**, or `crontab -e`):
 
 ```
-0 3 * * * /home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.refresh_cache >> /home/cpaneluser/deciduous-data/refresh_cache.log 2>&1
+0 3 * * * cd /home/cpaneluser/deciduous && /home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.refresh_cache >> /home/cpaneluser/deciduous-data/refresh_cache.log 2>&1
 ```
 
 Use the venv's `python` directly (not the system one) so `requests`/
 `SQLAlchemy`/etc. resolve; cron doesn't source `~/.bashrc` or activate venvs.
+The `cd` is equally load-bearing: `python -m backend.scripts...` resolves the
+`backend` package relative to the working directory, and cron starts in `$HOME`
+— without it the job dies on `No module named backend` every night.
 `refresh_cache.py` discovers session codes at runtime via
 `TTBClient.current_sessions()` — never hard-coded (AGENTS.md) — pulls ARTSC
 courses per session and the full program catalog, and throttles between bulk
