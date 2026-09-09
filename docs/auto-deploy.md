@@ -45,18 +45,20 @@ server (a deploy hard-resets them). Untracked files (`.env`,
 ### 1. Server: move the clone onto the `deploy` branch
 
 The app root must be a git clone whose `origin` points at GitHub and can fetch
-without a prompt. For this **private** repo, create a fine-grained
-**read-only** personal access token (Contents: Read) and embed it in the remote
-URL once. It sits in plaintext in `.git/config`, so read-only genuinely
-matters.
+without a prompt. The repo is **public**, so a plain HTTPS remote fetches
+unauthenticated and no token is needed:
 
 ```
 cd ~/deciduous
 rm -rf frontend/dist
-git remote set-url origin https://<TOKEN>@github.com/curejoker/Deciduous.git
+git remote set-url origin https://github.com/patrick-mikk/deciduous.git
 git fetch origin deploy
 git checkout deploy
 ```
+
+(If the repo is ever made private, swap in a fine-grained **read-only** PAT —
+Contents: Read — as `https://<TOKEN>@github.com/...`. It sits in plaintext in
+`.git/config`, so read-only genuinely matters.)
 
 **Why `rm -rf frontend/dist` first:** `frontend/dist/` is gitignored on `main`
 but **tracked** on `deploy` (CI commits the build there because cPanel has no
@@ -132,6 +134,20 @@ URL are right.
 No GitHub Actions secret is needed: the workflow pushes `deploy` with the
 built-in `GITHUB_TOKEN`. It does need **Settings → Actions → General →
 Workflow permissions → Read and write**, or the publish step 403s.
+
+**Do this before the first push to `main`.** New repos default to `read`, and
+the failure is easy to misread: backend tests and the frontend build all go
+green and only the final `Force-push deploy branch` step fails, with a bare
+`Process completed with exit code 128` and no mention of permissions. Verify
+with:
+
+```
+$ gh api repos/<owner>/<repo>/actions/permissions/workflow
+```
+
+`default_workflow_permissions` must be `write`. After fixing it, the failed run
+can simply be re-run (`gh run rerun <id> --failed`) — no new commit is needed to
+publish `deploy`.
 
 ### 5. Rebuild the data cache
 

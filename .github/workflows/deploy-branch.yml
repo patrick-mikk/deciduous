@@ -25,6 +25,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Republish `deploy` from the current main without needing a new commit —
+  # used for the first cutover (the branch does not exist until this runs once)
+  # and to rebuild it by hand if a run was lost.
+  workflow_dispatch:
 
 concurrency:
   # Keyed by ref so a PR run can never cancel an in-flight deploy of main.
@@ -75,10 +79,11 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
-      # Publish only from main. On a pull_request the job stops here, having
-      # served as the gate; `deploy` must never move for an unmerged branch.
+      # Publish only from main (push, or a manual run of this workflow on
+      # main). On a pull_request the job stops here, having served as the
+      # gate; `deploy` must never move for an unmerged branch.
       - name: Force-push deploy branch (main + built dist)
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
