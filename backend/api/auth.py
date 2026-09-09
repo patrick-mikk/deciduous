@@ -25,32 +25,55 @@ import secrets
 
 import bcrypt
 from flask import Blueprint, current_app, jsonify, request, session
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from backend.api import current_user, db_session, json_error, require_auth
+from backend.mailer import send_email
+from backend.models_db import PasskeyCredential
 from backend.models_db import Session as SessionModel
 from backend.models_db import User
-from backend.security.crypto import generate_data_key, generate_salt, unwrap_data_key, wrap_data_key
+from backend.security.crypto import (
+    generate_data_key,
+    generate_salt,
+    server_unwrap_data_key,
+    unwrap_data_key,
+    wrap_data_key,
+)
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _MIN_PASSWORD_LEN = 10
-_SESSION_LIFETIME = dt.timedelta(days=14)
+# Two session lifetimes (design: "Remember me for 30 days"). Without
+# remember-me the cookie is a browser-session cookie (gone on browser close)
+# and the DB row caps it at 24h; with it, a persistent 30-day session.
+_SESSION_LIFETIME_DEFAULT = dt.timedelta(hours=24)
+_SESSION_LIFETIME_REMEMBER = dt.timedelta(days=30)
 _MAX_FAILED_ATTEMPTS = 8
 _LOCKOUT = dt.timedelta(minutes=15)
+#: Minimum gap between "email me a reset link" sends for one account.
+_RESET_EMAIL_INTERVAL = dt.timedelta(minutes=2)
 
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
 
 
-def _start_session(user: User, data_key: bytes) -> None:
-    """Create a `Session` row and populate the signed cookie session."""
+def _start_session(user: User, data_key: bytes, remember: bool = False) -> None:
+    """Create a `Session` row and populate the signed cookie session.
+
+    `remember=False` (default): non-permanent cookie (dropped when the
+    browser closes) + a 24h server-side expiry. `remember=True`: permanent
+    cookie + 30-day server-side expiry. The DB row's `expires_at` is the
+    source of truth either way (`backend.api.current_user` checks it), so a
+    lingering cookie past expiry is inert.
+    """
+    lifetime = _SESSION_LIFETIME_REMEMBER if remember else _SESSION_LIFETIME_DEFAULT
     db = db_session()
     row = SessionModel(
         id=secrets.token_urlsafe(32),
         user_id=user.id,
-        expires_at=_now() + _SESSION_LIFETIME,
+        expires_at=_now() + lifetime,
         user_agent=(request.headers.get("User-Agent") or "")[:255],
         ip_address=request.remote_addr or "",
     )
@@ -58,14 +81,90 @@ def _start_session(user: User, data_key: bytes) -> None:
     db.commit()
 
     session.clear()
-    session.permanent = True
+    session.permanent = remember
     session["user_id"] = user.id
     session["session_id"] = row.id
     session["data_key"] = data_key.decode("ascii")
 
 
 def _user_public(user: User) -> dict:
-    return {"id": user.id, "email": user.email}
+    return {"id": user.id, "email": user.email, "verified": user.verified_at is not None}
+
+
+# ------------------------------------------------------------ email tokens
+_VERIFY_SALT = "verify-email-v1"
+_RESET_SALT = "password-reset-v1"
+_VERIFY_MAX_AGE = 60 * 60 * 24 * 3  # 3 days
+_RESET_MAX_AGE = 60 * 60  # 1 hour
+
+
+def _serializer(salt: str) -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=salt)
+
+
+def _pw_fingerprint(user: User) -> str:
+    """A short digest of the current password hash — bound into RESET tokens
+    so they become single-use: `reset_confirm` and `change_password` both
+    rotate `pw_hash`, which changes this digest and thereby invalidates every
+    outstanding reset link (so a redeemed link can't be replayed, and
+    changing the password kills any link an attacker may hold)."""
+    import hashlib
+
+    return hashlib.sha256(bytes(user.pw_hash)).hexdigest()[:16]
+
+
+def _email_token(user: User, salt: str) -> str:
+    # The email is in the payload so a token minted for one address can never
+    # verify/reset an account whose email has since changed. Reset tokens
+    # additionally carry a password fingerprint (`pv`) so they are single-use
+    # (see `_pw_fingerprint`); verification tokens don't, so a pending signup
+    # verification link keeps working across an early password change.
+    payload = {"uid": user.id, "email": user.email}
+    if salt == _RESET_SALT:
+        payload["pv"] = _pw_fingerprint(user)
+    return _serializer(salt).dumps(payload)
+
+
+def _load_email_token(token: str, salt: str, max_age: int) -> User | None:
+    try:
+        payload = _serializer(salt).loads(token, max_age=max_age)
+    except (BadSignature, SignatureExpired):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    user = db_session().get(User, payload.get("uid"))
+    if user is None or user.email != payload.get("email"):
+        return None
+    # Reset tokens are void once the bound password hash has changed (redeemed
+    # once, or changed via change-password) — this is what makes them one-shot.
+    if salt == _RESET_SALT and payload.get("pv") != _pw_fingerprint(user):
+        return None
+    return user
+
+
+def _send_verification_email(user: User) -> bool:
+    link = f"{current_app.config['APP_BASE_URL']}/verify?token={_email_token(user, _VERIFY_SALT)}"
+    return send_email(
+        user.email,
+        "Verify your Deciduous email",
+        "Hi,\n\n"
+        "Confirm this is your email address to finish setting up your Deciduous "
+        f"degree-planner account:\n\n  {link}\n\n"
+        "The link works for 3 days. If you didn't create this account, you can "
+        "ignore this message.\n\n— Deciduous",
+    )
+
+
+def _send_reset_email(user: User) -> bool:
+    link = f"{current_app.config['APP_BASE_URL']}/reset?token={_email_token(user, _RESET_SALT)}"
+    return send_email(
+        user.email,
+        "Reset your Deciduous password",
+        "Hi,\n\n"
+        f"Someone asked to reset the password for this account:\n\n  {link}\n\n"
+        "The link works for 1 hour. If it wasn't you, ignore this message — "
+        "your password is unchanged.\n\n— Deciduous",
+    )
 
 
 @bp.route("/csrf", methods=["GET"])
@@ -109,7 +208,8 @@ def signup():
     db.add(user)
     db.commit()
 
-    _start_session(user, data_key)
+    _send_verification_email(user)  # best-effort; signup succeeds regardless
+    _start_session(user, data_key, remember=bool(data.get("rememberMe")))
     return jsonify({"user": _user_public(user)}), 201
 
 
@@ -148,7 +248,7 @@ def signin():
     user.locked_until = None
     db.commit()
 
-    _start_session(user, data_key)
+    _start_session(user, data_key, remember=bool(data.get("rememberMe")))
     return jsonify({"user": _user_public(user)})
 
 
@@ -167,20 +267,409 @@ def signout():
 
 @bp.route("/reset", methods=["POST"])
 def reset_request():
-    """Request a password reset.
+    """Reset a forgotten password using a recovery code.
 
-    Always returns 202 regardless of whether the email exists (no account
-    enumeration). NOTE (ADR-0005): resetting a password without a recovery
-    code cannot re-derive the old data key, so previously encrypted
-    transcript/plan rows become unreadable after a reset — the design (see
-    `design/screens/01-auth-and-onboarding.md`) surfaces that warning in the
-    UI. A recovery-code flow that re-wraps the data key is future work; this
-    endpoint is intentionally a stub (no email delivery yet).
+    Body: `{email, recoveryCode, newPassword}`. The recovery code (generated
+    while signed in via `POST /api/auth/recovery-code`) verifies against
+    `User.recovery_code_hash` and unwraps `recovery_wrapped_data_key`, so the
+    data key survives the reset and gets re-wrapped under the new password
+    (closing the ADR-0005 "reset loses your data" gap for users who saved a
+    code). Without a valid code this returns the same generic 401 whether the
+    email exists, the code is wrong, or no code was ever generated — no
+    account enumeration. Uses the same persistent lockout counters as signin.
+
+    Called WITHOUT `recoveryCode`, this is the "email me a reset link" flow:
+    if the email has an account, a signed, 1-hour reset link is sent via
+    `backend.mailer` (see `reset_confirm` for the redemption endpoint).
+    Always 202 either way — no account enumeration through timing-visible
+    branches beyond the unavoidable SMTP queueing.
     """
-    return jsonify({"ok": True}), 202
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    # Normalize to the hashed form: uppercase, no spaces/dashes (the code is
+    # displayed as XXXX-XXXX-XXXX-XXXX but hashed without separators).
+    code = (data.get("recoveryCode") or "").strip().upper().replace(" ", "").replace("-", "")
+    new_password = data.get("newPassword") or ""
+
+    if not code:
+        db = db_session()
+        user = db.query(User).filter_by(email=email).first()
+        # Throttled per account: this branch is unauthenticated and each send
+        # spawns a daemon SMTP thread with a 20s timeout, so an unthrottled
+        # loop both mail-bombs the address and exhausts threads in the
+        # Passenger worker. Silently skipping (rather than erroring) keeps the
+        # response identical for every input -- the 202 below must not reveal
+        # whether the address exists, nor whether one was recently sent.
+        if user is not None and (
+            user.reset_email_sent_at is None
+            or user.reset_email_sent_at <= _now() - _RESET_EMAIL_INTERVAL
+        ):
+            user.reset_email_sent_at = _now()
+            db.commit()
+            _send_reset_email(user)
+        return jsonify({"ok": True}), 202
+
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        return json_error(f"Password must be at least {_MIN_PASSWORD_LEN} characters.", 422)
+
+    generic_error = "That email and recovery code combination is not valid."
+    db = db_session()
+    user = db.query(User).filter_by(email=email).first()
+    if user is None or not user.recovery_code_hash or not user.recovery_wrapped_data_key:
+        return json_error(generic_error, 401)
+
+    if user.locked_until is not None and user.locked_until > _now():
+        return json_error("Too many failed attempts. Try again later.", 429)
+
+    if not bcrypt.checkpw(code.encode("utf-8"), bytes(user.recovery_code_hash)):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= _MAX_FAILED_ATTEMPTS:
+            user.locked_until = _now() + _LOCKOUT
+        db.commit()
+        return json_error(generic_error, 401)
+
+    pepper = current_app.config["DATA_KEY_PEPPER"]
+    data_key = unwrap_data_key(user.recovery_wrapped_data_key, code, user.recovery_salt or "", pepper)
+    if data_key is None:
+        return json_error(generic_error, 401)
+
+    salt = generate_salt()
+    user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
+    user.salt = salt
+    user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    # Consume the recovery code — a code is single-use, so a leaked or
+    # shoulder-surfed code can't be replayed after the owner has used it.
+    user.recovery_code_hash = None
+    user.recovery_salt = None
+    user.recovery_wrapped_data_key = None
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    _revoke_all_sessions(db, user.id)  # a reset invalidates every signed-in device
+    db.commit()
+
+    _start_session(user, data_key)
+    return jsonify({"user": _user_public(user)})
+
+
+@bp.route("/reset/confirm", methods=["POST"])
+def reset_confirm():
+    """Redeem an emailed reset link: `{token, newPassword}`.
+
+    Data-key outcome (ADR-0005/0006), reported as `dataPreserved`:
+    - The account has a passkey (so `server_wrapped_data_key` exists): the
+      data key is recovered from that wrap and re-wrapped under the new
+      password — encrypted transcript/plan data SURVIVES.
+    - Otherwise the old data key is unrecoverable without the password or a
+      recovery code: a FRESH data key is issued, old encrypted values become
+      unreadable (they decrypt to empty, never garbage), and now-useless
+      recovery-code fields are cleared. The UI warns before this path.
+    Every session is revoked, then the caller is signed in.
+    """
+    data = request.get_json(silent=True) or {}
+    token = data.get("token") or ""
+    new_password = data.get("newPassword") or ""
+
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        return json_error(f"Password must be at least {_MIN_PASSWORD_LEN} characters.", 422)
+
+    user = _load_email_token(token, _RESET_SALT, _RESET_MAX_AGE)
+    if user is None:
+        return json_error("That reset link is invalid or has expired — request a new one.", 401)
+
+    pepper = current_app.config["DATA_KEY_PEPPER"]
+    data_key = (
+        server_unwrap_data_key(user.server_wrapped_data_key, pepper)
+        if user.server_wrapped_data_key
+        else None
+    )
+    db = db_session()
+    preserved = data_key is not None
+    if not preserved:
+        data_key = generate_data_key()
+        # Every wrap of the OLD (now-unrecoverable) key is dead weight — clear
+        # all of them so nothing keeps wrapping a discarded key: the recovery
+        # code, the passkey server wrap, and the passkey rows it unlocked
+        # (they can no longer reach the data, matching delete_passkey's
+        # "last passkey gone -> drop the server wrap" invariant).
+        user.recovery_code_hash = None
+        user.recovery_salt = None
+        user.recovery_wrapped_data_key = None
+        user.server_wrapped_data_key = None
+        db.query(PasskeyCredential).filter_by(user_id=user.id).delete()
+    salt = generate_salt()
+    user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
+    user.salt = salt
+    user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    # The link proves control of the mailbox — that's exactly what
+    # verification asserts, so count it.
+    if user.verified_at is None:
+        user.verified_at = _now()
+    _revoke_all_sessions(db, user.id)
+    db.commit()
+
+    _start_session(user, data_key)
+    return jsonify({"user": _user_public(user), "dataPreserved": preserved})
+
+
+# ------------------------------------------------------- email verification
+@bp.route("/verify", methods=["POST"])
+def verify_email():
+    """Redeem an emailed verification link: `{token}`. Public — the link may
+    be opened in a browser with no session; verifying never signs anyone in."""
+    data = request.get_json(silent=True) or {}
+    user = _load_email_token(data.get("token") or "", _VERIFY_SALT, _VERIFY_MAX_AGE)
+    if user is None:
+        return json_error("That verification link is invalid or has expired.", 401)
+    if user.verified_at is None:
+        user.verified_at = _now()
+        db_session().commit()
+    return jsonify({"ok": True, "email": user.email})
+
+
+@bp.route("/verify/request", methods=["POST"])
+@require_auth
+def resend_verification():
+    """Re-send the verification email for the signed-in account."""
+    user = current_user()
+    if user.verified_at is not None:
+        return jsonify({"ok": True, "alreadyVerified": True})
+    sent = _send_verification_email(user)
+    if not sent:
+        return json_error("Email sending isn't configured on this server yet.", 503)
+    return jsonify({"ok": True})
 
 
 @bp.route("/session", methods=["GET"])
 @require_auth
 def whoami():
     return jsonify({"user": _user_public(current_user())})
+
+
+# ---------------------------------------------------------------- sessions
+def _revoke_all_sessions(db, user_id: int, keep: str | None = None) -> None:
+    rows = db.query(SessionModel).filter_by(user_id=user_id, revoked_at=None).all()
+    for row in rows:
+        if keep is not None and row.id == keep:
+            continue
+        row.revoked_at = _now()
+
+
+def _session_public(row: SessionModel, current_id: str | None) -> dict:
+    return {
+        "id": row.id,
+        "current": row.id == current_id,
+        "createdAt": row.created_at.isoformat() + "Z",
+        "expiresAt": row.expires_at.isoformat() + "Z",
+        "userAgent": row.user_agent or "",
+        "ipAddress": row.ip_address or "",
+    }
+
+
+@bp.route("/sessions", methods=["GET"])
+@require_auth
+def list_sessions():
+    """Every ACTIVE session for the signed-in user (Settings → Security →
+    "Active sessions"), newest first, with the caller's own marked `current`."""
+    db = db_session()
+    user = current_user()
+    current_id = session.get("session_id")
+    rows = (
+        db.query(SessionModel)
+        .filter_by(user_id=user.id, revoked_at=None)
+        .order_by(SessionModel.created_at.desc())
+        .all()
+    )
+    active = [_session_public(r, current_id) for r in rows if r.is_active]
+    return jsonify({"sessions": active})
+
+
+@bp.route("/sessions/<session_id>", methods=["DELETE"])
+@require_auth
+def revoke_session(session_id: str):
+    """Revoke one of the caller's own sessions. Revoking the current one is
+    allowed and doubles as a sign-out (the cookie session is cleared too)."""
+    db = db_session()
+    user = current_user()
+    row = db.get(SessionModel, session_id)
+    if row is None or row.user_id != user.id:
+        return json_error("No such session.", 404)
+    if row.revoked_at is None:
+        row.revoked_at = _now()
+        db.commit()
+    if session.get("session_id") == session_id:
+        session.clear()
+    return jsonify({"ok": True})
+
+
+@bp.route("/sessions/revoke-others", methods=["POST"])
+@require_auth
+def revoke_other_sessions():
+    """"Sign out everywhere else": revoke every active session except this one."""
+    db = db_session()
+    user = current_user()
+    _revoke_all_sessions(db, user.id, keep=session.get("session_id"))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# ------------------------------------------------------- password & account
+@bp.route("/change-password", methods=["POST"])
+@require_auth
+def change_password():
+    """Change the signed-in user's password, re-wrapping the data key under
+    the new one (the key itself never changes, so encrypted rows are
+    untouched). Requires the current password even with a live session —
+    a stolen open laptop shouldn't be enough. Revokes every OTHER session."""
+    data = request.get_json(silent=True) or {}
+    current_password = data.get("currentPassword") or ""
+    new_password = data.get("newPassword") or ""
+
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        return json_error(f"Password must be at least {_MIN_PASSWORD_LEN} characters.", 422)
+
+    db = db_session()
+    user = current_user()
+    denied = _reauth_or_error(db, user, current_password, "Current password is incorrect.")
+    if denied is not None:
+        return denied
+
+    pepper = current_app.config["DATA_KEY_PEPPER"]
+    data_key = unwrap_data_key(user.wrapped_data_key, current_password, user.salt, pepper)
+    if data_key is None:
+        return json_error("Current password is incorrect.", 401)
+
+    salt = generate_salt()
+    user.pw_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt())
+    user.salt = salt
+    user.wrapped_data_key = wrap_data_key(data_key, new_password, salt, pepper)
+    # Retire the recovery code: a password change should invalidate a
+    # previously-issued (or attacker-planted) recovery credential, which would
+    # otherwise survive as a password-reset backdoor. The user is prompted to
+    # generate a fresh one from Settings. (Outstanding emailed reset links die
+    # automatically — they're bound to the old pw_hash via `_pw_fingerprint`.)
+    user.recovery_code_hash = None
+    user.recovery_salt = None
+    user.recovery_wrapped_data_key = None
+    _revoke_all_sessions(db, user.id, keep=session.get("session_id"))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+_RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/L lookalikes
+
+
+#: Sentinel distinguishing "wrong password" (401) from a lockout message (429).
+_WRONG_PASSWORD = "\x00wrong-password"
+
+
+def _reauth_password(db, user, password: str) -> str | None:
+    """Re-verify `password` for an already-signed-in user, under the same
+    lockout the sign-in path enforces.
+
+    A session cookie proves you were authenticated once; it does not license
+    unlimited password guessing. Change-password, recovery-code minting,
+    account deletion and passkey registration all re-ask for the password
+    precisely because they are the actions a stolen session shouldn't be able
+    to take -- so each has to count failures against
+    `User.failed_login_attempts` / `locked_until` exactly like `signin`,
+    otherwise the re-auth prompt is an unthrottled oracle.
+
+    Returns None on success, the `_WRONG_PASSWORD` sentinel for a bad
+    password, or a human-readable lockout message. Callers should use
+    `_reauth_or_error`, which turns those into the right status codes.
+    """
+    if user.locked_until is not None and user.locked_until > _now():
+        return "Too many failed attempts. Try again later."
+    if not bcrypt.checkpw(password.encode("utf-8"), bytes(user.pw_hash)):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= _MAX_FAILED_ATTEMPTS:
+            user.locked_until = _now() + _LOCKOUT
+        db.commit()
+        return _WRONG_PASSWORD
+    if user.failed_login_attempts or user.locked_until is not None:
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        db.commit()
+    return None
+
+
+def _reauth_or_error(db, user, password: str, wrong_message: str):
+    """`_reauth_password` plus the JSON response shaping every caller wants:
+    429 for a lockout, 401 with `wrong_message` for a bad password, None to
+    proceed."""
+    outcome = _reauth_password(db, user, password)
+    if outcome is None:
+        return None
+    if outcome is _WRONG_PASSWORD:
+        return json_error(wrong_message, 401)
+    return json_error(outcome, 429)
+
+
+def _generate_recovery_code() -> str:
+    groups = ["".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(4)) for _ in range(4)]
+    return "-".join(groups)
+
+
+@bp.route("/recovery-code", methods=["POST"])
+@require_auth
+def generate_recovery_code():
+    """Generate (or regenerate) the account's recovery code.
+
+    Returns the plaintext code EXACTLY ONCE — only its bcrypt hash and a
+    recovery-code-wrapped copy of the data key are stored, so a later
+    password reset with the code can re-wrap the key (see `reset_request`).
+    Regenerating replaces the previous code; the old one stops working.
+
+    Requires the current password even with a live session (like
+    `change_password`/`delete_account`): a recovery code is a full
+    password-reset credential, so minting one from a merely-open session
+    would be a persistence backdoor a stolen laptop could plant.
+    """
+    data = request.get_json(silent=True) or {}
+    password = data.get("password") or ""
+
+    db = db_session()
+    user = current_user()
+    denied = _reauth_or_error(db, user, password, "Current password is incorrect.")
+    if denied is not None:
+        return denied
+
+    # Derive the data key from the password rather than trusting the session
+    # copy — keeps the re-auth and the wrap consistent for the same secret.
+    data_key = unwrap_data_key(user.wrapped_data_key, password, user.salt, current_app.config["DATA_KEY_PEPPER"])
+    if data_key is None:
+        return json_error("Current password is incorrect.", 401)
+
+    code = _generate_recovery_code()
+    normalized = code.replace("-", "")
+    salt = generate_salt()
+    user.recovery_code_hash = bcrypt.hashpw(normalized.encode("utf-8"), bcrypt.gensalt())
+    user.recovery_salt = salt
+    user.recovery_wrapped_data_key = wrap_data_key(
+        data_key, normalized, salt, current_app.config["DATA_KEY_PEPPER"]
+    )
+    db.commit()
+    return jsonify({"recoveryCode": code})
+
+
+@bp.route("/account", methods=["DELETE"])
+@require_auth
+def delete_account():
+    """Permanently delete the account and everything under it (cascades to
+    sessions, transcript, plans, enrolments, shares, passkeys). Requires the
+    password as re-confirmation."""
+    data = request.get_json(silent=True) or {}
+    password = data.get("password") or ""
+
+    db = db_session()
+    user = current_user()
+    denied = _reauth_or_error(db, user, password, "Password is incorrect.")
+    if denied is not None:
+        return denied
+
+    db.delete(user)
+    db.commit()
+    session.clear()
+    return jsonify({"ok": True})

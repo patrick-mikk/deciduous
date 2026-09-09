@@ -1,0 +1,39 @@
+/* Onboarding (/onboarding) — public, no AppLayout chrome (same rationale as
+   Landing.css: this is a pre-account screen, so it hand-rolls its own header
+   rather than the authenticated TopBar/SideNav shell). Header layout mirrors
+   Landing.css's .dc-landing__header recipe exactly. */
+
+.dc-onboarding {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+.dc-onboarding__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-5) var(--gutter);
+}
+
+.dc-onboarding__body {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 var(--gutter) var(--space-10);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Same 640px breakpoint Landing.css uses for its equivalent header row —
+   below it, let the Wordmark and the "Sign in to restore" link stack
+   rather than crowd/overflow on narrow viewports. */
+@media (max-width: 640px) {
+  .dc-onboarding__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+}

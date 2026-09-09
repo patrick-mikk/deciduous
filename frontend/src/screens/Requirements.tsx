@@ -13,8 +13,9 @@ import {
   Skeleton,
   Switch,
 } from "@/ds";
-import { api } from "@/api";
+import { api, isAuthError } from "@/api";
 import type { DegreeAuditData, StudentRecord } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Requirements overview — routed at "/requirements" (design/01-information-architecture.md,
@@ -42,6 +43,8 @@ export default function Requirements() {
   const [audit, setAudit] = React.useState<DegreeAuditData | null>(null);
   const [programSummaries, setProgramSummaries] = React.useState<ProgramSummary[]>([]);
   const [onlyLeft, setOnlyLeft] = React.useState(false);
+  /** Signed out — `/api/me` 401s. Shown as the sign-up nudge, not as an error. */
+  const [isGuest, setIsGuest] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -67,7 +70,9 @@ export default function Requirements() {
         });
         setProgramSummaries(summaries);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load requirements.");
+        if (cancelled) return;
+        if (isAuthError(e)) setIsGuest(true);
+        else setError(e instanceof Error ? e.message : "Failed to load requirements.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -117,7 +122,14 @@ export default function Requirements() {
         </Callout>
       )}
 
-      {!loading && !error && record && record.programs.length === 0 && (
+      {!loading && isGuest && (
+        <GuestCallout title="Create an account to track requirement progress">
+          Requirement progress is measured against your saved transcript and programs. You can still read any
+          program's full requirement breakdown from Programs without an account.
+        </GuestCallout>
+      )}
+
+      {!loading && !error && !isGuest && record && record.programs.length === 0 && (
         <EmptyState
           icon="graduation-cap"
           title="No programs yet"
@@ -132,7 +144,9 @@ export default function Requirements() {
 
       {!loading && !error && record && record.programs.length > 0 && audit && (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <Card>
+          {/* The screen's single highlighted summary card (modernized-ACORN):
+              a teal left accent on the degree-progress hero only. */}
+          <Card style={{ borderLeft: "3px solid var(--accent)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 18 }}>
               <ProgressRing value={Math.round((audit.totalEarned / 20) * 100)} size="md" tone="primary" sublabel="complete" />
               <div>

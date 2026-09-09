@@ -23,7 +23,7 @@ import pytest  # noqa: E402
 import backend.api.programs as programs_module  # noqa: E402
 from backend.app import create_app  # noqa: E402
 from backend.config_app import Config  # noqa: E402
-from backend.data_sources.cache import SqliteCache  # noqa: E402
+from backend.data_sources.cache import PROGRAMS_CATALOG_FULL_AT, SqliteCache  # noqa: E402
 from backend.data_sources.llm_grouper import GroupingResult, LLMGroupingError  # noqa: E402
 from backend.data_sources.models import (  # noqa: E402
     Program,
@@ -77,6 +77,13 @@ class _BoomProgramClient:
 
     def __init__(self, *_a: Any, **_k: Any) -> None:
         raise AssertionError("ProgramClient must not be constructed here")
+
+
+def _mark_catalog_full(cache: SqliteCache) -> None:
+    """Pretend a full catalog pull already ran (what refresh_cache.py records),
+    so empty-q "browse" requests trust the seeded cache instead of self-healing
+    with a live pull."""
+    cache.set_meta(PROGRAMS_CATALOG_FULL_AT, "2026-07-08T00:00:00")
 
 
 def _program(
@@ -150,6 +157,7 @@ def test_search_programs_filters_by_type_and_subject(client, cache, monkeypatch)
         ],
         "2026-07-08T00:00:00",
     )
+    _mark_catalog_full(cache)  # the ?subject= call below is an empty-q browse
     monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
 
     resp = client.get("/api/programs?type=minor")
@@ -167,6 +175,7 @@ def test_search_programs_paginates(client, cache, monkeypatch):
         [_program(code=f"ASMAJ{i:04d}", title=f"Program {i}") for i in range(25)],
         "2026-07-08T00:00:00",
     )
+    _mark_catalog_full(cache)  # empty-q browse must not self-heal here
     monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
 
     resp = client.get("/api/programs?pageSize=10&page=2")
@@ -180,6 +189,67 @@ def test_search_programs_bad_page_param_is_422(client, monkeypatch):
     monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
     resp = client.get("/api/programs?page=nope")
     assert resp.status_code == 422
+
+
+def test_browse_self_heals_full_catalog_once(client, cache, monkeypatch):
+    """Empty-q browse on a never-bulk-loaded cache pulls the FULL catalog once
+    (even over a partial cache seeded by keyword searches), records the meta
+    flag, and never pulls again."""
+    # Partial cache: one program seeded by an earlier keyword search.
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    calls: list[dict] = []
+
+    class _FullCatalogClient:
+        def search(self, keyword: str = "", program_type: str = "", max_pages: int = 5):
+            calls.append({"keyword": keyword, "type": program_type, "max_pages": max_pages})
+            return [
+                _program(),
+                _program(code="ASSPE0608", title="Sociology Specialist", program_type="specialist"),
+                _program(code="ASMIN2222", title="History Minor", program_type="minor"),
+            ]
+
+    monkeypatch.setattr(programs_module, "ProgramClient", _FullCatalogClient)
+
+    resp = client.get("/api/programs")
+    assert resp.status_code == 200
+    assert resp.get_json()["total"] == 3  # full catalog, not the 1-program partial cache
+    assert len(calls) == 1
+    assert calls[0]["keyword"] == "" and calls[0]["max_pages"] > 5  # full pull, not keyword-scoped
+    assert cache.get_meta(PROGRAMS_CATALOG_FULL_AT) is not None
+
+    # Second browse serves the cache; a network hit would now blow up.
+    monkeypatch.setattr(programs_module, "ProgramClient", _BoomProgramClient)
+    resp = client.get("/api/programs")
+    assert resp.status_code == 200
+    assert resp.get_json()["total"] == 3
+
+
+def test_browse_pull_failure_serves_partial_cache(client, cache, monkeypatch):
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _DownProgramClient:
+        def search(self, *_a: Any, **_k: Any):
+            raise RuntimeError("calendar unreachable")
+
+    monkeypatch.setattr(programs_module, "ProgramClient", _DownProgramClient)
+
+    resp = client.get("/api/programs")
+    assert resp.status_code == 200  # degrade to the partial cache, not a 502
+    assert resp.get_json()["total"] == 1
+    assert cache.get_meta(PROGRAMS_CATALOG_FULL_AT) is None  # still incomplete -> retried next browse
+
+
+def test_browse_pull_failure_with_empty_cache_is_502(client, monkeypatch):
+    class _DownProgramClient:
+        def search(self, *_a: Any, **_k: Any):
+            raise RuntimeError("calendar unreachable")
+
+    monkeypatch.setattr(programs_module, "ProgramClient", _DownProgramClient)
+
+    resp = client.get("/api/programs")
+    assert resp.status_code == 502
+    assert "Program search failed" in resp.get_json()["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +363,60 @@ def test_reparse_requirements_llm_failure_is_502(client, cache, monkeypatch):
     assert "error" in resp.get_json()
 
 
+def test_reparse_requirements_missing_key_is_503_with_distinct_message(client, cache, monkeypatch):
+    """Issue #1: a missing server-side GEMINI_API_KEY must surface as a 503
+    with a message distinct from a generic Gemini failure, so the frontend
+    can tell the user what's actually wrong instead of a fixed generic string."""
+    from backend.data_sources.llm_grouper import GeminiNotConfiguredError
+
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _UnconfiguredGrouper:
+        def group(self, text: str) -> GroupingResult:
+            raise GeminiNotConfiguredError("Gemini API key not configured on the server.")
+
+    monkeypatch.setattr(programs_module, "_grouper", lambda: _UnconfiguredGrouper())
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/programs/ASMAJ1305A/requirements/reparse", headers=headers)
+    assert resp.status_code == 503
+    assert "not configured" in resp.get_json()["error"].lower()
+
+
+def test_reparse_requirements_request_error_is_502_with_rejected_message(client, cache, monkeypatch):
+    from backend.data_sources.llm_grouper import GeminiRequestError
+
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _RejectingGrouper:
+        def group(self, text: str) -> GroupingResult:
+            raise GeminiRequestError("Gemini rejected the request: 400 Client Error")
+
+    monkeypatch.setattr(programs_module, "_grouper", lambda: _RejectingGrouper())
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/programs/ASMAJ1305A/requirements/reparse", headers=headers)
+    assert resp.status_code == 502
+    assert "rejected the request" in resp.get_json()["error"].lower()
+
+
+def test_reparse_requirements_response_error_is_502_with_unparseable_message(client, cache, monkeypatch):
+    from backend.data_sources.llm_grouper import GeminiResponseError
+
+    cache.upsert_programs([_program()], "2026-07-08T00:00:00")
+
+    class _UnparseableGrouper:
+        def group(self, text: str) -> GroupingResult:
+            raise GeminiResponseError("Gemini returned an unparseable response.")
+
+    monkeypatch.setattr(programs_module, "_grouper", lambda: _UnparseableGrouper())
+
+    headers = _csrf_headers(client)
+    resp = client.post("/api/programs/ASMAJ1305A/requirements/reparse", headers=headers)
+    assert resp.status_code == 502
+    assert "unparseable" in resp.get_json()["error"].lower()
+
+
 # ---------------------------------------------------------------------------
 # /api/me/programs
 # ---------------------------------------------------------------------------
@@ -379,3 +503,77 @@ def test_delete_program_not_enrolled_is_404(client):
     headers = _csrf_headers(client)
     resp = client.delete("/api/me/programs/ASMAJ9999A", headers=headers)
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /api/me/programs/order
+# ---------------------------------------------------------------------------
+
+
+def test_reorder_programs_persists_across_list_calls(client):
+    _signup(client)
+    for code in ("ASMAJ1305A", "ASMAJ0608A", "ASMIN0301A"):
+        headers = _csrf_headers(client)
+        resp = client.post("/api/me/programs", json={"code": code}, headers=headers)
+        assert resp.status_code == 201
+
+    listed = client.get("/api/me/programs")
+    assert [p["code"] for p in listed.get_json()["programs"]] == [
+        "ASMAJ1305A",
+        "ASMAJ0608A",
+        "ASMIN0301A",
+    ]
+
+    headers = _csrf_headers(client)
+    resp = client.put(
+        "/api/me/programs/order",
+        json={"codes": ["ASMIN0301A", "ASMAJ1305A", "ASMAJ0608A"]},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert [p["code"] for p in resp.get_json()["programs"]] == [
+        "ASMIN0301A",
+        "ASMAJ1305A",
+        "ASMAJ0608A",
+    ]
+
+    # The new order survives a fresh GET, i.e. it's persisted, not request-local.
+    listed = client.get("/api/me/programs")
+    assert [p["code"] for p in listed.get_json()["programs"]] == [
+        "ASMIN0301A",
+        "ASMAJ1305A",
+        "ASMAJ0608A",
+    ]
+
+
+def test_reorder_programs_rejects_mismatched_code_set(client):
+    _signup(client)
+    headers = _csrf_headers(client)
+    client.post("/api/me/programs", json={"code": "ASMAJ1305A"}, headers=headers)
+    headers = _csrf_headers(client)
+    client.post("/api/me/programs", json={"code": "ASMAJ0608A"}, headers=headers)
+
+    headers = _csrf_headers(client)
+    missing = client.put("/api/me/programs/order", json={"codes": ["ASMAJ1305A"]}, headers=headers)
+    assert missing.status_code == 422
+
+    headers = _csrf_headers(client)
+    unknown = client.put(
+        "/api/me/programs/order",
+        json={"codes": ["ASMAJ1305A", "ASMAJ0608A", "ASMAJ9999A"]},
+        headers=headers,
+    )
+    assert unknown.status_code == 422
+
+    headers = _csrf_headers(client)
+    duplicate = client.put(
+        "/api/me/programs/order",
+        json={"codes": ["ASMAJ1305A", "ASMAJ1305A"]},
+        headers=headers,
+    )
+    assert duplicate.status_code == 422
+
+
+def test_reorder_programs_requires_auth(client):
+    resp = client.put("/api/me/programs/order", json={"codes": []})
+    assert resp.status_code in (401, 403)

@@ -5,6 +5,8 @@ import { AppLayout } from "@/layouts/AppLayout";
 import Landing from "@/screens/Landing";
 import SignIn from "@/screens/SignIn";
 import SignUp from "@/screens/SignUp";
+import ResetPassword from "@/screens/ResetPassword";
+import VerifyEmail from "@/screens/VerifyEmail";
 import Share from "@/screens/Share";
 
 import Onboarding from "@/screens/Onboarding";
@@ -25,8 +27,14 @@ import Help from "@/screens/Help";
 /**
  * Route map, 1:1 with design/01-information-architecture.md's sitemap.
  *
- *   Public (no app shell): /, /signin, /signup, /share/:token
+ *   Public (no app shell): /, /signin, /signup, /share/:token, /onboarding
  *   Authenticated (AppLayout: TopBar + SideNav + ProgressStrip): everything else.
+ *
+ * /onboarding is public and account-free by design (see Onboarding.tsx):
+ * there's no route guard anywhere in this file gating any path on a
+ * session, so this is really the only place that decision is made — a
+ * visitor can go straight from Landing (or a bookmark) into the tutorial
+ * and land on /dashboard afterward without ever creating an account.
  *
  * Screens are stubs (frontend/src/screens/*.tsx) — each owning agent overwrites
  * only their own screen's file body; this file and the route paths are the
@@ -39,11 +47,13 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/signin" element={<SignIn />} />
       <Route path="/signup" element={<SignUp />} />
+      <Route path="/reset" element={<ResetPassword />} />
+      <Route path="/verify" element={<VerifyEmail />} />
       <Route path="/share/:token" element={<Share />} />
+      <Route path="/onboarding" element={<Onboarding />} />
 
       {/* ---- Authenticated (app shell) ---------------------------------- */}
       <Route element={<AppLayout />}>
-        <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/dashboard" element={<Dashboard />} />
 
         <Route path="/programs" element={<Programs />} />

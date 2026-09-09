@@ -10,7 +10,7 @@ Build order for the degree planner. Backend first; React after the API is stable
 | **3** | Prerequisite parser + plan validator + degree-rules engine (`planner/`) | done ✅ |
 | **4** | Program-requirement tracker + auto-plan + Degree Explorer import | done ✅ |
 | **5** | React + TS SPA (Vite) on the Claude Design system, 18 screens | done ✅ |
-| **6** | cPanel deploy to `planner.mikkelsen.ca`, AutoSSL, nightly cron, hardening | not started |
+| **6** | cPanel deploy to `deciduous.mikkelsen.ca`, AutoSSL, nightly cron, hardening | in progress — code-side done, see [docs/deploy-cpanel.md](deploy-cpanel.md) |
 
 ## Done
 
@@ -26,8 +26,16 @@ Build order for the degree planner. Backend first; React after the API is stable
 ## Remaining (Phase 6)
 
 - **cPanel deploy**: MySQL provisioning, Passenger WSGI, React static build served at
-  `planner.mikkelsen.ca`, AutoSSL, env vars, nightly cache-refresh cron.
-- Timetable **optimizer** polish; auth hardening (password reset + recovery-code flow, rate limits).
+  `deciduous.mikkelsen.ca`, AutoSSL, env vars, nightly cache-refresh cron.
+- Timetable **optimizer** polish.
+- ~~Auth hardening~~ shipped: remember-me (30-day) sessions, passkey (WebAuthn) sign-in,
+  session management, password change with key re-wrap, recovery-code reset, account
+  deletion, profile endpoints. Remaining production items: [production-hardening.md](production-hardening.md).
+- **Rate-limit the import parse routes.** `POST /api/import/pdf` and
+  `/api/import/capture` parse for guests by design (an account-optional
+  onboarding step can't require a session — `backend/api/import_.py`), which
+  makes them the only unauthenticated CPU-bound uploads in the app. The 8 MB
+  cap bounds one request; a per-IP limit is what's still missing.
 - Breadth data completeness for past (uncached) sessions; wire the frontend off mock to the live API.
 
 ## Scope notes

@@ -2,19 +2,31 @@ import * as React from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 import { AuthCard, Input, PasswordField, Button, Checkbox, Callout } from "@/ds";
-import { isMockApi } from "@/api";
+import {
+  api,
+  authApi,
+  isMockApi,
+  loadGuestProfile,
+  saveGuestProfile,
+  clearGuestProfile,
+} from "@/api";
 
 /**
  * Sign up (design/screens/01-auth-and-onboarding.md, flow F1 step 1-2).
  *
- * Same "no auth endpoint on ApiClient yet" situation as SignIn.tsx: posts to
- * `${VITE_API_BASE}/auth/signup` when a backend is configured, otherwise
- * simulates the round trip so the flow renders and completes offline.
- * On success, lands on /onboarding (F1 step 4) — email verification (F1
- * step 3) isn't wired up in this preview.
+ * Account creation goes through `src/api/auth.ts` (`authApi.signUp`), which
+ * handles the CSRF handshake and simulates the round trip in mock/offline
+ * mode. New accounts are remembered for 30 days by default (you just created
+ * the account on this device); the SignIn screen offers the explicit choice.
+ *
+ * Onboarding no longer requires an account (Onboarding.tsx), so a visitor
+ * may already have a guest profile (programs + term) saved in localStorage
+ * by the time they get here — e.g. from the "Create a free account to sync"
+ * nudge at the end of the tutorial. On success, best-effort push those
+ * programs into the new account (same `api.addMyProgram` the "My programs"
+ * reorder feature uses) and land straight on /dashboard; a cold signup with
+ * no guest profile still lands on /onboarding as before.
  */
-
-const API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
 
 function scorePassword(pw: string): number {
   let s = 0;
@@ -24,23 +36,6 @@ function scorePassword(pw: string): number {
   if (/\d/.test(pw)) s++;
   if (/[^A-Za-z0-9]/.test(pw)) s++;
   return Math.min(4, s);
-}
-
-async function signUp(email: string, password: string): Promise<void> {
-  if (API_BASE) {
-    const res = await fetch(`${API_BASE}/auth/signup`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error((body && body.message) || "Couldn't create your account.");
-    }
-    return;
-  }
-  await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
 export default function SignUp() {
@@ -74,8 +69,54 @@ export default function SignUp() {
 
     setLoading(true);
     try {
-      await signUp(email, password);
-      navigate("/onboarding", { replace: true });
+      await authApi.signUp(email, password, true);
+      const guestProfile = loadGuestProfile();
+
+      // Credits imported before signing up live only in localStorage (the
+      // import routes parse for guests but refuse to persist). Hand them over
+      // first: if this fails we keep the profile, so the import is never lost
+      // to a successful-but-partial sync below.
+      let coursesSynced = true;
+      if (guestProfile?.courses && guestProfile.courses.length > 0) {
+        try {
+          await api.importStoredCourses({
+            courses: guestProfile.courses,
+            programs: guestProfile.programs.map((p) => ({ code: p.code, title: p.title })),
+          });
+        } catch {
+          coursesSynced = false;
+        }
+      }
+
+      if (guestProfile && guestProfile.programs.length > 0) {
+        const results = await Promise.allSettled(guestProfile.programs.map((p) => api.addMyProgram(p.code)));
+        // Keep any programs whose sync failed in the guest profile rather than
+        // dropping them silently — the account has whatever synced, and a
+        // later visit/retry can still pick up the rest. Clear only on full
+        // success. (A rejected add is most often a 409 "already enrolled",
+        // which is effectively success, but a real failure shouldn't lose data.)
+        const failed = guestProfile.programs.filter((_, i) => results[i].status === "rejected");
+        // Only clear once BOTH halves landed — clearing on program success
+        // alone would drop a still-unsynced import along with the profile.
+        if (failed.length > 0 || !coursesSynced) {
+          saveGuestProfile({
+            ...guestProfile,
+            programs: failed,
+            ...(coursesSynced ? { courses: undefined } : {}),
+          });
+        } else {
+          clearGuestProfile();
+        }
+        navigate("/dashboard", { replace: true });
+      } else if (guestProfile?.courses && guestProfile.courses.length > 0) {
+        // Imported credits but picked no programs — still a returning visitor
+        // with real data, so send them to their record, not back through the
+        // tutorial. Keep the profile if the hand-off failed.
+        if (coursesSynced) clearGuestProfile();
+        navigate("/transcript", { replace: true });
+      } else {
+        navigate("/onboarding", { replace: true });
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Couldn't create your account. Try again.");
     } finally {
@@ -86,7 +127,7 @@ export default function SignUp() {
   return (
     <AuthCard
       title="Create your account"
-      subtitle={isMockApi ? "Demo mode — no email is actually sent." : "Plan your degree, courses, and timetable."}
+      subtitle={isMockApi ? "Demo mode: no email is actually sent." : "Plan your degree, courses, and timetable."}
       footer={
         <>
           Already have an account?{" "}

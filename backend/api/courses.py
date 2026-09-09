@@ -33,15 +33,18 @@ and `design/screens/03-programs-and-courses.md`:
 from __future__ import annotations
 
 import datetime
+import json
 import re
+import time
 from typing import Any
 
 from flask import Blueprint, jsonify, request
 
 from backend.api import json_error
 from backend.data_sources.calendar_courses.client import CalendarCourseClient
+from backend.data_sources.cache import SqliteCache
 from backend.data_sources.models import Course, Instructor, MeetingTime, Section
-from backend.data_sources.timetable.client import TTBClient
+from backend.data_sources.timetable.client import PAGE_SIZE_HINT, TTBClient
 from backend.extensions import get_course_cache
 
 bp = Blueprint("courses", __name__, url_prefix="/api")
@@ -62,6 +65,25 @@ _MAX_PAGE_SIZE = 100
 # backend/tui/service.py) so filtering/paging below sees every match, not
 # just the first page of the underlying cache query.
 _SEARCH_FETCH_LIMIT = 5000
+
+# --- cold-cache session sync bounds (issue #7: Courses search latency) -----
+# A full ARTSC pull is ~80 TTB pages; doing that synchronously inside a
+# user-facing search request either blocks for a long time (TTB up but slow)
+# or throws an unhandled request-shaped delay when TTB is down. Each request
+# that hits a not-yet-fully-synced session instead makes *bounded* progress
+# (a few pages, a few seconds) and resumes on the next request -- see
+# `_ensure_session_synced` and `TTBClient.search`'s `start_page`/`max_pages`/
+# `deadline` params.
+_SYNC_MAX_PAGES_PER_REQUEST = 15
+_SYNC_TIME_BUDGET_SECONDS = 6.0
+
+# `TTBClient.current_sessions()` backs the "no session given" default in
+# `search_courses` -- and the frontend never sends a `session` param (see
+# frontend/src/screens/Courses.tsx), so *every* course search hit this live,
+# uncached TTB call. Caching it for a few minutes turns that into a live call
+# roughly once per TTL instead of once per keystroke.
+_SESSIONS_CACHE_KEY = "sessions:current"
+_SESSIONS_CACHE_TTL_SECONDS = 600
 
 
 def _now_iso() -> str:
@@ -175,29 +197,95 @@ def _default_session(sessions: list[str]) -> str | None:
     return sessions[0] if sessions else None
 
 
+def _cached_current_sessions(cache: SqliteCache) -> list[str]:
+    """`TTBClient.current_sessions()`, refreshed at most every
+    `_SESSIONS_CACHE_TTL_SECONDS`.
+
+    `search_courses` needs this on every request that omits `session` (which
+    is every request the Courses page sends), so calling TTB live each time
+    turned every debounced keystroke search into a live network round trip
+    even with a fully warm course cache -- part of issue #7. Cached in the
+    same `SqliteCache` meta table `_ensure_session_synced` already uses. On a
+    TTB failure, a stale-but-present cached value is preferred over a hard
+    failure; with no cached value at all, the exception propagates so the
+    caller can turn it into a clean 502.
+    """
+    raw = cache.get_meta(_SESSIONS_CACHE_KEY)
+    fetched_at = cache.get_meta(f"{_SESSIONS_CACHE_KEY}:at")
+    if raw is not None and fetched_at is not None:
+        try:
+            fresh = (time.time() - float(fetched_at)) < _SESSIONS_CACHE_TTL_SECONDS
+        except ValueError:
+            fresh = False
+        if fresh:
+            return json.loads(raw)
+
+    try:
+        sessions = TTBClient().current_sessions()
+    except Exception:
+        if raw is not None:
+            return json.loads(raw)  # stale beats a hard failure
+        raise
+    cache.set_meta(_SESSIONS_CACHE_KEY, json.dumps(sessions))
+    cache.set_meta(f"{_SESSIONS_CACHE_KEY}:at", str(time.time()))
+    return sessions
+
+
 @bp.route("/sessions", methods=["GET"])
 def list_sessions():
-    sessions = TTBClient().current_sessions()
+    try:
+        sessions = _cached_current_sessions(get_course_cache())
+    except Exception as exc:  # noqa: BLE001 - degrade to a clean JSON error
+        return json_error(f"Timetable Builder is unreachable: {exc}", 502)
     decoded = [d for s in sessions if (d := _decode_session(s)) is not None]
     decoded.sort(key=lambda d: (d["year"], d["term"] != "F", d["term"]))
     return jsonify({"sessions": decoded, "defaultSession": _default_session(sessions)})
 
 
 # ------------------------------------------------------------------ sync
-def _ensure_session_synced(session: str) -> None:
-    """One-time bulk pull of `session` into the shared cache.
+def _ensure_session_synced(session: str) -> bool:
+    """Make bounded progress syncing `session` into the shared cache.
 
-    Mirrors `backend.tui.service.SearchService._ensure_courses_synced`
-    exactly (cache-first, sync-once) -- TTB has no server-side keyword
-    search, so a whole-session pull is the only way to support prefix/
-    title search (docs/conventions.md, backend/docs/TTB_API_REFERENCE.md).
+    Mirrors `backend.tui.service.SearchService._ensure_courses_synced`'s
+    cache-first intent, but *not* its one-shot-to-completion pull: TTB has no
+    server-side keyword search, so a whole-session pull is the only way to
+    support prefix/title search (docs/conventions.md,
+    backend/docs/TTB_API_REFERENCE.md) -- but a full ~80-page ARTSC pull done
+    synchronously inside a single request either blocks that request for a
+    long time or, if TTB is down, only fails after retry/timeout delay (issue
+    #7). Instead, each call fetches at most `_SYNC_MAX_PAGES_PER_REQUEST`
+    pages within `_SYNC_TIME_BUDGET_SECONDS`; TTB pages are stateless, so an
+    incomplete sync just resumes from roughly where it left off on the next
+    request that hits this session, converging on a full sync over a few
+    quick requests instead of one slow one.
+
+    Returns True once the session's `synced:courses:{session}` marker is set
+    (fully synced, this call or an earlier one); False if this call made
+    partial progress and a caller should expect `search_courses` to see an
+    incomplete catalog for now.
     """
     cache = get_course_cache()
-    if cache.course_count(session) > 0:
-        return
-    courses = TTBClient().search(session, division=_TTB_DIVISION, course_code="")
-    cache.upsert_courses(session, courses, _now_iso())
-    cache.set_meta(f"synced:courses:{session}", _now_iso())
+    if cache.get_meta(f"synced:courses:{session}") is not None:
+        return True
+
+    start_page = max(1, cache.course_count(session) // PAGE_SIZE_HINT + 1)
+    stats: dict[str, Any] = {}
+    deadline = time.monotonic() + _SYNC_TIME_BUDGET_SECONDS
+    courses = TTBClient().search(
+        session,
+        division=_TTB_DIVISION,
+        course_code="",
+        start_page=start_page,
+        max_pages=_SYNC_MAX_PAGES_PER_REQUEST,
+        deadline=deadline,
+        stats=stats,
+    )
+    if courses:
+        cache.upsert_courses(session, courses, _now_iso())
+    if stats.get("complete"):
+        cache.set_meta(f"synced:courses:{session}", _now_iso())
+        return True
+    return False
 
 
 # ------------------------------------------------------------------- search
@@ -206,8 +294,12 @@ def search_courses():
     session = (request.args.get("session") or "").strip()
     if session and not _SESSION_RE.match(session):
         return json_error("session must be a 5-digit TTB session code, e.g. '20269'.", 422)
+    cache = get_course_cache()
     if not session:
-        sessions = TTBClient().current_sessions()
+        try:
+            sessions = _cached_current_sessions(cache)
+        except Exception as exc:  # noqa: BLE001 - degrade to a clean JSON error
+            return json_error(f"Could not reach Timetable Builder to determine the current session: {exc}", 502)
         session = _default_session(sessions)
         if session is None:
             return json_error("Timetable Builder has no current sessions available right now.", 502)
@@ -241,11 +333,10 @@ def search_courses():
     page_size = max(1, min(page_size, _MAX_PAGE_SIZE))
 
     try:
-        _ensure_session_synced(session)
+        catalog_complete = _ensure_session_synced(session)
     except Exception as exc:  # noqa: BLE001 - degrade to a clean JSON error
         return json_error(f"Course sync failed: {exc}", 502)
 
-    cache = get_course_cache()
     results = cache.search_courses(session, q, limit=_SEARCH_FETCH_LIMIT)
 
     if level:
@@ -269,6 +360,10 @@ def search_courses():
             "pageSize": page_size,
             "total": total,
             "totalPages": (total + page_size - 1) // page_size if total else 0,
+            # False while the session's cold-cache sync is still making bounded
+            # progress (see `_ensure_session_synced`) -- results so far are
+            # real data, just not necessarily the whole catalog yet.
+            "catalogComplete": catalog_complete,
         }
     )
 

@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Base URL of the Flask API, e.g. "https://planner.mikkelsen.ca/api". Unset in dev → mock adapter. */
+  /** Base URL of the Flask API, e.g. "https://deciduous.mikkelsen.ca/api". Unset in dev → mock adapter. */
   readonly VITE_API_BASE?: string;
 }
 

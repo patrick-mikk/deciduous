@@ -35,6 +35,13 @@ from backend.data_sources.models import (
 
 DEFAULT_CACHE_PATH = Path(tempfile.gettempdir()) / "uoft_planner_cache.sqlite"
 
+# `meta` key recording when a FULL program-catalog pull last completed (set by
+# `backend/scripts/refresh_cache.py` and the cold-cache fallback in
+# `backend/api/programs.py`). While unset, the cached `programs` table may be
+# an incomplete handful seeded by individual keyword searches, so catalog
+# browses must not trust it as the whole catalog.
+PROGRAMS_CATALOG_FULL_AT = "programs_catalog_full_at"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS courses (
     session       TEXT NOT NULL,

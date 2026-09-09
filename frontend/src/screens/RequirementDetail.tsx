@@ -17,8 +17,9 @@ import {
   Toast,
 } from "@/ds";
 import type { CourseDetail } from "@/ds";
-import { api, courseLevel, creditFromCode } from "@/api";
+import { api, courseLevel, creditFromCode, isAuthError } from "@/api";
 import type { Course, Program, RequirementGroup, RequirementProgress, TranscriptCourse } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Program requirement detail — routed at "/requirements/:code"
@@ -149,6 +150,9 @@ export default function RequirementDetail() {
   const [error, setError] = React.useState<string | null>(null);
   const [program, setProgram] = React.useState<Program | null>(null);
   const [enrolled, setEnrolled] = React.useState(false);
+  /** Signed out: the program breakdown still renders in full, only the
+   * "how much of this have I done" overlay is unavailable. */
+  const [isGuest, setIsGuest] = React.useState(false);
   const [progressRows, setProgressRows] = React.useState<RequirementProgress[]>([]);
   const [transcript, setTranscript] = React.useState<TranscriptCourse[]>([]);
 
@@ -167,12 +171,23 @@ export default function RequirementDetail() {
     setError(null);
     (async () => {
       try {
-        const [prog, rec] = await Promise.all([api.getProgram(code), api.getMyRecord()]);
+        // `getProgram` is public; only `getMyRecord` needs an account. Keeping
+        // them in one `Promise.all` meant a guest's 401 discarded the program
+        // too, so the whole requirement breakdown — which anyone may read —
+        // rendered as a raw `API error 401:` string. Degrade the record alone.
+        const [prog, rec] = await Promise.all([
+          api.getProgram(code),
+          api.getMyRecord().catch((e: unknown) => {
+            if (!isAuthError(e)) throw e;
+            if (!cancelled) setIsGuest(true);
+            return null;
+          }),
+        ]);
         if (cancelled) return;
         setProgram(prog);
-        setEnrolled(rec.programs.some((p) => p.code === code));
-        setProgressRows(rec.requirementProgress[code] ?? []);
-        setTranscript(rec.transcript);
+        setEnrolled(rec ? rec.programs.some((p) => p.code === code) : false);
+        setProgressRows(rec ? rec.requirementProgress[code] ?? [] : []);
+        setTranscript(rec ? rec.transcript : []);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load this program.");
       } finally {
@@ -198,7 +213,7 @@ export default function RequirementDetail() {
       setProgram((p) => (p ? { ...p, completionRequirements: groups, requirementsLoaded: true } : p));
       setToast({ tone: "success", message: "Requirements loaded from the calendar via Gemini." });
     } catch {
-      setToast({ tone: "danger", message: "Couldn't load requirements — try again." });
+      setToast({ tone: "danger", message: "Couldn't load requirements. Try again." });
     } finally {
       setReparsing(false);
     }
@@ -211,6 +226,13 @@ export default function RequirementDetail() {
     api
       .getCourse(courseCode)
       .then((c) => setCourseDetail(c))
+      .catch(() => {
+        // Without this the rejection was unhandled and the drawer fell through
+        // to its "Course not found" empty state — misreporting a network or
+        // server failure as a course that doesn't exist.
+        setCourseDetail(null);
+        setToast({ tone: "danger", message: `Couldn't load ${courseCode}. Check your connection and try again.` });
+      })
       .finally(() => setCourseLoading(false));
   }
 
@@ -246,6 +268,15 @@ export default function RequirementDetail() {
         </Callout>
       )}
 
+      {!loading && !error && isGuest && program && (
+        <div style={{ marginBottom: 16 }}>
+          <GuestCallout title="Create an account to track this against your record">
+            You're seeing the full requirement breakdown — that's public. Progress bars and "already taken" marks
+            need a saved transcript.
+          </GuestCallout>
+        </div>
+      )}
+
       {!loading && !error && !program && (
         <EmptyState
           icon="search"
@@ -261,18 +292,22 @@ export default function RequirementDetail() {
 
       {!loading && !error && program && (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <ProgramHeader
-            code={program.code}
-            name={program.title}
-            programType={program.programType || "major"}
-            department={program.department}
-            totalCredits={program.totalCredits}
-            earned={enrolled ? earnedTotal : undefined}
-            enrolmentRequirements={program.enrolmentRequirements}
-            needsReparse={!program.requirementsLoaded}
-            reparsing={reparsing}
-            onReparse={handleReparse}
-          />
+          {/* The screen's single highlighted summary card (modernized-ACORN):
+              a teal left accent on the program hero only. */}
+          <Card style={{ borderLeft: "3px solid var(--accent)" }}>
+            <ProgramHeader
+              code={program.code}
+              name={program.title}
+              programType={program.programType || "major"}
+              department={program.department}
+              totalCredits={program.totalCredits}
+              earned={enrolled ? earnedTotal : undefined}
+              enrolmentRequirements={program.enrolmentRequirements}
+              needsReparse={!program.requirementsLoaded}
+              reparsing={reparsing}
+              onReparse={handleReparse}
+            />
+          </Card>
 
           {enrolled && upperLevelMins && (
             <Card>

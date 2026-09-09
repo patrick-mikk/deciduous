@@ -40,10 +40,12 @@ import re
 from collections import Counter
 from dataclasses import replace
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from backend.api import current_user, db_session, json_error, require_auth
+from backend.api._audit import effective_total_credits
+from backend.data_sources.cache import PROGRAMS_CATALOG_FULL_AT
 from backend.data_sources.llm_grouper import GeminiGrouper, LLMGroupingError
 from backend.data_sources.models import Program, RequirementGroup
 from backend.data_sources.programs.client import ProgramClient
@@ -54,6 +56,11 @@ bp = Blueprint("programs", __name__)
 
 _DEFAULT_PAGE_SIZE = 20
 _MAX_PAGE_SIZE = 100
+# Page cap for the one-time full-catalog pull below — same generous ceiling as
+# `refresh_cache.py`'s (the whole catalog needed ~14 pages as of 2026-07-08);
+# `ProgramClient.search` stops early at the first empty page and throttles
+# between pages, so the cap only bounds a runaway, it isn't the expected cost.
+_FULL_CATALOG_MAX_PAGES = 60
 
 # AS + 3-letter type prefix + 3-4 digit subject + optional stream letter, e.g.
 # "ASMAJ1305A" (see backend/data_sources/programs/client.py's own copy of this
@@ -109,7 +116,7 @@ def _program_json(program: Program) -> dict:
         "department": program.department,
         "departmentUrl": program.department_url,
         "enrolmentRequirements": program.enrolment_requirements,
-        "totalCredits": program.total_credits,
+        "totalCredits": effective_total_credits(program),
     }
 
 
@@ -133,7 +140,7 @@ def _requirement_group_json(group: RequirementGroup) -> dict:
 def _requirements_json(program: Program) -> dict:
     return {
         "code": program.code,
-        "totalCredits": program.total_credits,
+        "totalCredits": effective_total_credits(program),
         # True once a course under any group carries per-course detail - only
         # the Gemini grouper populates `courses` (design/06: "Per-course
         # credits + notes only appear after LLM grouping").
@@ -160,6 +167,7 @@ def _enrolment_json(row: ProgramEnrolment) -> dict:
         "startSession": row.start_session,
         "programType": parsed[0] if parsed else "",
         "subject": parsed[1] if parsed else "",
+        "position": row.position,
         "addedAt": row.created_at.isoformat(),
     }
 
@@ -206,15 +214,39 @@ def search_programs():
 
     cache = get_course_cache()
     results = cache.search_programs(q, limit=500)
-    if not results and (q or program_type):
-        # Cache miss: pull live from the Academic Calendar (docs/conventions.md:
-        # cache aggressively) and seed the cache for next time.
+
+    # A "catalog browse" (no q, no type — e.g. onboarding loading the whole
+    # list to filter client-side) must see the FULL catalog. Until a full pull
+    # has completed (PROGRAMS_CATALOG_FULL_AT meta, normally set by
+    # backend/scripts/refresh_cache.py), the cache may hold only the handful
+    # of programs individual keyword searches happened to seed — so a browse
+    # self-heals with one full, page-throttled pull instead of trusting it.
+    is_browse = not q and not program_type
+    needs_full_pull = is_browse and cache.get_meta(PROGRAMS_CATALOG_FULL_AT) is None
+    if needs_full_pull or (not results and not is_browse):
         try:
-            results = ProgramClient().search(q, program_type)
+            if needs_full_pull:
+                fetched = ProgramClient().search(max_pages=_FULL_CATALOG_MAX_PAGES)
+            else:
+                # Keyword/type cache miss: pull live from the Academic Calendar
+                # (docs/conventions.md: cache aggressively) and seed the cache.
+                fetched = ProgramClient().search(q, program_type)
         except Exception as exc:  # noqa: BLE001 - degrade to a clean JSON error
-            return json_error(f"Program search failed: {exc}", 502)
-        if results:
-            cache.upsert_programs(results, _now_iso())
+            if not results:
+                return json_error(f"Program search failed: {exc}", 502)
+            # Partial cache beats a hard failure for a browse; say so in the log.
+            current_app.logger.warning(
+                "Full program-catalog pull failed (%s); serving %d cached program(s).",
+                exc,
+                len(results),
+            )
+            fetched = []
+        if fetched:
+            fetched_at = _now_iso()
+            cache.upsert_programs(fetched, fetched_at)
+            if needs_full_pull:
+                cache.set_meta(PROGRAMS_CATALOG_FULL_AT, fetched_at)
+            results = cache.search_programs(q, limit=500)
 
     if program_type:
         results = [p for p in results if p.program_type == program_type]
@@ -277,7 +309,11 @@ def reparse_requirements(code: str):
     try:
         result = _grouper().group(program.raw_completion_text)
     except LLMGroupingError as exc:
-        return json_error(f"Requirement re-parsing failed: {exc}", 502)
+        # `exc.status_code` distinguishes a server misconfiguration (503, e.g.
+        # no GEMINI_API_KEY) from an actual Gemini-side failure (502) -- the
+        # frontend surfaces `str(exc)` verbatim, so keep these messages
+        # distinct and actionable (see llm_grouper.py's exception hierarchy).
+        return json_error(str(exc), getattr(exc, "status_code", 502))
 
     program = replace(
         program,
@@ -361,7 +397,7 @@ def list_my_programs():
     rows = (
         db.query(ProgramEnrolment)
         .filter_by(user_id=current_user().id)
-        .order_by(ProgramEnrolment.created_at)
+        .order_by(ProgramEnrolment.position, ProgramEnrolment.created_at)
         .all()
     )
     return jsonify(
@@ -419,7 +455,11 @@ def add_my_program():
     start_session = (data.get("startSession") or "").strip() or None
 
     row = ProgramEnrolment(
-        user_id=user.id, program_code=code, program_title=title, start_session=start_session
+        user_id=user.id,
+        program_code=code,
+        program_title=title,
+        start_session=start_session,
+        position=len(existing),
     )
     db.add(row)
     try:
@@ -453,3 +493,34 @@ def remove_my_program(code: str):
 
     remaining = db.query(ProgramEnrolment).filter_by(user_id=user.id).all()
     return jsonify({"ok": True, "combination": _combination_status(remaining)})
+
+
+@bp.route("/api/me/programs/order", methods=["PUT"])
+@require_auth
+def reorder_my_programs():
+    """Persist "My programs" display order (design/02-user-flows.md: "reorder
+    priority"). Body: `{"codes": [...]}` — every enrolled program code, in the
+    student's desired order. Rejects a mismatched set (missing/unknown/duplicate
+    codes) with 422 rather than silently reordering a subset, since a partial
+    write would leave `position` values ambiguous relative to the omitted rows.
+    """
+    data = request.get_json(silent=True) or {}
+    codes = data.get("codes")
+    if not isinstance(codes, list) or not all(isinstance(c, str) for c in codes):
+        return json_error("codes must be a list of program codes.", 422)
+    codes = [c.strip().upper() for c in codes]
+
+    db = db_session()
+    user = current_user()
+    rows = db.query(ProgramEnrolment).filter_by(user_id=user.id).all()
+    by_code = {row.program_code: row for row in rows}
+
+    if len(codes) != len(set(codes)) or set(codes) != set(by_code):
+        return json_error("codes must match your enrolled programs exactly, with no duplicates.", 422)
+
+    for index, code in enumerate(codes):
+        by_code[code].position = index
+    db.commit()
+
+    ordered = sorted(rows, key=lambda r: r.position)
+    return jsonify({"programs": [_enrolment_json(r) for r in ordered]})

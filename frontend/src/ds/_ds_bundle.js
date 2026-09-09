@@ -859,7 +859,7 @@ function SectionRow({
       color: 'var(--text-secondary)',
       minWidth: 90
     }
-  }, (s.instructors || []).map(i => i.last).join(', ') || '—'), /*#__PURE__*/React.createElement(__ds_scope.SeatMeter, {
+  }, (s.instructors || []).map(i => i.last).join(', ') || 'TBA'), /*#__PURE__*/React.createElement(__ds_scope.SeatMeter, {
     current: s.currentEnrol,
     max: s.maxEnrol,
     waitlist: s.waitlist
@@ -1733,6 +1733,7 @@ function CourseCard({
   title,
   credit,
   breadth = [],
+  countsToward,
   fall,
   winter,
   status,
@@ -1791,7 +1792,9 @@ function CourseCard({
       fontSize: 'var(--text-code)',
       fontWeight: 'var(--weight-medium)',
       color: 'var(--accent)',
-      letterSpacing: 'var(--tracking-code)'
+      letterSpacing: 'var(--tracking-code)',
+      whiteSpace: 'nowrap',
+      flexShrink: 0
     }
   }, code);
   const creditEl = credit != null && /*#__PURE__*/React.createElement("span", {
@@ -1799,79 +1802,55 @@ function CourseCard({
       fontFamily: 'var(--font-mono)',
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-tertiary)',
-      fontVariantNumeric: 'tabular-nums'
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      flexShrink: 0
     }
   }, fmtCredit(credit));
   if (compact) {
+    const grip = draggable && /*#__PURE__*/React.createElement("i", {
+      "data-lucide": "grip-vertical",
+      style: { width: 16, height: 16, color: 'var(--text-tertiary)', flexShrink: 0 }
+    });
+    const chips = breadth.map(b => /*#__PURE__*/React.createElement(__ds_scope.Chip, { key: b, breadth: b, dot: true }, b));
+    const statusIcon = st && /*#__PURE__*/React.createElement("i", {
+      "data-lucide": st.icon,
+      title: st.label,
+      style: { width: 16, height: 16, color: st.color }
+    });
+    const addBtn = onAdd && /*#__PURE__*/React.createElement("button", {
+      onClick: onAdd, "aria-label": "Add", style: ghostIcon
+    }, /*#__PURE__*/React.createElement("i", { "data-lucide": "plus", style: { width: 16, height: 16 } }));
+    const detailsBtn = onDetails && /*#__PURE__*/React.createElement("button", {
+      onClick: onDetails, "aria-label": "Details", style: ghostIcon
+    }, /*#__PURE__*/React.createElement("i", { "data-lucide": "chevron-right", style: { width: 16, height: 16 } }));
+    const titleEl = /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 'var(--text-body)', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+    }, title);
+    // Stacked layout (used in the narrow plan rail): code + breadth + credit on
+    // the top row, then the course title on its own full-width line, then an
+    // optional "Counts toward ..." line. The title always renders -- the
+    // counts-toward line is appended only when present, it never gates the
+    // layout -- so every card shows its name regardless of requirement mapping.
     return /*#__PURE__*/React.createElement("div", {
       draggable: draggable,
       onDragStart: onDragStart,
       style: {
         display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '12px 16px',
+        flexDirection: 'column',
+        gap: 5,
+        padding: '10px 12px',
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
         fontFamily: 'var(--font-sans)',
         cursor: draggable ? 'grab' : 'default'
       }
-    }, draggable && /*#__PURE__*/React.createElement("i", {
-      "data-lucide": "grip-vertical",
-      style: {
-        width: 16,
-        height: 16,
-        color: 'var(--text-tertiary)',
-        flexShrink: 0
-      }
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        minWidth: 96
-      }
-    }, codeEl), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1,
-        minWidth: 0,
-        fontSize: 'var(--text-body)',
-        color: 'var(--text)',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap'
-      }
-    }, title), breadth.map(b => /*#__PURE__*/React.createElement(__ds_scope.Chip, {
-      key: b,
-      breadth: b,
-      dot: true
-    }, b)), creditEl, st && /*#__PURE__*/React.createElement("i", {
-      "data-lucide": st.icon,
-      title: st.label,
-      style: {
-        width: 16,
-        height: 16,
-        color: st.color
-      }
-    }), onAdd && /*#__PURE__*/React.createElement("button", {
-      onClick: onAdd,
-      "aria-label": "Add",
-      style: ghostIcon
-    }, /*#__PURE__*/React.createElement("i", {
-      "data-lucide": "plus",
-      style: {
-        width: 16,
-        height: 16
-      }
-    })), onDetails && /*#__PURE__*/React.createElement("button", {
-      onClick: onDetails,
-      "aria-label": "Details",
-      style: ghostIcon
-    }, /*#__PURE__*/React.createElement("i", {
-      "data-lucide": "chevron-right",
-      style: {
-        width: 16,
-        height: 16
-      }
-    })));
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }
+    }, grip, codeEl, chips, /*#__PURE__*/React.createElement("span", { style: { flex: 1, minWidth: 4 } }), creditEl, statusIcon, addBtn, detailsBtn), titleEl, countsToward && /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 'var(--text-caption)', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+    }, "Counts toward ", countsToward));
   }
   return /*#__PURE__*/React.createElement("div", {
     draggable: draggable,
@@ -1905,7 +1884,13 @@ function CourseCard({
       marginTop: 2,
       lineHeight: 'var(--leading-heading)'
     }
-  }, title)), st && /*#__PURE__*/React.createElement("span", {
+  }, title), countsToward && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-body-sm)',
+      color: 'var(--accent)',
+      marginTop: 4
+    }
+  }, "Counts toward ", countsToward)), st && /*#__PURE__*/React.createElement("span", {
     style: {
       display: 'inline-flex',
       alignItems: 'center',
@@ -2455,7 +2440,19 @@ function Checkbox({
   onChange,
   disabled = false
 }) {
+  const toggle = () => !disabled && onChange && onChange(!checked);
   return /*#__PURE__*/React.createElement("label", {
+    role: 'checkbox',
+    'aria-checked': checked,
+    'aria-disabled': disabled,
+    tabIndex: disabled ? -1 : 0,
+    onClick: toggle,
+    onKeyDown: (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        toggle();
+      }
+    },
     style: {
       display: 'inline-flex',
       alignItems: 'center',
@@ -2465,7 +2462,6 @@ function Checkbox({
       opacity: disabled ? 0.5 : 1
     }
   }, /*#__PURE__*/React.createElement("span", {
-    onClick: () => !disabled && onChange && onChange(!checked),
     style: {
       width: 18,
       height: 18,
@@ -2497,18 +2493,40 @@ Object.assign(__ds_scope, { Checkbox });
 
 // components/forms/Combobox.jsx
 try { (() => {
-/** Searchable single-select dropdown. Options filter as you type. */
+/** Searchable single-select dropdown. Options filter as you type.
+ *
+ * Options may optionally carry a `group` name; when any do, matches render
+ * under section headers ordered by `groupOrder` (leftover groups follow in
+ * first-seen order). One group named by `collapsedGroup` starts collapsed
+ * behind a toggle header — but auto-expands while the user is typing a
+ * query, so searching never hides matches. Ungrouped usage is unchanged. */
 function Combobox({
   label,
   options = [],
   value,
   onChange,
   placeholder = 'Select…',
-  clearable
+  clearable,
+  groupOrder,
+  collapsedGroup,
+  // Opt-in async/search behaviour (used by the course pickers). When
+  // `searchToReveal` is set, an empty query shows `emptyHint` instead of
+  // dumping every option alphabetically -- large catalogs (thousands of
+  // courses) have no useful "browse from A" default. `onQueryChange` lets a
+  // parent drive `options` from a server search as the user types, and
+  // `loading` shows a searching state while that request is in flight. Left
+  // unset, the component behaves exactly as before (browse-all, client-side
+  // filter) -- so grouped pickers like the program selector are unaffected.
+  onQueryChange,
+  loading = false,
+  searchToReveal = false,
+  emptyHint = 'Type to search.'
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
+  const [showCollapsed, setShowCollapsed] = React.useState(false);
   const ref = React.useRef(null);
+  const triggerRef = React.useRef(null);
   React.useEffect(() => {
     const onDoc = e => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
@@ -2516,10 +2534,51 @@ function Combobox({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
+  React.useEffect(() => {
+    if (!open) setShowCollapsed(false);
+  }, [open]);
+  // Surface query changes to a parent that wants to drive options via a
+  // server search. Intentionally keyed on `query` only (not the callback
+  // identity) so a fresh inline handler each render doesn't re-fire it.
+  React.useEffect(() => {
+    if (onQueryChange) onQueryChange(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
   const selected = options.find(o => o.value === value);
+  // When the parent already server-filtered by `query`, this client filter is
+  // a harmless no-op (labels contain the query); when browsing locally it does
+  // the filtering. `revealEmpty` gates the arbitrary alphabetical dump.
+  const revealEmpty = searchToReveal && !query.trim();
   const filtered = options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()));
+  let sections = null;
+  if (filtered.some(o => o.group)) {
+    const byGroup = new Map();
+    for (const o of filtered) {
+      const g = o.group || '';
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(o);
+    }
+    const preferred = (groupOrder || []).filter(g => byGroup.has(g));
+    const rest = Array.from(byGroup.keys()).filter(g => !preferred.includes(g));
+    sections = preferred.concat(rest).map(g => ({
+      name: g,
+      options: byGroup.get(g),
+      collapsible: g === collapsedGroup,
+      collapsed: g === collapsedGroup && !showCollapsed && !query.trim()
+    }));
+  }
   return /*#__PURE__*/React.createElement("label", {
     ref: ref,
+    onKeyDown: e => {
+      if (e.key === 'Escape' && open) {
+        // Keep the Escape from also dismissing any enclosing modal/sheet.
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+        setQuery('');
+        triggerRef.current && triggerRef.current.focus();
+      }
+    },
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -2536,6 +2595,7 @@ function Combobox({
     }
   }, label), /*#__PURE__*/React.createElement("button", {
     type: "button",
+    ref: triggerRef,
     onClick: () => setOpen(o => !o),
     style: {
       display: 'flex',
@@ -2602,7 +2662,7 @@ function Combobox({
     autoFocus: true,
     value: query,
     onChange: e => setQuery(e.target.value),
-    placeholder: "Search\u2026",
+    placeholder: searchToReveal ? "Type to search\u2026" : "Search\u2026",
     style: {
       width: '100%',
       boxSizing: 'border-box',
@@ -2613,40 +2673,89 @@ function Combobox({
       fontSize: 'var(--text-body-sm)',
       outline: 'none'
     }
-  })), filtered.map(o => /*#__PURE__*/React.createElement("div", {
-    key: o.value,
-    onClick: () => {
-      onChange && onChange(o.value);
-      setOpen(false);
-      setQuery('');
-    },
+  })), revealEmpty ? /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: '9px 12px',
-      cursor: 'pointer',
-      fontSize: 'var(--text-body)',
+      padding: '12px',
+      color: 'var(--text-tertiary)',
+      fontSize: 'var(--text-body-sm)'
+    }
+  }, emptyHint) : (() => {
+    const renderOption = o => /*#__PURE__*/React.createElement("div", {
+      key: o.value,
+      onClick: () => {
+        onChange && onChange(o.value);
+        setOpen(false);
+        setQuery('');
+      },
+      style: {
+        padding: '9px 12px',
+        cursor: 'pointer',
+        fontSize: 'var(--text-body)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        background: o.value === value ? 'var(--primary-bg)' : 'transparent',
+        color: o.value === value ? 'var(--primary)' : 'var(--text)'
+      },
+      onMouseEnter: e => {
+        if (o.value !== value) e.currentTarget.style.background = 'var(--surface-hover)';
+      },
+      onMouseLeave: e => {
+        if (o.value !== value) e.currentTarget.style.background = 'transparent';
+      }
+    }, o.value === value && /*#__PURE__*/React.createElement("i", {
+      "data-lucide": "check",
+      style: {
+        width: 14,
+        height: 14
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: o.value === value ? 0 : 22
+      }
+    }, o.label));
+    if (!sections) return filtered.map(renderOption);
+    const headerStyle = {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      background: o.value === value ? 'var(--primary-bg)' : 'transparent',
-      color: o.value === value ? 'var(--primary)' : 'var(--text)'
-    },
-    onMouseEnter: e => {
-      if (o.value !== value) e.currentTarget.style.background = 'var(--surface-hover)';
-    },
-    onMouseLeave: e => {
-      if (o.value !== value) e.currentTarget.style.background = 'transparent';
-    }
-  }, o.value === value && /*#__PURE__*/React.createElement("i", {
-    "data-lucide": "check",
+      justifyContent: 'space-between',
+      width: '100%',
+      boxSizing: 'border-box',
+      padding: '8px 12px 4px',
+      fontFamily: 'var(--font-sans)',
+      fontSize: 'var(--text-body-sm)',
+      fontWeight: 'var(--weight-medium)',
+      color: 'var(--text-tertiary)',
+      textAlign: 'left'
+    };
+    return sections.map(section => /*#__PURE__*/React.createElement("div", {
+      key: section.name
+    }, section.collapsible ? /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      "aria-expanded": !section.collapsed,
+      onClick: () => setShowCollapsed(s => !s),
+      style: {
+        ...headerStyle,
+        background: 'transparent',
+        border: 'none',
+        cursor: 'pointer'
+      }
+    }, `${section.name} (${section.options.length})`, /*#__PURE__*/React.createElement("i", {
+      "data-lucide": section.collapsed ? 'chevron-down' : 'chevron-up',
+      style: {
+        width: 14,
+        height: 14
+      }
+    })) : /*#__PURE__*/React.createElement("div", {
+      style: headerStyle
+    }, `${section.name} (${section.options.length})`), !section.collapsed && section.options.map(renderOption)));
+  })(), !revealEmpty && loading && /*#__PURE__*/React.createElement("div", {
     style: {
-      width: 14,
-      height: 14
+      padding: '12px',
+      color: 'var(--text-tertiary)',
+      fontSize: 'var(--text-body-sm)'
     }
-  }), /*#__PURE__*/React.createElement("span", {
-    style: {
-      marginLeft: o.value === value ? 0 : 22
-    }
-  }, o.label))), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Searching…"), !revealEmpty && !loading && filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '12px',
       color: 'var(--text-tertiary)',
@@ -2744,16 +2853,25 @@ function Input({
       display: 'flex',
       alignItems: 'center'
     }
-  }, icon && /*#__PURE__*/React.createElement("i", {
-    "data-lucide": icon,
+  }, icon && /*#__PURE__*/React.createElement("span", {
     style: {
       position: 'absolute',
       left: 10,
       width: 16,
       height: 16,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      pointerEvents: 'none'
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    "data-lucide": icon,
+    style: {
+      width: 16,
+      height: 16,
       color: 'var(--text-muted)'
     }
-  }), /*#__PURE__*/React.createElement("input", {
+  })), /*#__PURE__*/React.createElement("input", {
     type: type,
     placeholder: placeholder,
     value: value,
@@ -3390,6 +3508,8 @@ const DEFAULT_ITEMS = [{
   label: 'Dashboard',
   icon: 'layout-dashboard'
 }, {
+  section: 'Academics'
+}, {
   key: 'programs',
   label: 'Programs',
   icon: 'graduation-cap'
@@ -3425,20 +3545,28 @@ const DEFAULT_ITEMS = [{
   icon: 'circle-help'
 }];
 
-/** Left navigation rail. Collapses to an icon-only rail when `collapsed`. */
+/**
+ * Persistent dark navigation rail — the modernized-ACORN institutional sidebar.
+ * A deep-navy anchor holding the brand at top and the primary nav below; the
+ * active item is marked by a single teal left accent bar. Collapses to an
+ * icon-only rail when `collapsed`. `brand` is a node, or a `(collapsed) => node`
+ * render function so the mark can shrink to a glyph when the rail collapses.
+ */
 function SideNav({
   items = DEFAULT_ITEMS,
   active,
   onNavigate,
-  collapsed = false
+  collapsed = false,
+  brand
 }) {
+  const brandNode = typeof brand === 'function' ? brand(collapsed) : brand;
   return /*#__PURE__*/React.createElement("nav", {
     style: {
       gridArea: 'nav',
-      background: 'var(--surface)',
-      borderRight: '1px solid var(--border)',
-      width: collapsed ? 64 : 224,
-      padding: '12px 10px',
+      background: 'var(--sidebar-bg)',
+      borderRight: '1px solid var(--sidebar-border)',
+      width: collapsed ? 68 : 244,
+      padding: '0 0 12px',
       boxSizing: 'border-box',
       display: 'flex',
       flexDirection: 'column',
@@ -3446,18 +3574,56 @@ function SideNav({
       overflowY: 'auto',
       transition: 'width var(--duration-base) var(--ease-standard)'
     }
+  }, brandNode && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: collapsed ? 'center' : 'flex-start',
+      height: 60,
+      padding: collapsed ? '0' : '0 20px',
+      marginBottom: 8,
+      borderBottom: '1px solid var(--sidebar-border)',
+      flexShrink: 0
+    }
+  }, brandNode), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: brandNode ? '0 12px' : '12px 12px 0',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 2
+    }
   }, items.map((item, i) => {
     if (item.divider) return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
         height: 1,
-        background: 'var(--border)',
-        margin: '10px 6px'
+        background: 'var(--sidebar-border)',
+        margin: '12px 8px'
       }
     });
+    if (item.section) return collapsed ? /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        height: 1,
+        background: 'var(--sidebar-border)',
+        margin: '12px 8px'
+      }
+    }) : /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        fontSize: 'var(--text-overline)',
+        fontWeight: 'var(--weight-semibold)',
+        letterSpacing: 'var(--tracking-overline)',
+        textTransform: 'uppercase',
+        color: 'var(--sidebar-text-muted)',
+        padding: '16px 12px 6px',
+        userSelect: 'none'
+      }
+    }, item.section);
     const isActive = item.key === active;
     return /*#__PURE__*/React.createElement("button", {
       key: item.key,
+      className: 'dc-sidenav-item' + (isActive ? ' is-active' : ''),
       onClick: () => onNavigate && onNavigate(item.key),
       title: collapsed ? item.label : undefined,
       "aria-current": isActive ? 'page' : undefined,
@@ -3466,15 +3632,15 @@ function SideNav({
         alignItems: 'center',
         gap: 12,
         width: '100%',
-        padding: collapsed ? '10px' : '10px 12px',
+        padding: collapsed ? '10px' : '9px 12px',
         justifyContent: collapsed ? 'center' : 'flex-start',
         borderRadius: 'var(--radius-md)',
         border: 'none',
         cursor: 'pointer',
-        background: isActive ? 'var(--primary-bg)' : 'transparent',
-        color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
+        background: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
+        color: isActive ? 'var(--sidebar-text)' : 'var(--sidebar-text-muted)',
         fontFamily: 'var(--font-sans)',
-        fontSize: 'var(--text-body)',
+        fontSize: 'var(--text-body-sm)',
         fontWeight: isActive ? 'var(--weight-semibold)' : 'var(--weight-regular)',
         position: 'relative',
         boxSizing: 'border-box'
@@ -3482,19 +3648,20 @@ function SideNav({
     }, isActive && !collapsed && /*#__PURE__*/React.createElement("span", {
       style: {
         position: 'absolute',
-        left: 0,
-        top: 8,
-        bottom: 8,
+        left: -12,
+        top: 6,
+        bottom: 6,
         width: 3,
-        borderRadius: 3,
-        background: 'var(--primary)'
+        borderRadius: '0 2px 2px 0',
+        background: 'var(--sidebar-accent)'
       }
     }), /*#__PURE__*/React.createElement("i", {
       "data-lucide": item.icon,
       style: {
-        width: 20,
-        height: 20,
-        flexShrink: 0
+        width: 19,
+        height: 19,
+        flexShrink: 0,
+        color: isActive ? 'var(--sidebar-accent)' : 'currentColor'
       }
     }), !collapsed && /*#__PURE__*/React.createElement("span", null, item.label), !collapsed && item.badge != null && /*#__PURE__*/React.createElement("span", {
       style: {
@@ -3512,7 +3679,7 @@ function SideNav({
         justifyContent: 'center'
       }
     }, item.badge));
-  }));
+  })));
 }
 Object.assign(__ds_scope, { SideNav });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/layout/SideNav.jsx", error: String((e && e.message) || e) }); }
@@ -3673,7 +3840,7 @@ function TopBar({
       display: 'flex',
       alignItems: 'center',
       gap: 16,
-      background: 'var(--primary)',
+      background: 'var(--topbar-bg)',
       height: 60,
       padding: '0 16px',
       boxSizing: 'border-box'
@@ -3729,7 +3896,7 @@ function TopBar({
       fontFamily: 'var(--font-mono)',
       fontSize: 11,
       padding: '2px 6px',
-      borderRadius: 6,
+      borderRadius: 'var(--radius-sm)',
       background: 'rgba(255,255,255,0.14)',
       border: '1px solid rgba(255,255,255,0.2)'
     }
@@ -4106,8 +4273,8 @@ function ImportPanel({
     active: tab,
     onChange: onTab
   }), tab === 'pdf' && /*#__PURE__*/React.createElement(__ds_scope.Dropzone, {
-    label: "Drop your Degree Explorer PDF here",
-    hint: "or click to browse \xB7 parsed locally & encrypted",
+    label: "Drop your Academic History PDF here",
+    hint: "from ACORN \xB7 parsed locally & encrypted",
     accept: "application/pdf",
     onFile: onFile,
     progress: progress
@@ -4152,7 +4319,7 @@ function ImportPanel({
       color: 'var(--text-secondary)',
       textAlign: 'center'
     }
-  }, "Start with an empty record \u2014 add programs and courses by hand."), preview);
+  }, "Start with an empty record. Add programs and courses by hand."), preview);
 }
 
 /** Detected-programs + transcript-diff preview shown before applying an import. */
@@ -4971,7 +5138,13 @@ function CourseRail({
   onQuery,
   onlyRemaining = false,
   onToggleRemaining,
-  onDragCourse
+  onDragCourse,
+  loading = false,
+  onlyRemainingDisabled = false,
+  onlyRemainingHint,
+  emptyMessage = 'No matching courses.',
+  helperText,
+  countLabel
 }) {
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5004,7 +5177,7 @@ function CourseRail({
     style: {
       width: '100%',
       boxSizing: 'border-box',
-      padding: '9px 12px 9px 32px',
+      padding: '9px 32px 9px 32px',
       border: '1px solid var(--border)',
       borderRadius: 'var(--radius-md)',
       fontFamily: 'var(--font-sans)',
@@ -5013,46 +5186,82 @@ function CourseRail({
       background: 'var(--surface)',
       color: 'var(--text)'
     }
-  })), /*#__PURE__*/React.createElement("label", {
+  }), loading && /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: 'absolute',
+      right: 10,
+      top: '50%',
+      transform: 'translateY(-50%)',
+      display: 'inline-flex'
+    }
+  }, /*#__PURE__*/React.createElement(__ds_scope.Spinner, {
+    size: 14,
+    color: 'var(--text-tertiary)'
+  }))), /*#__PURE__*/React.createElement("label", {
     style: {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
       fontSize: 'var(--text-body-sm)',
-      color: 'var(--text-secondary)',
-      cursor: 'pointer'
+      color: onlyRemainingDisabled ? 'var(--text-tertiary)' : 'var(--text-secondary)',
+      cursor: onlyRemainingDisabled ? 'not-allowed' : 'pointer'
     }
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: onlyRemaining,
+    disabled: onlyRemainingDisabled,
     onChange: e => onToggleRemaining && onToggleRemaining(e.target.checked)
-  }), "Only courses that fill a remaining requirement"), /*#__PURE__*/React.createElement("div", {
+  }), "Only show courses that count toward what I still need"), onlyRemainingDisabled && onlyRemainingHint && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-caption)',
+      color: 'var(--text-tertiary)',
+      marginTop: -6
+    }
+  }, onlyRemainingHint), (countLabel || helperText) && !loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-caption)',
+      color: 'var(--text-tertiary)'
+    }
+  }, countLabel, countLabel && helperText ? ' · ' : null, helperText), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
       gap: 8,
       overflowY: 'auto'
     }
-  }, courses.map(c => /*#__PURE__*/React.createElement(__ds_scope.CourseCard, {
+  }, loading ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+      color: 'var(--text-tertiary)',
+      fontSize: 'var(--text-body-sm)',
+      padding: '20px 4px'
+    }
+  }, /*#__PURE__*/React.createElement(__ds_scope.Spinner, {
+    size: 18
+  }), "Searching…") : courses.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-body-sm)',
+      color: 'var(--text-tertiary)',
+      padding: '12px 4px'
+    }
+  }, emptyMessage) : courses.map(c => /*#__PURE__*/React.createElement(__ds_scope.CourseCard, {
     key: c.code,
     compact: true,
     code: c.code,
     title: c.title,
     credit: c.credit,
     breadth: c.breadth,
+    countsToward: c.countsToward,
     status: c.status,
     draggable: true,
     onDragStart: e => {
       e.dataTransfer.setData('text/plain', c.code);
       onDragCourse && onDragCourse(c.code);
     }
-  })), courses.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 'var(--text-body-sm)',
-      color: 'var(--text-tertiary)',
-      padding: '12px 4px'
-    }
-  }, "No matching courses.")));
+  }))));
 }
 Object.assign(__ds_scope, { CourseRail });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/plan/CourseRail.jsx", error: String((e && e.message) || e) }); }
@@ -5085,6 +5294,7 @@ function PlanCourseCard({
   status = 'planned',
   issues = [],
   satisfies = [],
+  countsToward,
   draggable = true,
   onDragStart,
   onRemove,
@@ -5133,7 +5343,7 @@ function PlanCourseCard({
       fontSize: 'var(--text-caption)',
       color: 'var(--text-tertiary)'
     }
-  }, typeof credit === 'number' ? credit.toFixed(1) : credit)), /*#__PURE__*/React.createElement("div", {
+  }, typeof credit === 'number' ? credit.toFixed(1) + ' FCE' : credit)), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-secondary)',
@@ -5142,7 +5352,16 @@ function PlanCourseCard({
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
     }
-  }, title)), onRemove && /*#__PURE__*/React.createElement("i", {
+  }, title), countsToward && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 'var(--text-caption)',
+      color: 'var(--text-tertiary)',
+      marginTop: 3,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, "Counts toward ", countsToward)), onRemove && /*#__PURE__*/React.createElement("i", {
     "data-lucide": "x",
     onClick: e => {
       e.stopPropagation();
@@ -5181,13 +5400,10 @@ function PlanCourseCard({
         height: 12
       }
     }), t.label);
-  }), satisfies.map((s, i) => s.breadth ? /*#__PURE__*/React.createElement(__ds_scope.Chip, {
+  }), satisfies.filter(s => s.breadth).map((s, i) => /*#__PURE__*/React.createElement(__ds_scope.Chip, {
     key: i,
     breadth: s.breadth,
     dot: true
-  }, s.label) : /*#__PURE__*/React.createElement(__ds_scope.Chip, {
-    key: i,
-    tone: "success"
   }, s.label))));
 }
 Object.assign(__ds_scope, { PlanCourseCard });
@@ -5268,7 +5484,7 @@ function TermColumn({
       fontWeight: 'var(--weight-semibold)',
       color: 'var(--text)'
     }
-  }, season, " ", year), /*#__PURE__*/React.createElement("span", {
+  }, season, " ", year), credits > 0 ? /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 'auto',
       fontFamily: 'var(--font-mono)',
@@ -5276,7 +5492,14 @@ function TermColumn({
       color: 'var(--text-tertiary)',
       fontVariantNumeric: 'tabular-nums'
     }
-  }, credits.toFixed(1), " cr")), /*#__PURE__*/React.createElement("div", {
+  }, credits.toFixed(1), " credits") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 'auto',
+      fontFamily: 'var(--font-sans)',
+      fontSize: 'var(--text-body-sm)',
+      color: 'var(--text-tertiary)'
+    }
+  }, "No courses yet")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -5388,20 +5611,60 @@ Object.assign(__ds_scope, { PlanBoard });
 try { (() => {
 const KIND = {
   prereq: {
-    icon: 'triangle-alert',
-    color: 'var(--danger)'
+    icon: 'triangle-alert'
+  },
+  prerequisite: {
+    icon: 'triangle-alert'
+  },
+  corequisite: {
+    icon: 'triangle-alert'
   },
   exclusion: {
-    icon: 'octagon-x',
-    color: 'var(--danger)'
+    icon: 'octagon-x'
   },
   'not-offered': {
-    icon: 'clock',
-    color: 'var(--warning)'
+    icon: 'clock'
+  },
+  offering: {
+    icon: 'clock'
+  },
+  unverified: {
+    icon: 'help-circle'
+  },
+  requirements_unparsed: {
+    icon: 'file-question'
+  },
+  'one-type-per-subject': {
+    icon: 'layers'
+  },
+  'distinct-credits': {
+    icon: 'layers'
   }
 };
 
-/** Collapsible list of all plan issues with jump-to links. */
+// severity -> banner/icon colour (Issue 4: warnings must read as warnings, not
+// errors \u2014 only an `error`-severity issue should ever paint this danger-red;
+// severity-only issues (e.g. backend's `requirements_unparsed`) get the
+// amber warning treatment instead).
+const SEVERITY = {
+  error: {
+    fg: 'var(--danger)',
+    bg: 'var(--danger-bg)'
+  },
+  warning: {
+    fg: 'var(--warning)',
+    bg: 'var(--warning-bg)'
+  },
+  info: {
+    fg: 'var(--info)',
+    bg: 'var(--info-bg)'
+  }
+};
+
+/** Collapsible list of all plan issues with jump-to links. Banner tone reflects
+ * the worst severity present \u2014 `error` only if at least one issue actually is
+ * one; a plan with only `warning`/`info` issues (e.g. unparsed requirements)
+ * reads as a warning, never the green "validates" state and never red. */
 function ValidationSummary({
   issues = [],
   onJump,
@@ -5425,12 +5688,16 @@ function ValidationSummary({
         width: 16,
         height: 16
       }
-    }), "No issues \u2014 plan validates");
+    }), "Your plan looks good.");
   }
+  const hasError = issues.some(iss => (iss.severity || 'error') === 'error');
+  const worst = hasError ? SEVERITY.error : SEVERITY.warning;
+  const warningCount = issues.length - issues.filter(iss => (iss.severity || 'error') === 'error').length;
+  const headerLabel = hasError ? `${issues.length} thing${issues.length === 1 ? '' : 's'} to fix before this plan works` : warningCount === 1 ? "Your plan works, but there's one thing worth a look" : `Your plan works, but there are ${warningCount} things worth a look`;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'var(--surface)',
-      border: '1px solid var(--danger)',
+      border: `1px solid ${worst.fg}`,
       borderRadius: 'var(--radius-md)',
       fontFamily: 'var(--font-sans)',
       overflow: 'hidden'
@@ -5443,7 +5710,7 @@ function ValidationSummary({
       gap: 8,
       width: '100%',
       padding: '12px 14px',
-      background: 'var(--danger-bg)',
+      background: worst.bg,
       border: 'none',
       cursor: 'pointer',
       textAlign: 'left'
@@ -5453,14 +5720,14 @@ function ValidationSummary({
     style: {
       width: 16,
       height: 16,
-      color: 'var(--danger)'
+      color: worst.fg
     }
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 'var(--weight-semibold)',
       color: 'var(--text)'
     }
-  }, issues.length, " issue", issues.length > 1 ? 's' : ''), /*#__PURE__*/React.createElement("i", {
+  }, headerLabel), /*#__PURE__*/React.createElement("i", {
     "data-lucide": open ? 'chevron-up' : 'chevron-down',
     style: {
       width: 16,
@@ -5470,6 +5737,7 @@ function ValidationSummary({
     }
   })), open && /*#__PURE__*/React.createElement("div", null, issues.map((iss, i) => {
     const k = KIND[iss.kind] || KIND.prereq;
+    const sev = SEVERITY[iss.severity || 'error'] || SEVERITY.error;
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       onClick: () => onJump && onJump(iss),
@@ -5486,7 +5754,7 @@ function ValidationSummary({
       style: {
         width: 15,
         height: 15,
-        color: k.color,
+        color: sev.fg,
         flexShrink: 0,
         marginTop: 2
       }
@@ -6226,6 +6494,16 @@ const TYPE = {
     label: 'Minor',
     color: 'var(--accent)',
     bg: 'var(--info-bg)'
+  },
+  focus: {
+    label: 'Focus',
+    color: 'var(--br2)',
+    bg: 'var(--br2-bg)'
+  },
+  certificate: {
+    label: 'Certificate',
+    color: 'var(--br4)',
+    bg: 'var(--br4-bg)'
   }
 };
 
@@ -6363,7 +6641,9 @@ try { (() => {
 const TYPE_LABEL = {
   specialist: 'Specialist',
   major: 'Major',
-  minor: 'Minor'
+  minor: 'Minor',
+  focus: 'Focus',
+  certificate: 'Certificate'
 };
 
 /** Program detail hero: name, code, type, department, total credits, enrolment callout, ring, actions. */
@@ -6675,7 +6955,9 @@ function StatTile({
       boxShadow: 'var(--shadow-e1)',
       padding: '16px 18px',
       fontFamily: 'var(--font-sans)',
-      borderTop: accent ? `3px solid ${accent}` : '1px solid var(--border)'
+      // Modernized-ACORN: the highlight marker is a subtle LEFT accent bar
+      // (matching the summary-card treatment), never a coloured top border.
+      borderLeft: accent ? `3px solid ${accent}` : '1px solid var(--border)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7045,7 +7327,7 @@ function DegreeAudit({
       width: 15,
       height: 15
     }
-  }), "CGPA ", cgpa.toFixed(2), " ", cgpa >= 1.85 ? '≥ 1.85 (eligible to graduate)' : '— below 1.85 graduation minimum'));
+  }), "CGPA ", cgpa.toFixed(2), " ", cgpa >= 1.85 ? '≥ 1.85 (eligible to graduate)' : 'is below the 1.85 graduation minimum'));
 }
 Object.assign(__ds_scope, { DegreeAudit });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/requirements/DegreeAudit.jsx", error: String((e && e.message) || e) }); }
@@ -7262,7 +7544,13 @@ function RequirementProgressList({
       fontFamily: 'var(--font-sans)'
     }
   }, programs.map((p, i) => {
-    const pct = p.required ? Math.round(p.earned / p.required * 100) : 0;
+    // `programs = []` above only guards the array itself — an item missing
+    // `earned`/`required` (a partial/malformed API response reaching this far)
+    // must not throw ".toFixed of undefined" here, so each field gets its own
+    // fallback too.
+    const earned = p.earned ?? 0;
+    const required = p.required ?? 0;
+    const pct = required ? Math.round(earned / required * 100) : 0;
     return /*#__PURE__*/React.createElement("div", {
       key: p.code || i,
       style: {
@@ -7293,7 +7581,7 @@ function RequirementProgressList({
         fontSize: 'var(--text-body-sm)',
         color: 'var(--text-tertiary)'
       }
-    }, p.earned.toFixed(1), " / ", p.required.toFixed(1), " cr", p.incomplete != null ? ` · ${p.incomplete} incomplete` : '')), onView && /*#__PURE__*/React.createElement("button", {
+    }, earned.toFixed(1), " / ", required.toFixed(1), " cr", p.incomplete != null ? ` · ${p.incomplete} incomplete` : '')), onView && /*#__PURE__*/React.createElement("button", {
       onClick: () => onView(p),
       style: {
         display: 'inline-flex',
@@ -9779,7 +10067,7 @@ function ExploreScreen({
     style: {
       fontWeight: 'var(--weight-bold)'
     }
-  }, "Disclaimer:"), " Explore courses is a search tool for building a hypothetical timetable. It does not connect to ACORN \u2014 to actually enrol, use ACORN during your assigned enrolment window."), /*#__PURE__*/React.createElement("div", {
+  }, "Disclaimer:"), " Explore courses is a search tool for building a hypothetical timetable. It does not connect to ACORN. To actually enrol, use ACORN during your assigned enrolment window."), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 32,
       fontWeight: 'var(--weight-heavy)',
@@ -10049,7 +10337,7 @@ function RequirementsScreen({
       color: 'var(--text-secondary)',
       marginBottom: 20
     }
-  }, "Honours Bachelor of Science \u2014 Computer Science Specialist \xB7 ", totalDone.toFixed(1), " / ", totalNeeded.toFixed(1), " FCE complete"), /*#__PURE__*/React.createElement("div", {
+  }, "Honours Bachelor of Science, Computer Science Specialist \xB7 ", totalDone.toFixed(1), " / ", totalNeeded.toFixed(1), " FCE complete"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -10192,7 +10480,7 @@ function TimetableScreen({
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-muted)'
     }
-  }, "Nothing yet \u2014 add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
+  }, "Nothing yet. Add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
     key: c.code,
     style: {
       background: 'var(--surface-card)',
@@ -10293,7 +10581,7 @@ function TimetableVariantA({
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-muted)'
     }
-  }, "Nothing yet \u2014 add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
+  }, "Nothing yet. Add sections from Explore courses."), courses.map(c => /*#__PURE__*/React.createElement("div", {
     key: c.code,
     style: {
       background: 'var(--surface-card)',
@@ -10495,7 +10783,7 @@ function TimetableVariantB({
       fontSize: 'var(--text-body-sm)',
       color: 'var(--text-muted)'
     }
-  }, "Nothing yet \u2014 add sections from Explore courses.")));
+  }, "Nothing yet. Add sections from Explore courses.")));
 }
 window.TimetableVariantB = TimetableVariantB;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "ui_kits/planner/screens/TimetableVariantB.jsx", error: String((e && e.message) || e) }); }

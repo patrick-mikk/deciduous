@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom";
 
 import {
   PageHeader,
-  StatTile,
-  DegreeProgressCard,
   DegreeAudit,
   ProgramCard,
   BreadthTracker,
@@ -16,20 +14,22 @@ import {
   Skeleton,
   Callout,
 } from "@/ds";
-import { api } from "@/api";
+import { api, isAuthError } from "@/api";
 import type { Alert, BreadthData, BreadthEvaluation, DegreeAuditData, Program, StudentRecord, Summary } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 import "./Dashboard.css";
 
 /**
  * Dashboard (`/dashboard`) — the degree-audit home screen
  * (design/screens/02-dashboard-and-progress.md + design/09-uoft-degree-rules.md).
  *
- * "Where am I and what's next?": a StatTile KPI row (credits / CGPA / breadth /
- * standing), the DegreeProgressCard growth-tree hero, a hard-rule DegreeAudit
- * (one row per design/09 §1 rule), the student's enrolled ProgramCard list,
- * the full-width BreadthTracker, an alerts panel, and a derived next-actions
- * checklist. Composed entirely from src/ds (design system) + src/api (typed
- * client, falling back to the mock adapter when VITE_API_BASE is unset).
+ * "Where am I and what's next?": one teal-accented summary card holding a
+ * label-above-value KPI grid (degree progress / CGPA / breadth / standing) and
+ * the primary actions, a hard-rule DegreeAudit (one row per design/09 §1 rule),
+ * the student's enrolled ProgramCard list, the full-width BreadthTracker, an
+ * alerts panel, and a derived next-actions checklist. Composed entirely from
+ * src/ds (design system) + src/api (typed client, falling back to the mock
+ * adapter when VITE_API_BASE is unset).
  */
 
 interface DashboardData {
@@ -44,6 +44,9 @@ interface DashboardData {
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
+  /** Signed out: every `/api/me/*` call this screen makes 401s. Distinct from
+   * "error" so the user gets the sign-up nudge, not `API error 401: {...}`. */
+  | { status: "guest" }
   | { status: "ready"; data: DashboardData };
 
 interface ProgramRow {
@@ -75,19 +78,34 @@ const TONE_VAR: Record<"success" | "warning" | "danger", string> = {
   danger: "var(--danger)",
 };
 
+/** One cell of the summary card's label-above-value KPI grid (modernized-ACORN:
+ * a small uppercase muted label over a bold value). */
+function Kpi({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className="dc-dashboard__kpi">
+      <p className="dc-dashboard__kpi-label">{label}</p>
+      <p className="dc-dashboard__kpi-value" style={valueColor ? { color: valueColor } : undefined}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function buildProgramRows(record: StudentRecord, allPrograms: Program[]): ProgramRow[] {
   return record.programs.map((enrolled) => {
     const full = allPrograms.find((p) => p.code === enrolled.code);
-    const groups = record.requirementProgress[enrolled.code] ?? [];
-    const earned = groups.reduce((sum, g) => sum + g.earned, 0);
-    const total = full?.totalCredits ?? groups.reduce((sum, g) => sum + g.required, 0);
+    // Completion comes from the ONE authoritative source (`GET /api/me`'s
+    // `programs[]`, computed by `_audit.program_progress_summary`) — never
+    // recomputed here by summing per-group `earned` (that double-counts a
+    // course listed under both an umbrella group and its sub-group) or by
+    // reading a raw 0.0 `totalCredits`.
     return {
       code: enrolled.code,
       name: full?.title ?? enrolled.name,
       programType: full?.programType ?? "major",
       department: full?.department ?? "",
-      earned,
-      total,
+      earned: enrolled.earnedCredits,
+      total: enrolled.totalCredits,
     };
   });
 }
@@ -106,13 +124,13 @@ function buildNextActions(audit: DegreeAuditData, breadth: BreadthEvaluation, un
   if (!breadth.satisfied) {
     actions.push({
       id: "breadth",
-      label: `Pick a breadth course — ${breadth.remaining.toFixed(1)} credit(s) still needed`,
+      label: `Pick a breadth course: ${breadth.remaining.toFixed(1)} credit(s) still needed`,
     });
   }
   if (audit.topDesignator && audit.topDesignator.credits > 15.0) {
     actions.push({
       id: "same-subject-cap",
-      label: `Reduce ${audit.topDesignator.code} credits — over the 15.0 same-subject cap`,
+      label: `Reduce ${audit.topDesignator.code} credits: over the 15.0 same-subject cap`,
     });
   }
   if (audit.cgpa < 1.85) {
@@ -122,7 +140,7 @@ function buildNextActions(audit: DegreeAuditData, breadth: BreadthEvaluation, un
     actions.push({ id: "alerts", label: `Resolve ${unreadAlerts} unread alert${unreadAlerts > 1 ? "s" : ""}` });
   }
   if (actions.length === 0) {
-    actions.push({ id: "on-track", label: "You're on track — no outstanding actions" });
+    actions.push({ id: "on-track", label: "You're on track, no outstanding actions" });
   }
   return actions;
 }
@@ -130,18 +148,23 @@ function buildNextActions(audit: DegreeAuditData, breadth: BreadthEvaluation, un
 function DashboardSkeleton() {
   return (
     <>
-      <div className="dc-dashboard__stats">
-        {[0, 1, 2, 3].map((i) => (
-          <Card key={i} style={{ flex: 1, minWidth: 150 }}>
-            <Skeleton width="60%" height={12} style={{ marginBottom: 10 }} />
-            <Skeleton width="45%" height={26} />
-          </Card>
-        ))}
-      </div>
+      <Card style={{ borderLeft: "3px solid var(--accent)", marginBottom: "var(--space-6, 24px)" }}>
+        <div className="dc-dashboard__summary-grid">
+          {[0, 1, 2, 3].map((i) => (
+            <div className="dc-dashboard__kpi" key={i}>
+              <Skeleton width="60%" height={12} style={{ marginBottom: 10 }} />
+              <Skeleton width="45%" height={22} />
+            </div>
+          ))}
+        </div>
+      </Card>
       <div className="dc-dashboard__columns">
         <div className="dc-dashboard__left">
           <Card>
-            <Skeleton width={200} height={200} radius="50%" />
+            <Skeleton height={14} style={{ marginBottom: 14 }} />
+            <Skeleton height={14} style={{ marginBottom: 14 }} />
+            <Skeleton height={14} style={{ marginBottom: 14 }} />
+            <Skeleton height={14} />
           </Card>
           <Card>
             <Skeleton height={14} style={{ marginBottom: 14 }} />
@@ -176,7 +199,7 @@ export default function Dashboard() {
         api.getMyDegreeAudit(),
         api.getMyBreadth(),
         api.getMyRecord(),
-        api.getPrograms(),
+        api.getAllPrograms(),
         api.getMyAlerts(),
       ]);
       setAlerts(myAlerts);
@@ -192,6 +215,10 @@ export default function Dashboard() {
         },
       });
     } catch (err) {
+      if (isAuthError(err)) {
+        setState({ status: "guest" });
+        return;
+      }
       setState({
         status: "error",
         message: err instanceof Error ? err.message : "Failed to load the dashboard.",
@@ -229,6 +256,13 @@ export default function Dashboard() {
         >
           {state.message}
         </Callout>
+      )}
+
+      {state.status === "guest" && (
+        <GuestCallout title="Create an account to see your degree audit">
+          The dashboard reads your saved transcript and programs, so there's nothing to show while you're browsing as
+          a guest. You can still search courses and programs, and build a plan, without an account.
+        </GuestCallout>
       )}
 
       {state.status === "ready" && state.data.record.programs.length === 0 && state.data.record.transcript.length === 0 && (
@@ -282,42 +316,30 @@ function ReadyDashboard({
 
   return (
     <>
-      <div className="dc-dashboard__stats">
-        <StatTile
-          label="Credits"
-          value={`${summary.creditsEarned.toFixed(1)}/${summary.creditsTotal.toFixed(1)}`}
-          sub={`${Math.round(summary.degreePct)}% of degree`}
-          accent="var(--primary)"
-        />
-        <StatTile
-          label="CGPA"
-          value={audit.cgpa.toFixed(2)}
-          sub="Graduate minimum 1.85"
-          accent={TONE_VAR[audit.cgpa >= 1.85 ? "success" : "warning"]}
-        />
-        <StatTile
-          label="Breadth"
-          value={`${breadthEvaluation.fulls}/5`}
-          sub={breadthEvaluation.satisfied ? "Requirement satisfied" : `${breadthEvaluation.remaining.toFixed(1)} cr to go`}
-          accent={TONE_VAR[breadthEvaluation.satisfied ? "success" : "warning"]}
-        />
-        <StatTile label="Standing" value={standing.label} sub={`CGPA ${audit.cgpa.toFixed(2)}`} accent={TONE_VAR[standing.tone]} />
-      </div>
+      {/* The single highlighted summary card on this screen (modernized-ACORN:
+          one teal-left-accented card, not an accent on every tile). ACORN's
+          "label above value" density, consolidated into one clean KPI grid with
+          the primary actions — replacing the old four-tile row + tree hero. */}
+      <Card style={{ borderLeft: "3px solid var(--accent)", marginBottom: "var(--space-6, 24px)" }}>
+        <div className="dc-dashboard__summary-grid">
+          <Kpi
+            label="Degree progress"
+            value={`${summary.creditsEarned.toFixed(1)} / ${summary.creditsTotal.toFixed(1)} credits`}
+          />
+          <Kpi label="CGPA" value={audit.cgpa.toFixed(2)} />
+          <Kpi label="Breadth" value={`${breadthEvaluation.fulls} / 5 categories`} />
+          <Kpi label="Standing" value={standing.label} valueColor={TONE_VAR[standing.tone]} />
+        </div>
+        <div className="dc-dashboard__summary-actions">
+          <Button onClick={() => navigate("/plan")}>View plan</Button>
+          <Button variant="secondary" onClick={() => navigate("/requirements")}>
+            Requirements
+          </Button>
+        </div>
+      </Card>
 
       <div className="dc-dashboard__columns">
         <div className="dc-dashboard__left">
-          <Card>
-            <div className="dc-dashboard__hero">
-              <DegreeProgressCard
-                degreePct={summary.degreePct}
-                earned={audit.totalEarned}
-                requiredCredits={20}
-                onTrack={audit.cgpa >= 1.85 && breadthEvaluation.satisfied}
-                degreeName="Your degree"
-              />
-            </div>
-          </Card>
-
           <Card>
             <div className="dc-dashboard__section-title">
               <h2>Degree audit</h2>

@@ -359,7 +359,7 @@ export default function TimetableOptimize() {
       setGenerating(false);
       setCandidates(results);
       setActiveId(results[0]?.id ?? null);
-      if (results.length === 0) pushToast("warning", "No conflict-free combination found — try loosening your preferences.");
+      if (results.length === 0) pushToast("warning", "No conflict-free combination found. Try loosening your preferences.");
       else pushToast("success", `Generated ${results.length} conflict-free candidate${results.length === 1 ? "" : "s"}.`);
     }, 700);
   }
@@ -481,7 +481,7 @@ export default function TimetableOptimize() {
             {activeCandidate && (
               <div>
                 <div style={{ marginBottom: 8, fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
-                  Preview — candidate #{activeCandidate.id.split("-")[1]} · score {activeCandidate.score}
+                  Preview: candidate #{activeCandidate.id.split("-")[1]} · score {activeCandidate.score}
                 </div>
                 <div style={{ overflowX: "auto" }}>
                   <TimetableGrid startHour={8} endHour={22} blocks={previewBlocks} />

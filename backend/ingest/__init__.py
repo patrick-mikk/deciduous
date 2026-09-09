@@ -1,4 +1,4 @@
-"""Normalizers that turn a UofT Degree Explorer export into a `StudentRecordDraft`.
+"""Normalizers that turn a UofT Academic History PDF (from ACORN) into a `StudentRecordDraft`.
 
 See `backend/ingest/degree_explorer.py`. Everything here is pure (no I/O, no
 DB, no Flask) so it's unit-testable with synthetic fixtures; `backend/api/

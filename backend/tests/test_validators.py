@@ -323,6 +323,55 @@ def test_degree_credit_summary_same_subject_cap():
     assert summary.same_subject_over_cap["POL"] == 16.0
 
 
+# ------------------------------------------------- CourseRecord.is_artsci
+# Regression coverage for the "Total credits 10.5/20.0, ArtSci credits
+# 0.0/10.0" bug: an imported ACORN transcript row has no `distribution`
+# until something looks it up in the course cache, and the classification
+# must not silently default to non-ArtSci for lack of a cache hit.
+
+
+def test_is_artsci_prefers_real_distribution_data():
+    """Real Calendar/cache data always wins, in either direction."""
+    assert CourseRecord(code="POL208H1", credits=0.5, distribution=("Arts",)).is_artsci
+    assert CourseRecord(code="MAT135H1", credits=0.5, distribution=("Science",)).is_artsci
+    # A campus-"1" code whose real distribution data says otherwise (e.g. a
+    # professional-faculty cross-list) is NOT overridden by the fallback.
+    assert not CourseRecord(code="APS100H1", credits=0.5, distribution=("Engineering",)).is_artsci
+
+
+def test_is_artsci_falls_back_to_campus_digit_when_no_distribution_data():
+    """No cache hit (empty `distribution`) -- fall back to the course-code
+    campus digit. St. George ArtSci codes ("...H1"/"...Y1") default True;
+    other campuses / unparseable codes default False."""
+    assert CourseRecord(code="ECO101H1", credits=0.5, distribution=()).is_artsci
+    assert CourseRecord(code="POL208H1", credits=0.5, distribution=()).is_artsci
+    assert CourseRecord(code="ECO100Y1", credits=1.0, distribution=()).is_artsci
+    # UTM (3) / UTSC (5) campus digits -- not this app's ARTSC scope.
+    assert not CourseRecord(code="ECO101H3", credits=0.5, distribution=()).is_artsci
+    assert not CourseRecord(code="ECO101H5", credits=0.5, distribution=()).is_artsci
+    # Unparseable code -- no signal either way, default False.
+    assert not CourseRecord(code="NOT-A-CODE", credits=0.5, distribution=()).is_artsci
+
+
+def test_degree_credit_summary_total_at_least_artsci():
+    """Regression: total credits must never be LESS than ArtSci credits, and
+    a transcript that's entirely campus-"1" (St. George ArtSci) courses with
+    no cached distribution data must count in full toward ArtSci, not 0.0 --
+    the exact bug reported on the Requirements page (10.5/20.0 total vs.
+    0.0/10.0 ArtSci for an all-ArtSci student)."""
+    records = [
+        _completed("ECO101H1", 0.5),
+        _completed("ECO102H1", 0.5),
+        _completed("POL208H1", 0.5),
+        _completed("URB101Y1", 1.0),
+    ]
+    summary = validators.degree_credit_summary(records)
+    assert summary.total_credits == 2.5
+    assert summary.artsci_credits == summary.total_credits
+    assert summary.artsci_credits >= 0
+    assert summary.total_credits >= summary.artsci_credits
+
+
 def test_validate_degree_credits_reports_gaps_and_cap_violation():
     summary = validators.DegreeCreditSummary(
         total_credits=5.0,
@@ -423,6 +472,86 @@ def test_evaluate_program_combination_upper_level_minimums():
     pp = result.program_progress[0]
     assert not pp.meets_credit_target  # 1.0 earned < 6.0 target
     assert not pp.meets_upper_level_minimums  # 0 at 300+ < 2.0 required
+
+
+# ---------------------------------------------------------------------------
+# validators.py — unparsed-program exclusion + nonstandard combinations
+# (issue #2: 4 declared majors reporting a false "0.0 distinct credits")
+# ---------------------------------------------------------------------------
+
+
+def test_unparsed_program_excluded_from_distinct_credits_and_flagged():
+    """An enrolled program whose requirements never parsed (empty
+    course_codes with requirements_parsed=False) must NOT silently drop the
+    distinct-credits total to whatever the *other* programs contribute with
+    no explanation -- it must be excluded and reported, per issue #2."""
+    programs = [
+        ProgramRequirement(
+            code="ASMAJ1478",
+            program_type="major",
+            subject="1478",
+            total_credits=8.0,
+            title="Economics Major",
+            course_codes=frozenset(),  # never parsed
+            requirements_parsed=False,
+        ),
+        ProgramRequirement(
+            code="ASMAJ2660A",
+            program_type="major",
+            subject="2660",
+            total_credits=6.0,
+            title="Public Policy Major",
+            course_codes=frozenset({"PPG301H1", "PPG302H1"}),
+        ),
+        ProgramRequirement(
+            code="ASMAJ2001A",
+            program_type="major",
+            subject="2001",
+            total_credits=6.0,
+            title="Urban Studies Major",
+            course_codes=frozenset({"URB201H1"}),
+        ),
+    ]
+    records = [
+        _completed("ECO101H1", 0.5),
+        _completed("PPG301H1", 0.5),
+        _completed("PPG302H1", 0.5),
+        _completed("URB201H1", 0.5),
+    ]
+    result, issues = validators.evaluate_program_combination(programs, records)
+
+    assert result.unparsed_programs == ["ASMAJ1478"]
+    # Only the two PARSED programs' covered credits count -- ECO101H1 doesn't
+    # silently count as "0 shared credits", it's excluded from the math.
+    assert result.distinct_credits == 1.5  # PPG301H1 + PPG302H1 + URB201H1 only
+    unparsed_issues = [i for i in issues if i.code == "requirements-unparsed"]
+    assert len(unparsed_issues) == 1
+    assert unparsed_issues[0].course_code == "ASMAJ1478"
+    assert "Economics Major" in unparsed_issues[0].message
+    assert "not yet parsed" in unparsed_issues[0].message
+
+
+def test_four_majors_is_a_nonstandard_but_valid_combination():
+    """4 majors exceeds any standard shape (1 Specialist / 2 Majors / 1 Major
+    + 2 Minors), but 2 of the 4 already satisfy the 2-Major pattern -- this
+    must be recognized as valid + informational, not mis-flagged as an
+    invalid/incomplete combination (issue #2)."""
+    programs = [
+        ProgramRequirement(code="ASMAJ1478", program_type="major", subject="1478", total_credits=8.0),
+        ProgramRequirement(code="ASMAJ2001", program_type="major", subject="2001", total_credits=6.0),
+        ProgramRequirement(code="ASMAJ2660", program_type="major", subject="2660", total_credits=6.0),
+        ProgramRequirement(code="ASMAJ3001", program_type="major", subject="3001", total_credits=6.0),
+    ]
+    result, issues = validators.evaluate_program_combination(programs, [])
+
+    assert result.combo_type == "two_majors"
+    assert result.combo_valid
+    assert not any(i.code == "program-combination" for i in issues)  # not "invalid"
+    nonstandard = [i for i in issues if i.code == "program-combination-nonstandard"]
+    assert len(nonstandard) == 1
+    assert nonstandard[0].severity == "info"
+    assert "4 programs" in nonstandard[0].message
+    assert "2 of your 4 majors" in nonstandard[0].message
 
 
 # ---------------------------------------------------------------------------

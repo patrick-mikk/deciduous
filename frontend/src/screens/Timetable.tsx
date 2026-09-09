@@ -1,8 +1,9 @@
 import * as React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { api } from "@/api";
-import type { Course, SessionCode, StudentRecord } from "@/api";
+import { api, remainingRequirementMatches, countsTowardPhrase, isExcludedByTaken, isAuthError } from "@/api";
+import type { Course, Program, SessionCode, StudentRecord } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 import {
   Button,
   Callout,
@@ -44,6 +45,10 @@ import {
 // ---------------------------------------------------------------------------
 // Local types + client-side scenario storage
 // ---------------------------------------------------------------------------
+
+/** Stand-in record for a signed-out visitor — the board is client-local, so
+ * everything except tray seeding and suggestion ranking still works. */
+const EMPTY_RECORD: StudentRecord = { programs: [], transcript: [], requirementProgress: {}, cgpa: 0 };
 
 export interface ScenarioVM {
   id: string;
@@ -260,6 +265,9 @@ export default function Timetable() {
   // ---- Core data ----
   const [sessions, setSessions] = React.useState<SessionCode[]>([]);
   const [record, setRecord] = React.useState<StudentRecord | null>(null);
+  /** Signed out: `getMyRecord` 401'd, so the tray/suggestions have nothing to
+   * seed from. The board still works — see the loader below. */
+  const [isGuest, setIsGuest] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -276,9 +284,15 @@ export default function Timetable() {
   // ---- Add-course dialog ----
   const [addOpen, setAddOpen] = React.useState(false);
   const [addChoice, setAddChoice] = React.useState<string | null>(null);
+  // `/api/courses` is paged, so the dialog searches the server as the user
+  // types (driven by the Combobox query) instead of loading and client-side
+  // filtering a single alphabetical page -- which could neither default
+  // usefully nor reach a course past page one.
+  const [addQuery, setAddQuery] = React.useState("");
   const [catalog, setCatalog] = React.useState<Course[]>([]);
   const [catalogLoading, setCatalogLoading] = React.useState(false);
   const [catalogError, setCatalogError] = React.useState<string | null>(null);
+  const [catalogRetryKey, setCatalogRetryKey] = React.useState(0);
 
   // ---- Swap-section popover (click a grid block) ----
   const [swapCode, setSwapCode] = React.useState<string | null>(null);
@@ -297,7 +311,20 @@ export default function Timetable() {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([api.getSessions(), api.getMyRecord()])
+    // The board itself is entirely client-local (see this file's header note —
+    // `PUT /api/plan/:term/sections` was never wired up), so a signed-out
+    // visitor can genuinely use this screen. Only `getMyRecord` needs an
+    // account, and only to seed the tray and rank suggestions — so its 401 is
+    // handled separately from `getSessions` and degraded to an empty record
+    // instead of taking the whole timetable down with a raw error banner.
+    Promise.all([
+      api.getSessions(),
+      api.getMyRecord().catch((e: unknown) => {
+        if (!isAuthError(e)) throw e;
+        if (!cancelled) setIsGuest(true);
+        return EMPTY_RECORD;
+      }),
+    ])
       .then(([sess, rec]) => {
         if (cancelled) return;
         setSessions(sess);
@@ -313,6 +340,72 @@ export default function Timetable() {
       cancelled = true;
     };
   }, [reloadKey]);
+
+  // ---- Enrolled program requirements + ranked remaining suggestions --------
+  const [programDetails, setProgramDetails] = React.useState<Program[]>([]);
+  const [suggestionCourses, setSuggestionCourses] = React.useState<Course[]>([]);
+  React.useEffect(() => {
+    if (!record || record.programs.length === 0) {
+      setProgramDetails([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(record.programs.map((p) => api.getProgram(p.code).catch(() => null))).then((res) => {
+      if (!cancelled) setProgramDetails(res.filter((p): p is Program => p != null));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [record]);
+
+  // Completed/in-progress transcript codes -- "taken" for both requirement-line
+  // accounting (remainingMatches below) and exclusion filtering (the
+  // suggestion-fetch effect below).
+  const takenCodes = React.useMemo(() => {
+    if (!record) return new Set<string>();
+    return new Set(
+      record.transcript.filter((t) => t.status === "completed" || t.status === "in_progress").map((t) => t.code),
+    );
+  }, [record]);
+
+  const remainingMatches = React.useMemo(() => {
+    if (!record) return [];
+    return remainingRequirementMatches(programDetails, record.requirementProgress, takenCodes);
+  }, [record, programDetails, takenCodes]);
+
+  // Fetch details for the top suggestions so the "add a course" dialog can lead
+  // with courses that fill a remaining requirement (later narrowed to the ones
+  // actually offered in the selected term). Formal Calendar exclusions (e.g. a
+  // course excluded by an already-completed one) are dropped here too -- a hard
+  // rule, checked independently of the requirement-line satisfaction above.
+  React.useEffect(() => {
+    const top = remainingMatches.slice(0, 40).map((m) => m.code);
+    if (top.length === 0) {
+      setSuggestionCourses([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      top.map((code) =>
+        api
+          .getCourse(code)
+          .then((c) => [code, c] as const)
+          .catch(() => [code, null] as const),
+      ),
+    ).then((pairs) => {
+      if (cancelled) return;
+      const byCode = new Map(pairs);
+      setSuggestionCourses(
+        top
+          .map((code) => byCode.get(code))
+          .filter((c): c is Course => Boolean(c))
+          .filter((c) => !isExcludedByTaken(c.exclusions, takenCodes)),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [remainingMatches, takenCodes]);
 
   // ---- Load stored scenarios once ----
   React.useEffect(() => {
@@ -384,22 +477,43 @@ export default function Timetable() {
     };
   }, [scenario]);
 
-  // ---- Course catalog for the "add course" dialog (fetched lazily) ----
+  // ---- Debounced server search for the "add course" dialog ----
+  // Fires only while the dialog is open with a non-empty query; an empty query
+  // keeps the Combobox in its "type to search" state (no arbitrary first-page
+  // dump).
+  const addSearchId = React.useRef(0);
   React.useEffect(() => {
-    if (!addOpen || catalog.length > 0 || catalogLoading) return;
+    const q = addQuery.trim();
+    if (!addOpen) {
+      setCatalog([]);
+      setCatalogLoading(false);
+      return;
+    }
+    if (!q) {
+      // Selecting an option resets the Combobox query to empty; keep the last
+      // results so the chosen course's label still resolves in the trigger.
+      setCatalogLoading(false);
+      return;
+    }
+    const id = ++addSearchId.current;
     setCatalogLoading(true);
     setCatalogError(null);
-    api
-      .getCourses()
-      .then((cs) => {
-        setCatalog(cs);
-        setCatalogLoading(false);
-      })
-      .catch((e: unknown) => {
-        setCatalogError(e instanceof Error ? e.message : "Couldn't load the course catalog.");
-        setCatalogLoading(false);
-      });
-  }, [addOpen, catalog.length, catalogLoading]);
+    const t = window.setTimeout(() => {
+      api
+        .getCourses({ q })
+        .then((cs) => {
+          if (addSearchId.current !== id) return;
+          setCatalog(cs);
+          setCatalogLoading(false);
+        })
+        .catch((e: unknown) => {
+          if (addSearchId.current !== id) return;
+          setCatalogError(e instanceof Error ? e.message : "Couldn't search the course catalog.");
+          setCatalogLoading(false);
+        });
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [addOpen, addQuery, catalogRetryKey]);
 
   // ---- Mutators (scoped to the active scenario) ----
   function mutateScenario(fn: (s: ScenarioVM) => ScenarioVM) {
@@ -430,7 +544,7 @@ export default function Timetable() {
 
   function selectSection(code: string, method: string, name: string) {
     if (scenario?.locked[code]?.[method]) {
-      pushToast("warning", `${code} ${method} is locked — unlock it before changing sections.`);
+      pushToast("warning", `${code} ${method} is locked. Unlock it before changing sections.`);
       return;
     }
     mutateScenario((s) => ({ ...s, selected: { ...s.selected, [code]: { ...(s.selected[code] ?? {}), [method]: name } } }));
@@ -524,7 +638,7 @@ export default function Timetable() {
 
   function handleExport() {
     if (blocks.length === 0) {
-      pushToast("warning", "Nothing to export yet — add a course and pick sections first.");
+      pushToast("warning", "Nothing to export yet. Add a course and pick sections first.");
       return;
     }
     downloadText(`deciduous-${term}.ics`, "text/calendar", buildIcs(blocks, termLabel(term)));
@@ -554,14 +668,42 @@ export default function Timetable() {
   const gridBlocks = React.useMemo(() => blocks.map((b) => ({ ...b, room: b.building })), [blocks]);
   const conflicts = React.useMemo(() => conflictMessages(blocks), [blocks]);
 
+  const countsTowardByCode = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of remainingMatches) {
+      const phrase = countsTowardPhrase(m.programs);
+      if (phrase) map[m.code] = phrase;
+    }
+    return map;
+  }, [remainingMatches]);
+
+  // Default (nothing typed): lead with ranked remaining-requirement courses
+  // that are actually offered in this term. Typing switches to catalog search.
+  const addSuggesting = !addQuery.trim();
   const addOptions = React.useMemo(() => {
     if (!scenario || !term) return [];
     const season = seasonOf(term);
-    return catalog
-      .filter((c) => !scenario.courseCodes.includes(c.code))
-      .filter((c) => c.sectionCode === "Y" || season === "Summer" || (season === "Fall" && c.sectionCode === "F") || (season === "Winter" && c.sectionCode === "S"))
-      .map((c) => ({ value: c.code, label: `${c.code} — ${c.title}` }));
-  }, [catalog, scenario, term]);
+    const offeredInTerm = (c: Course) =>
+      c.sectionCode === "Y" ||
+      season === "Summer" ||
+      (season === "Fall" && c.sectionCode === "F") ||
+      (season === "Winter" && c.sectionCode === "S");
+    const source = addSuggesting ? suggestionCourses : catalog;
+    const list = source.filter((c) => !scenario.courseCodes.includes(c.code)).filter(offeredInTerm);
+    // Keep the current pick resolvable even after the Combobox clears its query.
+    if (addChoice && !list.some((c) => c.code === addChoice)) {
+      const chosen =
+        suggestionCourses.find((c) => c.code === addChoice) ?? catalog.find((c) => c.code === addChoice);
+      if (chosen) list.unshift(chosen);
+    }
+    return list.map((c) => {
+      const ct = addSuggesting ? countsTowardByCode[c.code] : undefined;
+      return {
+        value: c.code,
+        label: ct ? `${c.code} · ${c.title} (counts toward ${ct})` : `${c.code} · ${c.title}`,
+      };
+    });
+  }, [addSuggesting, suggestionCourses, catalog, scenario, term, addChoice, countsTowardByCode]);
 
   const swapCourse = swapCode ? (courseDetails.get(swapCode) ?? null) : null;
   const ready = !loading && !loadError && !!scenario;
@@ -609,6 +751,15 @@ export default function Timetable() {
           </div>
         }
       />
+
+      {isGuest && !loadError && (
+        <div style={{ marginBottom: 20 }}>
+          <GuestCallout title="Create an account to save this timetable">
+            You can build and export a timetable as a guest — it's kept in this browser only. An account saves it
+            across devices and pre-fills the tray from your plan.
+          </GuestCallout>
+        </div>
+      )}
 
       {loadError && (
         <div style={{ marginBottom: 20 }}>
@@ -686,6 +837,7 @@ export default function Timetable() {
         onClose={() => {
           setAddOpen(false);
           setAddChoice(null);
+          setAddQuery("");
         }}
         footer={
           <>
@@ -694,6 +846,7 @@ export default function Timetable() {
               onClick={() => {
                 setAddOpen(false);
                 setAddChoice(null);
+                setAddQuery("");
               }}
             >
               Cancel
@@ -705,6 +858,7 @@ export default function Timetable() {
                 if (addChoice) addCourseToTray(addChoice);
                 setAddOpen(false);
                 setAddChoice(null);
+                setAddQuery("");
               }}
             >
               Add
@@ -712,30 +866,31 @@ export default function Timetable() {
           </>
         }
       >
-        {catalogError ? (
-          <Callout
-            tone="danger"
-            title="Couldn't load the course catalog"
-            action={
-              <Button variant="secondary" size="sm" onClick={() => setCatalog([])}>
-                Retry
-              </Button>
-            }
-          >
-            {catalogError}
-          </Callout>
-        ) : catalogLoading ? (
-          <Skeleton height={38} />
-        ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {catalogError && (
+            <Callout
+              tone="danger"
+              title="Couldn't search the course catalog"
+              action={
+                <Button variant="secondary" size="sm" onClick={() => setCatalogRetryKey((k) => k + 1)}>
+                  Retry
+                </Button>
+              }
+            >
+              {catalogError}
+            </Callout>
+          )}
           <Combobox
             label="Course"
-            placeholder="Search courses…"
+            placeholder={addSuggesting ? "Pick a suggestion, or search all courses" : "Search courses…"}
             options={addOptions}
             value={addChoice}
             onChange={(v: string | null) => setAddChoice(v)}
+            onQueryChange={(q: string) => setAddQuery(q)}
+            loading={addSuggesting ? false : catalogLoading}
             clearable
           />
-        )}
+        </div>
       </Dialog>
 
       {/* ---- Swap section (click a grid block) ---- */}

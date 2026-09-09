@@ -19,8 +19,9 @@ import {
   StatTile,
   Toast,
 } from "@/ds";
-import { api, GRADE_SCALE, markToGradePoint } from "@/api";
-import type { StudentRecord, TranscriptCourse, TranscriptCourseStatus } from "@/api";
+import { api, GRADE_SCALE, isAuthError, resolveGradePoints } from "@/api";
+import type { StudentRecord, TranscriptCourse, TranscriptCourseStatus, TranscriptResponse } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Transcript (design/screens/05-transcript-settings-share.md "Transcript"):
@@ -29,9 +30,22 @@ import type { StudentRecord, TranscriptCourse, TranscriptCourseStatus } from "@/
  * courses. Row edits/adds are local-only (StudentRecord has no PATCH/POST
  * verbs on the typed ApiClient yet) so they demo the interaction without
  * pretending to persist to a backend that doesn't exist.
+ *
+ * GPA source of truth: every sessional/cumulative/CGPA figure shown here
+ * comes from `GET /api/me/transcript` (`api.getMyTranscript()`), computed
+ * server-side by `backend/planner/gpa.py` — never recomputed from raw marks
+ * client-side. The one exception is the GPA projector below, which HAS to
+ * recompute locally (it layers hypothetical grades for in-progress/planned
+ * courses onto the real ones) — it resolves grade points via the shared
+ * `resolveGradePoints` (frontend/src/api/degreeAudit.ts), which mirrors the
+ * backend's letter-over-mark precedence rule exactly, so it can never drift
+ * into a second, disagreeing GPA engine the way the old client-only
+ * `computeGpa` did (see AGENTS.md / the CGPA-mismatch fix).
  */
 
-type LoadStatus = "loading" | "ready" | "error";
+/** "guest" = signed out; `/api/me/*` 401s. Kept distinct from "error" so the
+ * screen shows the sign-up nudge instead of a raw `API error 401:` string. */
+type LoadStatus = "loading" | "ready" | "error" | "guest";
 
 // Special (non-GPA) grades — design: "render as chips, excluded from GPA."
 const SPECIAL_GRADES = new Set(["CR", "NCR", "P", "LWD", "FZ", "SDF", "INC", "DNW"]);
@@ -45,10 +59,39 @@ const STATUS_OPTIONS: { label: string; value: TranscriptCourseStatus }[] = [
 const LETTER_TO_GP: Record<string, number> = Object.fromEntries(GRADE_SCALE.map((g) => [g.letter, g.gp]));
 
 const TERM_LABEL: Record<string, string> = { "1": "Winter", "5": "Summer", "9": "Fall" };
+// A well-formed TTB session code, e.g. "20269".
+const SESSION_CODE_RE = /^\d{4}[159]$/;
+// A legacy human label, either ordering, e.g. "Fall 2026" / "2026 Fall" (any case).
+const SESSION_LABEL_RE = /^(fall|winter|summer)\s+(\d{4})$|^(\d{4})\s+(fall|winter|summer)$/i;
+
+/** Formats ONE "-"-delimited piece of a session string. Recognises a 5-digit
+ * TTB code or a legacy "Fall 2026"/"2026 Fall" label (case-insensitive);
+ * anything else -- an unrecognised or already-odd string -- renders
+ * VERBATIM. This must never fall back to a bare "?": a raw string a user
+ * can read is always better than a lone question mark next to their own
+ * transcript (see AGENTS.md / the "?" rendering-bug fix). The backend
+ * (`backend/api/me.py` `_normalize_session`) already normalizes legacy
+ * sessions server-side, so in practice this mostly sees real codes -- this
+ * is defense in depth for the mock adapter, the share view, and any row
+ * that slips through un-normalized. */
+function formatSessionPart(part: string): string {
+  const trimmed = part.trim();
+  if (SESSION_CODE_RE.test(trimmed)) {
+    return `${TERM_LABEL[trimmed.slice(4)]} ${trimmed.slice(0, 4)}`;
+  }
+  const m = SESSION_LABEL_RE.exec(trimmed);
+  if (m) {
+    const term = (m[1] ?? m[4]).toLowerCase();
+    const year = m[2] ?? m[3];
+    return `${term.charAt(0).toUpperCase()}${term.slice(1)} ${year}`;
+  }
+  return trimmed || "–";
+}
+
 function formatSession(code: string): string {
   return code
     .split("-")
-    .map((part) => `${TERM_LABEL[part.slice(4)] ?? "?"} ${part.slice(0, 4)}`)
+    .map(formatSessionPart)
     .join(" – ");
 }
 
@@ -56,16 +99,12 @@ function courseKey(c: Pick<TranscriptCourse, "session" | "code">): string {
   return `${c.session}::${c.code}`;
 }
 
+/** Whether `c` counts toward GPA at all, per the shared `resolveGradePoints`
+ * precedence rule -- used only to seed the GPA projector's starting
+ * credits/points (see module doc comment above for why this file still has
+ * ONE local GPA computation). */
 function isGpaEligible(c: TranscriptCourse): boolean {
-  return c.status === "completed" && c.mark != null && !SPECIAL_GRADES.has(c.grade);
-}
-
-function computeGpa(list: TranscriptCourse[]): number | null {
-  const eligible = list.filter(isGpaEligible);
-  if (eligible.length === 0) return null;
-  const totalCredits = eligible.reduce((s, c) => s + c.credits, 0);
-  const totalPoints = eligible.reduce((s, c) => s + c.credits * markToGradePoint(c.mark as number), 0);
-  return totalCredits > 0 ? totalPoints / totalCredits : null;
+  return resolveGradePoints(c) != null;
 }
 
 interface SessionGroup {
@@ -97,6 +136,7 @@ export default function Transcript() {
   const [status, setStatus] = React.useState<LoadStatus>("loading");
   const [error, setError] = React.useState<string | null>(null);
   const [record, setRecord] = React.useState<StudentRecord | null>(null);
+  const [transcriptResp, setTranscriptResp] = React.useState<TranscriptResponse | null>(null);
   const [courses, setCourses] = React.useState<TranscriptCourse[]>([]);
   const [editing, setEditing] = React.useState<EditState | null>(null);
   const [adding, setAdding] = React.useState<AddState | null>(null);
@@ -106,14 +146,18 @@ export default function Transcript() {
   const load = React.useCallback(() => {
     setStatus("loading");
     setError(null);
-    api
-      .getMyRecord()
-      .then((r) => {
+    Promise.all([api.getMyRecord(), api.getMyTranscript()])
+      .then(([r, t]) => {
         setRecord(r);
         setCourses(r.transcript);
+        setTranscriptResp(t);
         setStatus("ready");
       })
       .catch((e: unknown) => {
+        if (isAuthError(e)) {
+          setStatus("guest");
+          return;
+        }
         setError(e instanceof Error ? e.message : "Failed to load transcript.");
         setStatus("error");
       });
@@ -127,6 +171,18 @@ export default function Transcript() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Authoritative per-session sgpa/cumGpa, keyed by (already backend-
+  // normalized) session -- looked up, never recomputed, when building the
+  // groups below. See the module doc comment: this is the single source of
+  // truth for every GPA number on this page besides the projector.
+  const gpaBySession = React.useMemo(() => {
+    const m = new Map<string, { sgpa: number | null; cumGpa: number | null }>();
+    for (const s of transcriptResp?.sessions ?? []) {
+      m.set(s.session, { sgpa: s.sgpa, cumGpa: s.cumGpa });
+    }
+    return m;
+  }, [transcriptResp]);
+
   const ascendingGroups = React.useMemo<SessionGroup[]>(() => {
     const bySession = new Map<string, TranscriptCourse[]>();
     for (const c of courses) {
@@ -134,20 +190,29 @@ export default function Transcript() {
       arr.push(c);
       bySession.set(c.session, arr);
     }
-    const sessions = [...bySession.keys()].sort((a, b) => Number(a.split("-")[0]) - Number(b.split("-")[0]));
-    let running: TranscriptCourse[] = [];
+    // A session with no parseable leading year (an unrecognised legacy
+    // string `_normalize_session` couldn't place, kept verbatim) sorts
+    // AFTER every real session -- matching backend/api/me.py's own
+    // `_session_sort_key`, so a straggler session's numbers (looked up by
+    // string key regardless of position) stay consistent with which group
+    // visually reads as "the latest session".
+    const sortKey = (s: string) => {
+      const n = Number(s.split("-")[0]);
+      return Number.isNaN(n) ? Infinity : n;
+    };
+    const sessions = [...bySession.keys()].sort((a, b) => sortKey(a) - sortKey(b));
     return sessions.map((s) => {
       const list = bySession.get(s) as TranscriptCourse[];
-      running = [...running, ...list];
+      const backendGpa = gpaBySession.get(s);
       return {
         session: s,
         label: formatSession(s),
         courses: list,
-        sessionalGpa: computeGpa(list),
-        cumGpa: computeGpa(running),
+        sessionalGpa: backendGpa?.sgpa ?? null,
+        cumGpa: backendGpa?.cumGpa ?? null,
       };
     });
-  }, [courses]);
+  }, [courses, gpaBySession]);
 
   const sessionGroups = React.useMemo(() => [...ascendingGroups].reverse(), [ascendingGroups]);
 
@@ -156,10 +221,12 @@ export default function Transcript() {
   const trendValues = ascendingGroups.filter((g) => g.sessionalGpa != null).map((g) => g.sessionalGpa as number);
 
   const plannedCourses = courses.filter((c) => c.status === "planned" || c.status === "in_progress");
-  const baseCredits = courses.filter(isGpaEligible).reduce((s, c) => s + c.credits, 0);
-  const basePoints = courses
-    .filter(isGpaEligible)
-    .reduce((s, c) => s + c.credits * markToGradePoint(c.mark as number), 0);
+  const gpaEligibleCourses = React.useMemo(() => courses.filter(isGpaEligible), [courses]);
+  const baseCredits = gpaEligibleCourses.reduce((s, c) => s + c.credits, 0);
+  const basePoints = gpaEligibleCourses.reduce(
+    (s, c) => s + c.credits * (resolveGradePoints(c) as number),
+    0,
+  );
 
   const projectedCgpa = React.useMemo(() => {
     let credits = baseCredits;
@@ -220,14 +287,14 @@ export default function Transcript() {
         header: "Mark",
         align: "right",
         mono: true,
-        render: (v) => (v == null ? "—" : String(v)),
+        render: (v) => (v == null ? "–" : String(v)),
       },
       {
         key: "grade",
         header: "Grade",
         render: (v, row) => {
           const grade = v as string;
-          if (!grade) return "—";
+          if (!grade) return "–";
           if (SPECIAL_GRADES.has(grade)) return <Chip tone="info">{grade}</Chip>;
           return (
             <>
@@ -282,6 +349,18 @@ export default function Transcript() {
     );
   }
 
+  if (status === "guest") {
+    return (
+      <>
+        <PageHeader title="Transcript" />
+        <GuestCallout title="Create an account to keep a transcript">
+          Your marks are encrypted and stored against your account, so there's no transcript to show while you're
+          browsing as a guest.
+        </GuestCallout>
+      </>
+    );
+  }
+
   if (status === "error") {
     return (
       <>
@@ -308,13 +387,13 @@ export default function Transcript() {
         subtitle={record ? `${courses.length} course${courses.length === 1 ? "" : "s"} on record` : undefined}
         actions={
           <>
-            <Button variant="secondary" icon="upload" onClick={() => setToast("Import flow lives on Onboarding — see /onboarding.")}>
+            <Button variant="secondary" icon="upload" onClick={() => setToast("Import flow lives on Onboarding. See /onboarding.")}>
               Import
             </Button>
             <Button variant="secondary" icon="plus" onClick={() => setAdding(BLANK_ADD)}>
               Add course
             </Button>
-            <DataExportMenu onExport={(kind: string) => setToast(`Exported as ${kind.toUpperCase()} (demo — no backend export yet).`)} />
+            <DataExportMenu onExport={(kind: string) => setToast(`Exported as ${kind.toUpperCase()} (demo, no backend export yet).`)} />
           </>
         }
       />
@@ -323,7 +402,7 @@ export default function Transcript() {
         <EmptyState
           icon="file-text"
           title="No courses on record yet"
-          description="Import your Degree Explorer record or add a course manually to get started."
+          description="Import your Academic History PDF from ACORN or add a course manually to get started."
           action={
             <Button icon="plus" onClick={() => setAdding(BLANK_ADD)}>
               Add course
@@ -332,11 +411,25 @@ export default function Transcript() {
         />
       ) : (
         <>
+          {transcriptResp && transcriptResp.warnings.length > 0 && (
+            <>
+              {transcriptResp.warnings.map((w, i) => (
+                <div key={i} style={{ marginBottom: 16 }}>
+                  <Callout tone="warning" title="Some grades may be out of date">
+                    {w}
+                  </Callout>
+                </div>
+              ))}
+            </>
+          )}
+
           <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-            <StatTile label="CGPA" value={(record?.cgpa ?? 0).toFixed(2)} accent="var(--primary)" />
+            {/* The screen's single highlighted card (modernized-ACORN): a teal
+                left accent on the CGPA tile only. */}
+            <StatTile label="CGPA" value={(transcriptResp?.cgpa ?? 0).toFixed(2)} accent="var(--accent)" />
             <StatTile
               label="This session"
-              value={thisSessionGroup?.sessionalGpa != null ? thisSessionGroup.sessionalGpa.toFixed(2) : "—"}
+              value={thisSessionGroup?.sessionalGpa != null ? thisSessionGroup.sessionalGpa.toFixed(2) : "–"}
               sub={thisSessionGroup?.label}
             />
             <StatTile label="Credits earned" value={creditsEarned.toFixed(1)} />
@@ -425,7 +518,7 @@ export default function Transcript() {
                     Projected CGPA
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: "var(--weight-semibold)", color: "var(--primary)" }}>
-                    {projectedCgpa != null ? projectedCgpa.toFixed(2) : "—"}
+                    {projectedCgpa != null ? projectedCgpa.toFixed(2) : "–"}
                   </span>
                 </div>
               </>
@@ -456,7 +549,7 @@ export default function Transcript() {
               label="Grade"
               value={editing.grade}
               onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditing({ ...editing, grade: e.target.value })}
-              options={[{ label: "—", value: "" }, ...GRADE_OPTIONS]}
+              options={[{ label: "–", value: "" }, ...GRADE_OPTIONS]}
             />
             <Select
               label="Status"

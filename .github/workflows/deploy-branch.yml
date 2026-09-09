@@ -1,0 +1,88 @@
+# CI for every pull request, and the `deploy` branch the cPanel server
+# auto-pulls (docs/auto-deploy.md).
+#
+# Both events run the same checks:
+#   1. the backend test suite (the stable subset — fixture-dependent and
+#      live-network tests are excluded, matching what passes from a clean
+#      checkout),
+#   2. typecheck + build the frontend.
+# Only a push to main additionally:
+#   3. force-pushes `deploy` = this commit + the built `frontend/dist`
+#      committed on top (dist is gitignored on main; the server needs it
+#      prebuilt because cPanel has no Node).
+#
+# Running on pull_request too is the point of gating *before* the merge:
+# without it these checks fire only after a change is already on main, so a
+# red build is caught one merge too late and every later PR branches off the
+# broken commit. The deploy branch is still protected either way — a failing
+# test or build blocks it from updating and the live site stays on the
+# previous good build.
+
+name: CI and publish deploy branch
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # Keyed by ref so a PR run can never cancel an in-flight deploy of main.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - name: Run tests (stable subset)
+        env:
+          PYTHONUTF8: "1"
+        # Excluded: test_timetable.py needs an untracked local fixture
+        # (fixtures/ttb_getPageableCourses_sample.json, never committed);
+        # "live_smoke" tests hit real UofT endpoints.
+        # test_programs.py IS included — its corpus-dependent tests skip
+        # themselves when the gitignored corpus is absent, so the program-type
+        # classification regression tests run here.
+        run: >
+          python -m pytest backend/tests -q
+          --ignore=backend/tests/test_timetable.py
+          -k "not live_smoke"
+
+  frontend:
+    needs: backend-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      # Publish only from main. On a pull_request the job stops here, having
+      # served as the gate; `deploy` must never move for an unmerged branch.
+      - name: Force-push deploy branch (main + built dist)
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B deploy
+          git add -f frontend/dist
+          git commit -m "Deploy build of ${GITHUB_SHA::9}"
+          git push -f origin deploy

@@ -7,17 +7,45 @@ import {
   RequirementGroupCard,
   POStCombinationValidator,
   Callout,
+  Card,
   EmptyState,
   Skeleton,
   Button,
 } from "@/ds";
-import { api, creditFromCode } from "@/api";
-import type { Program, ProgramType, RequirementGroup, RequirementProgress } from "@/api";
+import { api, creditFromCode, isAuthError } from "@/api";
+import type { EnrolledProgramRef, Program, ProgramType, RequirementGroup, RequirementProgress } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Screen — routed at "/programs/:code" (design/screens/03-programs-and-courses.md,
  * "Program detail").
  */
+
+/**
+ * `httpClient`'s `http()` helper (frontend/src/api/client.ts) throws a bare
+ * `Error(`API error ${status}: ${bodyText}`)` on a non-2xx response -- it
+ * doesn't parse the backend's `{"error": "..."}` JSON body itself. Without
+ * this, every reparse failure showed the same fixed "Couldn't load..."
+ * string regardless of *why* it failed (issue #1) -- a missing server-side
+ * Gemini API key, a Gemini-side rejection, and an unparseable Gemini response
+ * are now distinct 503/502/502 errors with distinct messages
+ * (backend/data_sources/llm_grouper.py's exception hierarchy +
+ * backend/api/programs.py's `reparse_requirements`), so surface the real one.
+ */
+function backendErrorMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  const match = err.message.match(/^API error \d+: ([\s\S]*)$/);
+  if (!match) return err.message || fallback;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (parsed && typeof parsed.error === "string" && parsed.error.trim()) {
+      return parsed.error;
+    }
+  } catch {
+    // Body wasn't JSON (e.g. a dev-proxy plain-text 5xx) -- fall through to the raw text.
+  }
+  return match[1].trim() || fallback;
+}
 
 /** Same client-side approximation used on the Programs screen (design/09 §1 + §2). */
 function evaluateCombination(
@@ -34,6 +62,25 @@ function evaluateCombination(
   const shapeValid = specialists.length >= 1 || majors.length >= 2 || (majors.length >= 1 && minors.length >= 2);
   if (!shapeValid) {
     notes.push("The degree program requirement needs 1 Specialist, 2 Majors, or 1 Major + 2 Minors.");
+  } else {
+    // A student can declare MORE programs than the minimal valid shape needs
+    // (e.g. 4 majors) -- that's nonstandard, not invalid: a subset already
+    // satisfies a combination, so say so informationally rather than
+    // reporting the combination as broken (design/09-uoft-degree-rules.md §1).
+    const minimum = specialists.length >= 1 ? 1 : majors.length >= 2 ? 2 : 3;
+    if (programs.length > minimum) {
+      const satisfiedBy =
+        specialists.length >= 1
+          ? "your specialist already satisfies the combination requirement"
+          : majors.length >= 2
+            ? `2 of your ${majors.length} majors already satisfy the 2-Major pattern`
+            : "1 major + 2 minors among your programs already satisfy the Major + 2 Minors pattern";
+      notes.push(
+        `${programs.length} programs exceeds the standard program combinations (1 Specialist, ` +
+          `2 Majors, or 1 Major + 2 Minors); UofT requires at least one valid combination among ` +
+          `your programs: ${satisfiedBy}.`,
+      );
+    }
   }
 
   const bySubject = new Map<string, Program[]>();
@@ -49,16 +96,30 @@ function evaluateCombination(
     }
   }
 
+  // A program whose requirements haven't been Gemini/heuristically parsed yet
+  // reports zero `appliedCourses` for every group -- NOT because the student
+  // hasn't taken anything toward it, but because the parse never completed
+  // (issue #1). Folding that silent zero into the shared-credit total would
+  // misreport a real "0.0 distinct credits shared" that has nothing to do
+  // with the student's actual course history (issue #2) -- so it's excluded
+  // from the math here, and called out explicitly instead.
+  const unparsed = programs.filter((p) => p.requirementsLoaded !== true);
+  for (const p of unparsed) {
+    notes.push(`${p.title} requirements not yet parsed. Combination check incomplete.`);
+  }
+
   const applied = new Set<string>();
   for (const p of programs) {
+    if (p.requirementsLoaded !== true) continue;
     for (const group of progressByCode[p.code] ?? []) {
       for (const code of group.appliedCourses) applied.add(code);
     }
   }
   const distinctCredits = Array.from(applied).reduce((sum, code) => sum + creditFromCode(code), 0);
-  const distinctOk = programs.length < 2 || distinctCredits >= 12.0;
+  const parsedCount = programs.length - unparsed.length;
+  const distinctOk = parsedCount < 2 || distinctCredits >= 12.0;
   if (!distinctOk) {
-    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs — need ≥12.0.`);
+    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs. Need ≥12.0.`);
   }
 
   const valid = shapeValid && oneTypePerSubject && distinctOk;
@@ -72,7 +133,7 @@ function evaluateCombination(
           : `${programs.length} program${programs.length === 1 ? "" : "s"}`;
   return {
     valid,
-    message: valid ? `Valid combination — ${shapeLabel}` : "Program combination needs attention",
+    message: valid ? `Valid combination: ${shapeLabel}` : "Program combination needs attention",
     notes,
   };
 }
@@ -88,9 +149,15 @@ export default function ProgramDetail() {
   const [reparseError, setReparseError] = React.useState<string | null>(null);
 
   const [enrolled, setEnrolled] = React.useState(false);
+  const [myProgramRef, setMyProgramRef] = React.useState<EnrolledProgramRef | null>(null);
   const [enrolledPrograms, setEnrolledPrograms] = React.useState<Program[]>([]);
   const [progressByCode, setProgressByCode] = React.useState<Record<string, RequirementProgress[]>>({});
   const [comboLoading, setComboLoading] = React.useState(true);
+  /** Guest nudge / failure text for the Add / Remove buttons below. */
+  const [enrolNotice, setEnrolNotice] = React.useState<
+    { kind: "guest"; title: string; message: string } | { kind: "error"; message: string } | null
+  >(null);
+  const [enrolBusy, setEnrolBusy] = React.useState(false);
 
   // The program itself.
   React.useEffect(() => {
@@ -121,6 +188,7 @@ export default function ProgramDetail() {
       .then(async ([record, progress]) => {
         if (cancelled) return;
         setProgressByCode(progress);
+        setMyProgramRef(record.programs.find((p) => p.code === code) ?? null);
         setEnrolled(record.programs.some((p) => p.code === code));
         const resolved = await Promise.all(record.programs.map((p) => api.getProgram(p.code)));
         if (cancelled) return;
@@ -146,20 +214,79 @@ export default function ProgramDetail() {
       .then((groups) => {
         setProgram((prev) => (prev ? { ...prev, completionRequirements: groups, requirementsLoaded: true } : prev));
       })
-      .catch(() => setReparseError("Couldn't load the full requirement breakdown. Try again."))
+      .catch((err: unknown) =>
+        setReparseError(
+          backendErrorMessage(err, "Couldn't load the full requirement breakdown. Try again."),
+        ),
+      )
       .finally(() => setReparsing(false));
   }
 
-  function handleAdd() {
-    if (!program) return;
+  /**
+   * Enrol / unenrol. These used to flip `enrolled` in local state ONLY, never
+   * calling the API — so the header switched to "Enrolled" and the change
+   * vanished on the next reload, for signed-in students as much as guests.
+   * They now go through the same `api.addMyProgram`/`removeMyProgram` that
+   * Programs.tsx uses, applied optimistically and rolled back on failure, with
+   * a guest's 401 reported as the shared sign-up nudge rather than as a
+   * success (or as a raw `API error 401:` string).
+   */
+  async function handleAdd() {
+    if (!program || enrolBusy) return;
+    const target = program;
+    setEnrolBusy(true);
+    setEnrolNotice(null);
     setEnrolled(true);
-    setEnrolledPrograms((prev) => (prev.some((p) => p.code === program.code) ? prev : [...prev, program]));
+    setEnrolledPrograms((prev) => (prev.some((p) => p.code === target.code) ? prev : [...prev, target]));
+    try {
+      await api.addMyProgram(target.code);
+    } catch (err: unknown) {
+      setEnrolled(false);
+      setEnrolledPrograms((prev) => prev.filter((p) => p.code !== target.code));
+      setEnrolNotice(
+        isAuthError(err)
+          ? {
+              kind: "guest",
+              title: "Create an account to add programs",
+              message: `Anyone can read ${target.code}'s requirements, but adding it to your degree audit needs somewhere to save it.`,
+            }
+          : {
+              kind: "error",
+              message: backendErrorMessage(
+                err,
+                `Couldn't add ${target.code}. It may conflict with a program you're already enrolled in.`,
+              ),
+            },
+      );
+    } finally {
+      setEnrolBusy(false);
+    }
   }
 
-  function handleRemove() {
-    if (!program) return;
+  async function handleRemove() {
+    if (!program || enrolBusy) return;
+    const target = program;
+    setEnrolBusy(true);
+    setEnrolNotice(null);
     setEnrolled(false);
-    setEnrolledPrograms((prev) => prev.filter((p) => p.code !== program.code));
+    setEnrolledPrograms((prev) => prev.filter((p) => p.code !== target.code));
+    try {
+      await api.removeMyProgram(target.code);
+    } catch (err: unknown) {
+      setEnrolled(true);
+      setEnrolledPrograms((prev) => (prev.some((p) => p.code === target.code) ? prev : [...prev, target]));
+      setEnrolNotice(
+        isAuthError(err)
+          ? {
+              kind: "guest",
+              title: "Create an account to manage programs",
+              message: "You're browsing as a guest, so there's no saved enrolment to remove yet.",
+            }
+          : { kind: "error", message: backendErrorMessage(err, `Couldn't remove ${target.code}. Try again.`) },
+      );
+    } finally {
+      setEnrolBusy(false);
+    }
   }
 
   // ---- Loading / not-found / error states ----------------------------------
@@ -215,7 +342,11 @@ export default function ProgramDetail() {
 
   const combo = evaluateCombination(enrolledPrograms, progressByCode);
   const myProgress = enrolled ? progressByCode[program.code] ?? [] : [];
-  const earnedCredits = myProgress.reduce((s, g) => s + g.earned, 0);
+  // The header's earned/total come from the ONE authoritative summary
+  // (`record.programs[]` -> `_audit.program_progress_summary`), the same
+  // engine the Dashboard and "My Programs" cards use — NOT a per-group sum of
+  // `myProgress` (that double-counts courses shared across nested groups). The
+  // per-group breakdown below still renders each group's own earned/required.
 
   function progressFor(group: RequirementGroup) {
     return myProgress.find((p) => p.label === group.heading);
@@ -229,26 +360,39 @@ export default function ProgramDetail() {
       />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        <ProgramHeader
-          code={program.code}
-          name={program.title}
-          programType={(program.programType || "major") as ProgramType}
-          department={program.department}
-          totalCredits={program.totalCredits}
-          earned={enrolled ? earnedCredits : undefined}
-          enrolmentRequirements={program.enrolmentRequirements || undefined}
-          needsReparse={!program.requirementsLoaded}
-          reparsing={reparsing}
-          onReparse={handleReparse}
-          onAdd={enrolled ? undefined : handleAdd}
-          enrolled={enrolled}
-        />
-        {enrolled && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -12 }}>
-            <Button variant="ghost" size="sm" icon="x" onClick={handleRemove}>
-              Remove from my programs
-            </Button>
-          </div>
+        {/* The screen's single highlighted summary card (modernized-ACORN):
+            a teal left accent on the program hero only. */}
+        <Card style={{ borderLeft: "3px solid var(--accent)" }}>
+          <ProgramHeader
+            code={program.code}
+            name={program.title}
+            programType={(program.programType || "major") as ProgramType}
+            department={program.department}
+            totalCredits={myProgramRef?.totalCredits ?? program.totalCredits}
+            earned={enrolled ? myProgramRef?.earnedCredits ?? 0 : undefined}
+            enrolmentRequirements={program.enrolmentRequirements || undefined}
+            needsReparse={!program.requirementsLoaded}
+            reparsing={reparsing}
+            onReparse={handleReparse}
+            onAdd={enrolled ? undefined : handleAdd}
+            enrolled={enrolled}
+          />
+          {enrolled && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+              <Button variant="ghost" size="sm" icon="x" onClick={handleRemove}>
+                Remove from my programs
+              </Button>
+            </div>
+          )}
+        </Card>
+
+        {enrolNotice?.kind === "guest" && (
+          <GuestCallout title={enrolNotice.title}>{enrolNotice.message}</GuestCallout>
+        )}
+        {enrolNotice?.kind === "error" && (
+          <Callout tone="danger" title="Couldn't update your programs">
+            {enrolNotice.message}
+          </Callout>
         )}
 
         {reparseError && <Callout tone="danger" title="Requirement parsing failed">{reparseError}</Callout>}

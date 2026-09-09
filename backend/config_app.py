@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 _INSTANCE_DIR = Path(__file__).resolve().parent / "instance"
 
@@ -77,6 +77,38 @@ class Config:
         # The SPA's origin, for CORS + cookie scoping. Vite's default dev port.
         self.CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "http://localhost:5173")
 
+        # WebAuthn passkeys (backend/api/passkeys.py). The RP ID must be the
+        # site's registrable domain (e.g. "deciduous.mikkelsen.ca"); the
+        # expected origin is the full scheme://host[:port] the browser reports.
+        # Both default from CORS_ORIGIN so local dev works with zero config.
+        self.PASSKEY_ORIGIN = os.environ.get("PASSKEY_ORIGIN") or self.CORS_ORIGIN
+        self.PASSKEY_RP_ID = (
+            os.environ.get("PASSKEY_RP_ID") or urlsplit(self.PASSKEY_ORIGIN).hostname or "localhost"
+        )
+        self.PASSKEY_RP_NAME = os.environ.get("PASSKEY_RP_NAME", "Deciduous")
+
+        # Outbound SMTP (backend/mailer.py) — on cPanel, the site mailbox
+        # (e.g. deciduous@mikkelsen.ca via the host's mail server). Left unset,
+        # email sending is a logged no-op and email-dependent flows degrade
+        # gracefully (verification banner stays, reset links can't be emailed).
+        self.SMTP_HOST = os.environ.get("SMTP_HOST")
+        self.SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))  # 465 SSL; 587 -> STARTTLS
+        self.SMTP_USER = os.environ.get("SMTP_USER")
+        self.SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
+        self.MAIL_FROM = os.environ.get("MAIL_FROM") or self.SMTP_USER
+        self.MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "Deciduous")
+
+        # Absolute base URL used in emailed links (verify / reset). Defaults to
+        # the SPA origin, which is correct for the single-origin production setup.
+        self.APP_BASE_URL = (os.environ.get("APP_BASE_URL") or self.CORS_ORIGIN).rstrip("/")
+
+        # Auto-deploy from GitHub (backend/api/deploy.py, docs/auto-deploy.md).
+        # Unset secret ⇒ the /api/deploy/* routes all 503 (feature off).
+        # DEPLOY_BRANCH is what the server tracks — "deploy" is the branch the
+        # GitHub Action publishes (main + built frontend/dist).
+        self.DEPLOY_WEBHOOK_SECRET = os.environ.get("DEPLOY_WEBHOOK_SECRET")
+        self.DEPLOY_BRANCH = os.environ.get("DEPLOY_BRANCH", "deploy")
+
         self.DEBUG = not is_production
         self.TESTING = False
 
@@ -88,7 +120,11 @@ class Config:
         self.SESSION_COOKIE_SECURE = _truthy(
             os.environ.get("SESSION_COOKIE_SECURE"), default=is_production
         )
+        # Cookie max-age for *permanent* (remember-me) sessions. The DB
+        # `Session.expires_at` row is the real source of truth per session
+        # (24h default / 30d remembered — backend/api/auth.py); this just caps
+        # how long the remembered cookie itself survives.
         self.PERMANENT_SESSION_LIFETIME = int(
-            os.environ.get("SESSION_LIFETIME_SECONDS", 60 * 60 * 24 * 14)
+            os.environ.get("SESSION_LIFETIME_SECONDS", 60 * 60 * 24 * 30)
         )
         self.JSON_SORT_KEYS = False

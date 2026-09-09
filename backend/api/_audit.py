@@ -29,9 +29,39 @@ from backend.ingest.degree_explorer import (
     mark_to_letter,
 )
 from backend.planner.course_code import parse_course_code
+from backend.planner.validators import PROGRAM_MIN_CREDITS
 
 # Degree-wide thresholds, design/09-uoft-degree-rules.md section 1.
 TOTAL_CREDITS_REQUIRED = 20.0
+
+
+def effective_total_credits(program: Program) -> float:
+    """The single source of truth for a program's total required credits.
+
+    The Calendar/grouper only sometimes states a program-level total, so
+    `program.total_credits` is frequently 0.0 (e.g. the Economics Major, whose
+    requirements are given as groups with no summary line). A bare 0.0 makes
+    every "X / 0.0 cr" / "0% complete" summary look broken next to a detailed
+    breakdown that clearly totals more. So fall back, in order:
+
+    1. the parsed program total, when > 0;
+    2. otherwise the largest single requirement group's credits — for a program
+       written as one umbrella "Program Course Requirements N.0" group plus
+       sub-groups, that umbrella *is* the real total (and is exactly what the
+       breakdown shows), so we never sum overlapping groups and over-count;
+    3. otherwise the standard minimum for the program type.
+
+    Every place that shows a program denominator (the search/detail serializers
+    and `program_progress_summary`) routes through here, so the top-of-page
+    summary and the group breakdown can never disagree on the total.
+    """
+    if program.total_credits and program.total_credits > 0:
+        return program.total_credits
+    group_max = max(
+        (g.credits for g in program.completion_requirements if not g.is_note and g.credits > 0),
+        default=0.0,
+    )
+    return max(group_max, PROGRAM_MIN_CREDITS.get(program.program_type, 0.0))
 ARTSCI_CREDITS_REQUIRED = 10.0
 LEVEL200_CREDITS_REQUIRED = 13.0
 LEVEL300_CREDITS_REQUIRED = 6.0
@@ -56,10 +86,14 @@ _BREADTH_SUFFIX_RE = re.compile(r"\((\d)\)\s*$")
 @dataclass(frozen=True)
 class TranscriptRow:
     """One transcript course, decoupled from the `TranscriptEntry` DB model
-    so this module never imports SQLAlchemy. `is_artsci` defaults to True --
-    every course offered through this planner is an Arts & Science course
-    unless the caller has real `Course.distribution` data saying otherwise
-    (see `design/09-uoft-degree-rules.md` section 5)."""
+    so this module never imports SQLAlchemy. `is_artsci` is NOT computed
+    here -- `backend.planner.types.CourseRecord.is_artsci` is the single
+    classification rule (real `Course.distribution` data when available,
+    else a campus-digit-"1" course-code fallback), and every production
+    caller (`backend.api.me._transcript_rows`) passes that value straight
+    through so this module and `backend/planner/validators.py` can never
+    disagree about the same course. The `True` default here only applies to
+    ad-hoc/test construction that doesn't go through that path."""
 
     code: str
     credits: float
@@ -347,7 +381,7 @@ def program_progress_summary(program: Program | None, program_row: ProgramRow, r
         c.code: c.credits for group in program.completion_requirements for c in group.courses
     }
     earned_credits = sum(code_credits.get(c, 0.5) for c in earned_codes)
-    total = program.total_credits or sum(g.credits for g in program.completion_requirements) or 0.0
+    total = effective_total_credits(program)
     percent = round(min(earned_credits / total, 1.0) * 100, 1) if total else 0.0
 
     return {

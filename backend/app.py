@@ -9,7 +9,10 @@
 3. Auto-registers every `bp` Blueprint found in `backend/api/*.py` — see the
    contract documented in `backend/api/__init__.py`.
 4. Installs same-origin-with-credentials CORS, a double-submit CSRF guard,
-   and JSON-only error handlers (never a stack trace to the client).
+   the dev-only auto-login bypass (`backend.dev_auth` -- inert unless
+   `FLASK_ENV=development` or `FLASK_SKIP_AUTH` is truthy, and never active in
+   production), and JSON-only error handlers (never a stack trace to the
+   client).
 
 Run locally with `flask --app backend.app run` (from the repo root, with
 `PYTHONUTF8=1` on Windows) or via `backend/passenger_wsgi.py` on cPanel.
@@ -18,18 +21,30 @@ Run locally with `flask --app backend.app run` (from the repo root, with
 from __future__ import annotations
 
 import importlib
+import os
 import pkgutil
 import secrets
+from pathlib import Path
 
-from flask import Flask, Response, jsonify, request
-from werkzeug.exceptions import HTTPException
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException, NotFound
 
 from backend.config import load_env
 from backend.config_app import Config
+from backend.dev_auth import register_dev_auth_bypass
 from backend.extensions import create_all, init_db
 
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-_CSRF_EXEMPT_PATHS = {"/api/auth/csrf"}
+# /api/deploy/*: GitHub webhooks can't do the double-submit cookie dance;
+# those routes authenticate with an HMAC signature / Bearer secret instead
+# (backend/api/deploy.py) — strictly stronger than CSRF for a cookieless caller.
+_CSRF_EXEMPT_PATHS = {"/api/auth/csrf", "/api/deploy/webhook", "/api/deploy/run"}
+
+# `frontend/dist` is a filesystem concern of this entry point (where the
+# built SPA lives on disk), not an app-behaviour setting, so it's read
+# straight from `os.environ` here rather than added to `backend/config_app.py`.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_FRONTEND_DIST = _REPO_ROOT / "frontend" / "dist"
 
 
 def create_app(config: Config | None = None) -> Flask:
@@ -46,6 +61,8 @@ def create_app(config: Config | None = None) -> Flask:
 
     _register_cors(app)
     _register_csrf_guard(app)
+    register_dev_auth_bypass(app)
+    _register_spa(app)
     _register_error_handlers(app)
 
     return app
@@ -114,6 +131,50 @@ def _register_csrf_guard(app: Flask) -> None:
         if not header or not cookie or not secrets.compare_digest(header, cookie):
             return _json_error("Invalid or missing CSRF token.", 403)
         return None
+
+
+# -------------------------------------------------------------------- SPA
+def _register_spa(app: Flask) -> None:
+    """Serve the built React SPA so one Flask process is the single origin
+    cPanel's "Setup Python App" needs (no separate static vhost). `dist_dir`
+    is a filesystem path this entry point cares about, not app behaviour, so
+    it's read straight from `os.environ` rather than threaded through
+    `backend/config_app.Config`.
+
+    Only registered when a build is present at startup -- local API-only dev
+    (no `frontend/dist` yet) keeps today's "nothing answers GET /" behaviour.
+    """
+    dist_dir = Path(os.environ.get("FRONTEND_DIST") or _DEFAULT_FRONTEND_DIST)
+    if not dist_dir.is_dir():
+        app.logger.info(
+            "No frontend build at %s -- SPA serving disabled (API-only mode); "
+            "set FRONTEND_DIST to override.",
+            dist_dir,
+        )
+        return
+    app.logger.info("Serving SPA from %s", dist_dir)
+
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def _serve_spa(path: str) -> Response:
+        if path == "api" or path.startswith("api/"):
+            # Unmatched /api/* -- shape it like the rest of the API instead
+            # of falling through to the SPA's index.html.
+            abort(404)
+
+        try:
+            response = send_from_directory(dist_dir, path or "index.html")
+            served_exact_asset = bool(path)
+        except NotFound:
+            # Client-side route (e.g. /onboarding, /plan) -- let the SPA router handle it.
+            response = send_from_directory(dist_dir, "index.html")
+            served_exact_asset = False
+
+        if served_exact_asset and path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 # ---------------------------------------------------------- error handlers

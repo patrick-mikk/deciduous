@@ -8,14 +8,16 @@ import {
   Input,
   Select,
   Button,
+  IconButton,
   ProgramCard,
   Skeleton,
   EmptyState,
   Callout,
   POStCombinationValidator,
 } from "@/ds";
-import { api, creditFromCode } from "@/api";
-import type { Program, ProgramType, RequirementProgress, StudentRecord } from "@/api";
+import { api, creditFromCode, isAuthError } from "@/api";
+import type { EnrolledProgramRef, Program, ProgramType, RequirementProgress } from "@/api";
+import { GuestCallout } from "@/components/GuestCallout";
 
 /**
  * Screen — routed at "/programs" (design/screens/03-programs-and-courses.md,
@@ -30,6 +32,13 @@ import type { Program, ProgramType, RequirementProgress, StudentRecord } from "@
 const PAGE_SIZE = 20;
 
 type TabKey = "browse" | "mine";
+
+/** Outcome of an add/remove/reorder attempt, when it's worth telling the user
+ * about. `guest` is the account-optional 401 case (friendly nudge, info tone);
+ * `error` is a genuine failure (danger tone). */
+type ActionNotice =
+  | { kind: "guest"; title: string; message: string }
+  | { kind: "error"; title: string; message: string };
 
 const TYPE_OPTIONS: { value: ProgramType; label: string }[] = [
   { value: "", label: "All types" },
@@ -82,7 +91,7 @@ function evaluateCombination(
   const distinctCredits = Array.from(applied).reduce((sum, code) => sum + creditFromCode(code), 0);
   const distinctOk = programs.length < 2 || distinctCredits >= 12.0;
   if (!distinctOk) {
-    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs — need ≥12.0.`);
+    notes.push(`Only ${distinctCredits.toFixed(1)} distinct credits shared across programs. Need ≥12.0.`);
   }
 
   const valid = shapeValid && oneTypePerSubject && distinctOk;
@@ -96,7 +105,7 @@ function evaluateCombination(
           : `${programs.length} program${programs.length === 1 ? "" : "s"}`;
   return {
     valid,
-    message: valid ? `Valid combination — ${shapeLabel}` : "Program combination needs attention",
+    message: valid ? `Valid combination: ${shapeLabel}` : "Program combination needs attention",
     notes,
   };
 }
@@ -117,27 +126,68 @@ export default function Programs() {
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // ---- My programs (record + per-program progress) -------------------------
-  const [record, setRecord] = React.useState<StudentRecord | null>(null);
+  // ---- My programs (enrolled list, in saved order, + per-program progress) -
   const [progressByCode, setProgressByCode] = React.useState<Record<string, RequirementProgress[]>>({});
-  const [myPrograms, setMyPrograms] = React.useState<Map<string, Program>>(new Map());
+  // Authoritative per-program completion, keyed by code, from `GET /api/me`'s
+  // `programs[]` (`_audit.program_progress_summary`) — the single source every
+  // program card shares, so "My programs" summaries can't disagree with a
+  // program's own detail page.
+  const [summaryByCode, setSummaryByCode] = React.useState<Record<string, EnrolledProgramRef>>({});
+  const [myPrograms, setMyPrograms] = React.useState<Program[]>([]);
   const [myLoading, setMyLoading] = React.useState(true);
   const [myError, setMyError] = React.useState<string | null>(null);
+  /**
+   * Result of the last add/remove/reorder attempt. Rendered ABOVE the tab
+   * switch (not inside the "My programs" branch) — the previous `myActionError`
+   * Callout lived only in that branch, so an "Add" pressed on the *Browse* tab
+   * set it and then rendered nothing at all: the reported "clicking Add does
+   * nothing" bug. Every action a guest can reach from Browse must report back
+   * in the view they're actually looking at.
+   */
+  const [actionNotice, setActionNotice] = React.useState<ActionNotice | null>(null);
+  /** No session at all — every `/api/me/*` call 401s. Not an error: accounts
+   * are optional (see App.tsx's "no route guard anywhere" note). */
+  const [isGuest, setIsGuest] = React.useState(false);
+  const [dragCode, setDragCode] = React.useState<string | null>(null);
+  // Scopes the aria-label lookup `focusPriorityButton` does after a keyboard
+  // reorder — see its comment below for why a DOM query is needed at all.
+  const myListRef = React.useRef<HTMLOListElement | null>(null);
 
-  // Student record + requirement progress, once — drives every card's
-  // enrolled/Add-vs-Remove state and the "My programs" tab.
+  // Enrolled programs (in the student's saved order, `GET /api/me/programs`)
+  // + requirement progress, once — drives every card's enrolled/Add-vs-Remove
+  // state and the "My programs" tab.
   React.useEffect(() => {
     let cancelled = false;
     setMyLoading(true);
-    Promise.all([api.getMyRecord(), api.getMyRequirementProgress()])
-      .then(([r, progress]) => {
+    Promise.all([api.getMyPrograms(), api.getMyRequirementProgress(), api.getMyRecord()])
+      .then(([enrolled, progress, record]) => {
         if (cancelled) return;
-        setRecord(r);
         setProgressByCode(progress);
+        setSummaryByCode(Object.fromEntries(record.programs.map((p) => [p.code, p])));
         setMyError(null);
+        // allSettled: one enrolled program's catalog lookup failing (stale
+        // code, transient network blip) shouldn't take down the whole list —
+        // show what resolved and drop the rest, rather than erroring out.
+        return Promise.allSettled(enrolled.map((p) => api.getProgram(p.code))).then((results) => {
+          if (cancelled) return;
+          setMyPrograms(
+            results
+              .map((r) => (r.status === "fulfilled" ? r.value : null))
+              .filter((p): p is Program => p !== null),
+          );
+        });
       })
-      .catch(() => {
-        if (!cancelled) setMyError("Couldn't load your enrolled programs.");
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // A guest has no session, so all three /api/me calls 401 together.
+        // That's the expected signed-out state, not a load failure — show the
+        // sign-up nudge instead of a red "couldn't load" banner.
+        if (isAuthError(err)) {
+          setIsGuest(true);
+          setMyError(null);
+        } else {
+          setMyError("Couldn't load your enrolled programs.");
+        }
       })
       .finally(() => {
         if (!cancelled) setMyLoading(false);
@@ -147,32 +197,11 @@ export default function Programs() {
     };
   }, []);
 
-  // Resolve full Program records for whatever's on the student record.
-  React.useEffect(() => {
-    if (!record) return;
-    let cancelled = false;
-    Promise.all(record.programs.map((p) => api.getProgram(p.code)))
-      .then((results) => {
-        if (cancelled) return;
-        setMyPrograms((prev) => {
-          const next = new Map(prev);
-          for (const p of results) if (p) next.set(p.code, p);
-          return next;
-        });
-      })
-      .catch(() => {
-        // Surfaced via myError above already; nothing further to do.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [record]);
-
   // Subject filter options: distinct departments across the unfiltered catalog.
   React.useEffect(() => {
     let cancelled = false;
     api
-      .getPrograms({})
+      .getAllPrograms()
       .then((all) => {
         if (cancelled) return;
         setSubjectOptions(Array.from(new Set(all.map((p) => p.department).filter(Boolean))).sort());
@@ -215,16 +244,128 @@ export default function Programs() {
     fetchPrograms(next, true);
   }
 
-  function addProgram(program: Program) {
-    setMyPrograms((prev) => new Map(prev).set(program.code, program));
+  async function addProgram(program: Program) {
+    setActionNotice(null);
+    try {
+      await api.addMyProgram(program.code);
+      setMyPrograms((prev) => (prev.some((p) => p.code === program.code) ? prev : [...prev, program]));
+    } catch (err: unknown) {
+      if (isAuthError(err)) {
+        setIsGuest(true);
+        setActionNotice({
+          kind: "guest",
+          title: "Create an account to add programs",
+          message: `Browsing the catalog doesn't need an account, but ${program.code} has to be saved to one before it can count toward your degree audit.`,
+        });
+      } else {
+        setActionNotice({
+          kind: "error",
+          title: "Couldn't update your programs",
+          message: `Couldn't add ${program.code}. It may conflict with a program you're already enrolled in.`,
+        });
+      }
+    }
   }
 
-  function removeProgram(code: string) {
-    setMyPrograms((prev) => {
-      const next = new Map(prev);
-      next.delete(code);
-      return next;
-    });
+  async function removeProgram(code: string) {
+    setActionNotice(null);
+    try {
+      await api.removeMyProgram(code);
+      setMyPrograms((prev) => prev.filter((p) => p.code !== code));
+    } catch (err: unknown) {
+      if (isAuthError(err)) {
+        setIsGuest(true);
+        setActionNotice({
+          kind: "guest",
+          title: "Create an account to manage programs",
+          message: "You're browsing as a guest, so there are no saved programs to remove yet.",
+        });
+      } else {
+        setActionNotice({ kind: "error", title: "Couldn't update your programs", message: `Couldn't remove ${code}. Try again.` });
+      }
+    }
+  }
+
+  // Optimistic reorder: apply locally first (drag/keyboard both feel instant),
+  // then persist; roll back to the prior order if the save fails.
+  async function persistOrder(next: Program[]) {
+    const previous = myPrograms;
+    setMyPrograms(next);
+    setActionNotice(null);
+    try {
+      await api.reorderMyPrograms(next.map((p) => p.code));
+    } catch (err: unknown) {
+      setMyPrograms(previous);
+      if (isAuthError(err)) {
+        setIsGuest(true);
+        setActionNotice({
+          kind: "guest",
+          title: "Create an account to save program priority",
+          message: "Program order is part of your saved record, so it needs an account to stick.",
+        });
+      } else {
+        setActionNotice({ kind: "error", title: "Couldn't update your programs", message: "Couldn't save the new order. Try again." });
+      }
+    }
+  }
+
+  /** Human-readable name for a "Move X up/down" aria-label — the program
+   * title reads better to a screen reader than the raw code. */
+  function programDisplayName(program: Program): string {
+    return program.title || program.code;
+  }
+
+  /**
+   * `IconButton` (ds) doesn't forward a `ref` or pass through arbitrary
+   * props, so the only stable hook into its rendered `<button>` from this
+   * screen is the `aria-label` it already renders — used here, scoped to
+   * `myListRef`, to move focus after a keyboard reorder (see `moveProgram`).
+   */
+  function focusPriorityButton(program: Program, direction: "up" | "down") {
+    const label = `Move ${programDisplayName(program)} ${direction} in priority`;
+    const button = myListRef.current?.querySelector<HTMLButtonElement>(
+      `button[aria-label="${CSS.escape(label)}"]`,
+    );
+    button?.focus();
+  }
+
+  /** Keyboard/touch alternative to dragging (also usable with a mouse). */
+  function moveProgram(code: string, direction: -1 | 1) {
+    const index = myPrograms.findIndex((p) => p.code === code);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= myPrograms.length) return;
+    const next = [...myPrograms];
+    [next[index], next[target]] = [next[target], next[index]];
+    persistOrder(next);
+
+    // The IconButton the user just activated disables itself once the item
+    // lands at that end of the list (top for "up", bottom for "down") — a
+    // disabled button can't hold focus, so without this the browser drops
+    // keyboard focus to <body> right after the move. Redirect focus to the
+    // opposite-direction button on the same row instead, which stays enabled
+    // (the list always has >=2 programs whenever a move is possible).
+    const reachedTop = direction === -1 && target === 0;
+    const reachedBottom = direction === 1 && target === next.length - 1;
+    if (reachedTop || reachedBottom) {
+      const moved = next[target];
+      const oppositeDirection = direction === -1 ? "down" : "up";
+      requestAnimationFrame(() => focusPriorityButton(moved, oppositeDirection));
+    }
+  }
+
+  function dropProgramOn(code: string) {
+    if (!dragCode || dragCode === code) {
+      setDragCode(null);
+      return;
+    }
+    const from = myPrograms.findIndex((p) => p.code === dragCode);
+    const to = myPrograms.findIndex((p) => p.code === code);
+    setDragCode(null);
+    if (from < 0 || to < 0) return;
+    const next = [...myPrograms];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    persistOrder(next);
   }
 
   function clearFilters() {
@@ -233,14 +374,16 @@ export default function Programs() {
     setSubject("");
   }
 
-  const mineList = Array.from(myPrograms.values());
-  const combo = evaluateCombination(mineList, progressByCode);
+  const myProgramCodes = React.useMemo(() => new Set(myPrograms.map((p) => p.code)), [myPrograms]);
+  const combo = evaluateCombination(myPrograms, progressByCode);
   const filtersActive = Boolean(q || type || subject);
 
   function creditsFor(program: Program): { earned: number; total: number } | undefined {
-    const groups = progressByCode[program.code];
-    if (!groups) return undefined;
-    return { earned: groups.reduce((s, g) => s + g.earned, 0), total: program.totalCredits };
+    // One source of truth — the server-computed summary — never a per-group
+    // sum of `earned` (double-counts shared courses) or a raw 0.0 total.
+    const summary = summaryByCode[program.code];
+    if (!summary) return undefined;
+    return { earned: summary.earnedCredits, total: summary.totalCredits };
   }
 
   return (
@@ -252,13 +395,25 @@ export default function Programs() {
       <Tabs
         tabs={[
           { value: "browse", label: "Browse" },
-          { value: "mine", label: `My programs${mineList.length ? ` (${mineList.length})` : ""}` },
+          { value: "mine", label: `My programs${myPrograms.length ? ` (${myPrograms.length})` : ""}` },
         ]}
         active={tab}
         onChange={(v: TabKey) => setTab(v)}
       />
 
       <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Rendered OUTSIDE the tab switch on purpose: "Add" lives on the
+            Browse tab, so its result has to be visible there too (see
+            `actionNotice`'s declaration). */}
+        {actionNotice?.kind === "guest" && (
+          <GuestCallout title={actionNotice.title}>{actionNotice.message}</GuestCallout>
+        )}
+        {actionNotice?.kind === "error" && (
+          <Callout tone="danger" title={actionNotice.title}>
+            {actionNotice.message}
+          </Callout>
+        )}
+
         {tab === "browse" ? (
           <>
             <FilterBar onClear={filtersActive ? clearFilters : undefined}>
@@ -351,7 +506,7 @@ export default function Programs() {
                           department={p.department}
                           earned={cr?.earned}
                           total={cr?.total}
-                          enrolled={myPrograms.has(p.code)}
+                          enrolled={myProgramCodes.has(p.code)}
                           onView={() => navigate(`/programs/${p.code}`)}
                           onAdd={() => addProgram(p)}
                           onRemove={() => removeProgram(p.code)}
@@ -377,7 +532,7 @@ export default function Programs() {
                 {myError}
               </Callout>
             )}
-            {!myError && mineList.length > 0 && (
+            {!myError && myPrograms.length > 0 && (
               <POStCombinationValidator valid={combo.valid} message={combo.message} notes={combo.notes} />
             )}
             {myLoading ? (
@@ -386,34 +541,92 @@ export default function Programs() {
                   <Skeleton key={i} height={78} />
                 ))}
               </div>
-            ) : !myError && mineList.length === 0 ? (
-              <EmptyState
-                icon="graduation-cap"
-                title="No programs yet"
-                description="Add a Specialist, Major, or Minor from Browse to start tracking your degree combination."
-                action={<Button onClick={() => setTab("browse")}>Browse programs</Button>}
-              />
+            ) : !myError && myPrograms.length === 0 ? (
+              isGuest ? (
+                // A guest has no saved record at all — say so plainly instead
+                // of implying they simply haven't picked anything yet.
+                <GuestCallout title="Create an account to keep a program list">
+                  You're browsing as a guest. Search and requirement breakdowns are all open to you, but a saved list
+                  of Specialists, Majors, and Minors needs an account.
+                </GuestCallout>
+              ) : (
+                <EmptyState
+                  icon="graduation-cap"
+                  title="No programs yet"
+                  description="Add a Specialist, Major, or Minor from Browse to start tracking your degree combination."
+                  action={<Button onClick={() => setTab("browse")}>Browse programs</Button>}
+                />
+              )
             ) : (
               !myError && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {mineList.map((p) => {
+                // A native <ol> conveys list membership + position ("item 2
+                // of 3") to screen readers on its own — `aria-live` still
+                // announces reorders without needing `role="status"`, which
+                // would otherwise replace the implicit list role.
+                <ol
+                  ref={myListRef}
+                  aria-live="polite"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                  }}
+                >
+                  {myPrograms.map((p, i) => {
                     const cr = creditsFor(p);
+                    const name = programDisplayName(p);
                     return (
-                      <ProgramCard
+                      <li
                         key={p.code}
-                        code={p.code}
-                        name={p.title}
-                        programType={p.programType || "major"}
-                        department={p.department}
-                        earned={cr?.earned}
-                        total={cr?.total}
-                        enrolled
-                        onView={() => navigate(`/programs/${p.code}`)}
-                        onRemove={() => removeProgram(p.code)}
-                      />
+                        draggable
+                        onDragStart={() => setDragCode(p.code)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => dropProgramOn(p.code)}
+                        onDragEnd={() => setDragCode(null)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          cursor: "grab",
+                          opacity: dragCode === p.code ? 0.5 : 1,
+                        }}
+                      >
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <IconButton
+                            icon="chevron-up"
+                            label={`Move ${name} up in priority`}
+                            size={24}
+                            disabled={i === 0}
+                            onClick={() => moveProgram(p.code, -1)}
+                          />
+                          <IconButton
+                            icon="chevron-down"
+                            label={`Move ${name} down in priority`}
+                            size={24}
+                            disabled={i === myPrograms.length - 1}
+                            onClick={() => moveProgram(p.code, 1)}
+                          />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <ProgramCard
+                            code={p.code}
+                            name={p.title}
+                            programType={p.programType || "major"}
+                            department={p.department}
+                            earned={cr?.earned}
+                            total={cr?.total}
+                            enrolled
+                            onView={() => navigate(`/programs/${p.code}`)}
+                            onRemove={() => removeProgram(p.code)}
+                          />
+                        </div>
+                      </li>
                     );
                   })}
-                </div>
+                </ol>
               )
             )}
           </>

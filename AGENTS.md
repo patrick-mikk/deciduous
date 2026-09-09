@@ -12,7 +12,7 @@ validate it against prerequisites, exclusions, breadth requirements, program
 requirements, and timetable conflicts — using live data from the UofT **Timetable
 Builder** API and the **Academic Calendar**.
 
-Target deployment: `planner.mikkelsen.ca`, a **cPanel Python app** (Passenger WSGI),
+Target deployment: `deciduous.mikkelsen.ca`, a **cPanel Python app** (Passenger WSGI),
 Python **3.12.13**, cPanel **MySQL**. React SPA frontend (built later).
 
 ## Why (design intent)
@@ -51,8 +51,10 @@ docs/                    project-level structured docs (architecture, convention
 design/                  the design package (00-09 + screens/) and Claude Design output
 ```
 
-Current state: **full stack built** — data layer + Flask API + validators + React frontend.
-Remaining: cPanel deploy, timetable-optimizer polish, auth hardening (see docs/roadmap.md).
+Current state: **full stack built** — data layer + Flask API + validators + React frontend,
+including account/auth surface (remember-me sessions, passkeys, recovery codes, profile).
+Remaining: cPanel deploy, timetable-optimizer polish, production hardening
+(see docs/roadmap.md and docs/production-hardening.md).
 
 ## Commands
 
@@ -100,3 +102,4 @@ Remaining: cPanel deploy, timetable-optimizer polish, auth hardening (see docs/r
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Decisions (ADRs): [docs/decisions/](docs/decisions/)
 - Roadmap / phases: [docs/roadmap.md](docs/roadmap.md)
+- cPanel deploy runbook: [docs/deploy-cpanel.md](docs/deploy-cpanel.md)

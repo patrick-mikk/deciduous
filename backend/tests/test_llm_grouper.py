@@ -20,6 +20,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import pytest  # noqa: E402
+import requests  # noqa: E402
+
 from backend.data_sources.llm_grouper import (  # noqa: E402
     GeminiGrouper,
     GroupingResult,
@@ -134,8 +137,10 @@ def test_missing_codes_are_recovered_into_unclassified_group() -> None:
     assert recovered.courses[0].credits == 0.5  # still gets its credit weight
 
 
-def test_missing_api_key_raises() -> None:
-    from backend.data_sources.llm_grouper import LLMGroupingError
+def test_missing_api_key_raises_distinct_configured_error() -> None:
+    """A missing server-side key is a config problem (503), not a bad-gateway
+    (502) -- the frontend must be able to tell the two apart (issue #1)."""
+    from backend.data_sources.llm_grouper import GeminiNotConfiguredError, LLMGroupingError
 
     # Ensure no ambient key leaks in (e.g. a real exported GEMINI_API_KEY).
     saved = os.environ.pop("GEMINI_API_KEY", None)
@@ -144,12 +149,91 @@ def test_missing_api_key_raises() -> None:
         try:
             g.group(_SOURCE_HTML)
         except LLMGroupingError as exc:
-            assert "GEMINI_API_KEY" in str(exc)
+            assert isinstance(exc, GeminiNotConfiguredError)
+            assert exc.status_code == 503
+            assert "not configured" in str(exc).lower()
         else:
             raise AssertionError("expected LLMGroupingError when no API key is set")
     finally:
         if saved is not None:
             os.environ["GEMINI_API_KEY"] = saved
+
+
+def test_http_error_raises_gemini_request_error_with_502() -> None:
+    """A non-2xx HTTP response from Gemini (bad request, quota exhausted after
+    retries, etc.) is a distinct, 502-flavoured error -- not lumped in with a
+    config problem or a parsing problem."""
+    from backend.data_sources.llm_grouper import GeminiRequestError
+
+    class _FakeResponse:
+        status_code = 400
+        text = '{"error": {"message": "invalid argument"}}'
+
+        def json(self):
+            return {"error": {"message": "invalid argument"}}
+
+        def raise_for_status(self):
+            raise requests.HTTPError("400 Client Error", response=self)
+
+    g = GeminiGrouper(api_key="test-key")
+    g._session.post = lambda *a, **k: _FakeResponse()  # type: ignore[assignment]
+    with pytest.raises(GeminiRequestError) as exc_info:
+        g.group(_SOURCE_HTML)
+    assert exc_info.value.status_code == 502
+    assert "rejected the request" in str(exc_info.value).lower()
+
+
+def test_markdown_fenced_json_response_is_parsed() -> None:
+    """Some models wrap structured output in a ```json fence even when
+    responseMimeType=application/json was requested -- the parser must strip
+    it rather than treat the whole response as unparseable."""
+    fenced_text = "```json\n" + json.dumps({
+        "total_credits": 7.0,
+        "groups": [{"heading": "First Year", "credits": 1.0, "is_note": False, "notes": "",
+                    "courses": [_course("GGR172H1")]}],
+    }) + "\n```"
+    payload = {"candidates": [{"content": {"parts": [{"text": fenced_text}]}}]}
+    result = _grouper_returning(payload).group(_SOURCE_HTML)
+    assert result.total_credits == 7.0
+    assert result.groups[0].heading == "First Year"
+    assert "GGR172H1" in _all_codes(result)
+
+
+def test_bare_triple_backtick_fenced_json_response_is_parsed() -> None:
+    """Same as above but with a bare ``` fence (no `json` language tag)."""
+    fenced_text = "```\n" + json.dumps({
+        "total_credits": 0.0,
+        "groups": [{"heading": "Group A", "credits": 0.0, "is_note": False, "notes": "",
+                    "courses": [_course("GGR172H1")]}],
+    }) + "\n```"
+    payload = {"candidates": [{"content": {"parts": [{"text": fenced_text}]}}]}
+    result = _grouper_returning(payload).group(_SOURCE_HTML)
+    assert result.groups[0].heading == "Group A"
+    assert "GGR172H1" in _all_codes(result)
+
+
+def test_truncated_response_raises_gemini_response_error() -> None:
+    """Output cut off mid-JSON (e.g. hit a MAX_TOKENS finish reason) must fail
+    with a distinct, actionable error rather than an unhandled exception."""
+    from backend.data_sources.llm_grouper import GeminiResponseError
+
+    truncated_text = '{"total_credits": 7.0, "groups": [{"heading": "First Year", "cred'
+    payload = {"candidates": [{"content": {"parts": [{"text": truncated_text}]}}]}
+    with pytest.raises(GeminiResponseError) as exc_info:
+        _grouper_returning(payload).group(_SOURCE_HTML)
+    assert exc_info.value.status_code == 502
+    assert "unparseable" in str(exc_info.value).lower()
+
+
+def test_empty_candidates_raises_gemini_response_error() -> None:
+    """A safety-blocked prompt comes back with an empty `candidates` list --
+    must not raise an unhandled IndexError."""
+    from backend.data_sources.llm_grouper import GeminiResponseError
+
+    payload = {"candidates": [], "promptFeedback": {"blockReason": "SAFETY"}}
+    with pytest.raises(GeminiResponseError) as exc_info:
+        _grouper_returning(payload).group(_SOURCE_HTML)
+    assert "SAFETY" in str(exc_info.value)
 
 
 def test_looks_under_segmented_flags_collapsed_programs() -> None:

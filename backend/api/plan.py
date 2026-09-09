@@ -490,6 +490,14 @@ def _program_progress(
     results: list[dict[str, Any]] = []
     subject_types: dict[str, list[str]] = {}
     all_required_codes: set[str] = set()
+    combo_issues: list[dict[str, Any]] = []
+    # Count of enrolled programs whose requirements actually parsed (nonzero
+    # course codes) — the distinct-credits check below only makes sense
+    # across these; an unparsed program already gets its own
+    # "requirements_unparsed" warning above, so folding its (necessarily
+    # empty) `required_codes` into the union would silently understate the
+    # total instead of just leaving it out with an explanation.
+    parsed_program_count = 0
 
     for enrolment in enrolments:
         type_subject = _program_type_subject(enrolment.program_code)
@@ -506,6 +514,15 @@ def _program_progress(
                     "cached": False,
                     "groups": [],
                 }
+            )
+            combo_issues.append(
+                _issue(
+                    "warning",
+                    "requirements_unparsed",
+                    enrolment.program_code,
+                    f"Requirements for {enrolment.program_title or enrolment.program_code} "
+                    "haven't been parsed yet — program progress can't be checked.",
+                )
             )
             continue
 
@@ -524,6 +541,23 @@ def _program_progress(
                     "coveredCourses": covered,
                 }
             )
+
+        if not required_codes:
+            # Cached, but no course codes were ever extracted from its
+            # completion-requirement text (neither the heuristic parse nor a
+            # Gemini reparse succeeded) — false success otherwise: every group
+            # would read 0/0 with no indication anything is actually unknown.
+            combo_issues.append(
+                _issue(
+                    "warning",
+                    "requirements_unparsed",
+                    enrolment.program_code,
+                    f"Requirements for {program.title or enrolment.program_code} "
+                    "haven't been parsed yet — program progress can't be checked.",
+                )
+            )
+        else:
+            parsed_program_count += 1
 
         all_required_codes |= required_codes
         covered_program_codes = required_codes & owned_codes
@@ -547,7 +581,6 @@ def _program_progress(
             }
         )
 
-    combo_issues: list[dict[str, Any]] = []
     for subject, types in subject_types.items():
         if len(types) > 1:
             combo_issues.append(
@@ -561,7 +594,7 @@ def _program_progress(
                 )
             )
 
-    if len(enrolments) >= 2:
+    if parsed_program_count >= 2:
         distinct_credits = sum(_credit(code) for code in (all_required_codes & owned_codes))
         if distinct_credits < 12.0:
             combo_issues.append(
