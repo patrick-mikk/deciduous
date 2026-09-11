@@ -14,9 +14,17 @@ Behaviour by mode
   returns False. Callers treat email as best-effort — signup/reset flows
   still succeed; only the email doesn't go out. This keeps local dev working
   with zero mail setup.
-- **Configured**: the message is handed to a daemon thread so the request
-  isn't blocked on the SMTP round-trip (~0.5–2s to a cPanel relay). Failures
-  are logged, never raised into the request.
+- **Configured**: delivered *synchronously*, inside the request, over
+  verified TLS. Failures are logged and reported as False, never raised into
+  the request.
+
+Why not a background thread: this used to hand the message to a
+`threading.Thread(daemon=True)` so the request wouldn't wait on SMTP. Under
+LiteSpeed's `lswsgi` (the production host) the worker is reaped as soon as the
+response is written, and a daemon thread is killed with it — the same mechanism
+that silently broke the deploy webhook while it returned 202
+(docs/auto-deploy.md, "Why the webhook alone isn't enough"). The relay is on the
+same host, so the wait is short; `_SMTP_TIMEOUT` bounds the worst case.
 
 Delivery is at-most-once and unacknowledged by design — anything critical
 must also work without the email arriving (e.g. reset links can be re-requested).
@@ -25,7 +33,7 @@ must also work without the email arriving (e.g. reset links can be re-requested)
 from __future__ import annotations
 
 import smtplib
-import threading
+import ssl
 from email.message import EmailMessage
 from email.utils import formataddr
 
@@ -33,6 +41,10 @@ from flask import Flask, current_app
 
 #: TESTING-mode capture: list of `EmailMessage`s "sent" since process start.
 outbox: list[EmailMessage] = []
+
+#: Seconds before giving up on the relay. Delivery now blocks the request, so
+#: this is the ceiling on how long a stalled mail server can hold up a signup.
+_SMTP_TIMEOUT = 10
 
 
 def _build_message(cfg: dict, to: str, subject: str, text_body: str) -> EmailMessage:
@@ -44,27 +56,38 @@ def _build_message(cfg: dict, to: str, subject: str, text_body: str) -> EmailMes
     return msg
 
 
-def _deliver(cfg: dict, msg: EmailMessage, logger) -> None:
-    """Blocking SMTP delivery. Runs on a daemon thread — must not touch Flask
-    request/app context (everything needed is in the plain `cfg` dict)."""
+def _deliver(cfg: dict, msg: EmailMessage, logger) -> bool:
+    """Blocking SMTP delivery; True if the relay accepted the message.
+
+    TLS is verified against the system CA store. smtplib's own default context
+    does *not* check the certificate, and this connection carries the mailbox
+    password — so pass an explicit `ssl.create_default_context()` on both the
+    implicit-SSL (465) and STARTTLS paths.
+    """
+    host, port = cfg["SMTP_HOST"], int(cfg["SMTP_PORT"])
+    context = ssl.create_default_context()
     try:
-        if int(cfg["SMTP_PORT"]) == 465:
-            server: smtplib.SMTP = smtplib.SMTP_SSL(cfg["SMTP_HOST"], int(cfg["SMTP_PORT"]), timeout=20)
+        if port == 465:
+            server: smtplib.SMTP = smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT, context=context)
         else:
-            server = smtplib.SMTP(cfg["SMTP_HOST"], int(cfg["SMTP_PORT"]), timeout=20)
-            server.starttls()
-        with server:
+            server = smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT)
+        with server:  # closes the socket even if STARTTLS or login fails
+            if port != 465:
+                server.starttls(context=context)
             if cfg.get("SMTP_USER"):
                 server.login(cfg["SMTP_USER"], cfg.get("SMTP_PASSWORD") or "")
             server.send_message(msg)
         logger.info("Sent email %r to %s", msg["Subject"], msg["To"])
+        return True
     except Exception:  # noqa: BLE001 — best-effort: log, never crash the app
         logger.exception("Failed to send email %r to %s", msg["Subject"], msg["To"])
+        return False
 
 
 def send_email(to: str, subject: str, text_body: str, app: Flask | None = None) -> bool:
-    """Queue one plain-text email. Returns True if it was queued (or captured
-    in TESTING mode), False if SMTP isn't configured. Never raises."""
+    """Send one plain-text email. Returns True if the relay accepted it (or it
+    was captured in TESTING mode); False if SMTP isn't configured or delivery
+    failed. Never raises."""
     app = app or current_app
     cfg = {
         "SMTP_HOST": app.config.get("SMTP_HOST"),
@@ -87,6 +110,4 @@ def send_email(to: str, subject: str, text_body: str, app: Flask | None = None) 
         )
         return False
 
-    msg = _build_message(cfg, to, subject, text_body)
-    threading.Thread(target=_deliver, args=(cfg, msg, app.logger), daemon=True).start()
-    return True
+    return _deliver(cfg, _build_message(cfg, to, subject, text_body), app.logger)

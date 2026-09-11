@@ -93,6 +93,28 @@ def test_resend_verification(client):
     assert resp.get_json().get("alreadyVerified") is True
 
 
+
+@pytest.mark.parametrize(
+    ("smtp_host", "status", "fragment"),
+    [
+        (None, 503, "isn't configured"),  # nothing to retry until an admin acts
+        ("mail.example.test", 502, "Try again"),  # relay refused this attempt
+    ],
+)
+def test_resend_verification_failure_says_why(client, monkeypatch, smtp_host, status, fragment):
+    """send_email reports real delivery now, so a False from it no longer
+    implies "unconfigured" — telling a user to wait for an admin when the relay
+    merely hiccuped (or vice versa) sends them the wrong way."""
+    from backend.api import auth as auth_api
+
+    _signup(client, "unlucky@mail.utoronto.ca")
+    client.application.config["SMTP_HOST"] = smtp_host
+    monkeypatch.setattr(auth_api, "_send_verification_email", lambda user: False)
+
+    resp = client.post("/api/auth/verify/request", headers=_csrf_headers(client))
+    assert resp.status_code == status
+    assert fragment in resp.get_json()["error"]
+
 # ------------------------------------------------------------- email reset
 def test_reset_request_emails_link_and_confirm_resets_password(client):
     email, old_pw, new_pw = "emailreset@mail.utoronto.ca", "correcthorsebattery", "a-whole-new-passw0rd"
