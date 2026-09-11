@@ -45,6 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _INSTANCE_DIR = REPO_ROOT / "backend" / "instance"
 STATE_PATH = _INSTANCE_DIR / "last-deploy.json"
 LOCK_PATH = _INSTANCE_DIR / "deploy.lock"
+LOG_PATH = _INSTANCE_DIR / "deploy.log"
 RESTART_PATH = REPO_ROOT / "tmp" / "restart.txt"
 
 _LOCK_STALE_AFTER = 15 * 60  # seconds
@@ -113,6 +114,34 @@ def read_state() -> dict | None:
         return None
 
 
+def spawn_detached(branch: str) -> None:
+    """Start a deploy in a *detached child process* and return immediately.
+
+    The web path cannot use a background thread. Under LiteSpeed's `lswsgi` the
+    worker is reaped as soon as the response is written, and a
+    `threading.Thread(daemon=True)` is killed with the interpreter — observed
+    dying inside `_acquire_lock` between `os.open` and `os.write`, leaving a
+    0-byte lock file and no state behind, so the deploy never ran at all while
+    the webhook happily returned 202.
+
+    `start_new_session=True` puts the deploy in its own session, so it survives
+    both that reap and the Passenger restart the deploy itself triggers as its
+    final step. Output goes to `backend/instance/deploy.log`; the machine-
+    readable result still lands in `last-deploy.json` for `/api/deploy/status`.
+    """
+    _INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG_PATH, "ab") as log:
+        subprocess.Popen(  # noqa: S603 — fixed argv, no shell
+            [sys.executable, "-m", "backend.scripts.deploy", "--branch", branch],
+            cwd=REPO_ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+            close_fds=True,
+        )
+
+
 def run_deploy(branch: str) -> dict:
     """Execute one deploy of `origin/<branch>`. Returns (and persists) the
     result dict: `{status, fromSha, toSha, startedAt, finishedAt, steps}`,
@@ -159,12 +188,22 @@ def run_deploy(branch: str) -> dict:
         state["toSha"] = new_sha
 
         # Short-circuit ONLY when the checkout is already at the target AND the
-        # last deploy of exactly this SHA fully SUCCEEDED. A deploy that died
+        # last deploy of exactly this SHA already SUCCEEDED. A deploy that died
         # after `git reset` (HEAD already == origin) but before restart must
         # still be retryable — otherwise every retry would report up-to-date
         # and never run pip/schema/restart. All post-reset steps are idempotent.
+        #
+        # "up-to-date" counts as success: it is only ever written *after* a
+        # "deployed" run of this same SHA, so the chain stays anchored on a real
+        # deploy. Accepting only "deployed" made the poller oscillate — the
+        # short-circuit persists status="up-to-date", which then failed this
+        # check on the next tick and forced a full redeploy (schema step and a
+        # Passenger restart) every other run, forever. A genuinely interrupted
+        # deploy leaves "failed" and is still retried.
         already_deployed = bool(
-            prior and prior.get("status") == "deployed" and prior.get("toSha") == new_sha
+            prior
+            and prior.get("status") in ("deployed", "up-to-date")
+            and prior.get("toSha") == new_sha
         )
         if new_sha == old_sha and already_deployed:
             state["status"] = "up-to-date"

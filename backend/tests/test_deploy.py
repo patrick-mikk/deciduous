@@ -1,8 +1,10 @@
-"""Deploy webhook/API tests. The actual git/pip runner
-(`backend/scripts/deploy.py::run_deploy`) is monkeypatched — these tests
+"""Deploy webhook/API tests. The process spawn
+(`backend/scripts/deploy.py::spawn_detached`) is monkeypatched — these tests
 cover everything in front of it: HMAC signature verification, event/branch
 filtering, Bearer auth on the manual/status routes, the off-by-default 503
 when no secret is configured, and CSRF exemption of the webhook path.
+
+`run_deploy`'s own short-circuit logic is covered separately at the bottom.
 """
 
 from __future__ import annotations
@@ -47,15 +49,14 @@ def client():
 
 @pytest.fixture()
 def deploys(monkeypatch):
-    """Capture run_deploy calls instead of touching git; wait_for() joins the
-    webhook's background thread by polling the capture list."""
+    """Capture spawn_detached calls instead of forking a real deploy.
+
+    The spawn is synchronous (it only starts a child), so the recorded calls are
+    visible as soon as the request returns; `wait_for`'s signature is kept so
+    the assertions below read unchanged.
+    """
     calls: list[str] = []
-
-    def _fake_run_deploy(branch: str) -> dict:
-        calls.append(branch)
-        return {"status": "deployed", "branch": branch}
-
-    monkeypatch.setattr(deploy_api, "run_deploy", _fake_run_deploy)
+    monkeypatch.setattr(deploy_api, "spawn_detached", calls.append)
 
     def wait_for(n: int, timeout: float = 2.0) -> list[str]:
         deadline = time.monotonic() + timeout
@@ -168,3 +169,69 @@ def test_everything_503s_without_a_configured_secret():
     assert client.post("/api/deploy/webhook", data=body, headers=_signed_headers(body)).status_code == 503
     assert client.post("/api/deploy/run", headers={"Authorization": f"Bearer {_SECRET}"}).status_code == 503
     assert client.get("/api/deploy/status", headers={"Authorization": f"Bearer {_SECRET}"}).status_code == 503
+
+
+# --- run_deploy short-circuit -------------------------------------------------
+# Regression cover for the cron poller oscillating: the short-circuit persists
+# status="up-to-date", so if only "deployed" counted as a prior success, every
+# other tick did a full redeploy (schema step + Passenger restart) forever.
+
+
+@pytest.fixture()
+def no_side_effects(monkeypatch, tmp_path):
+    """Run run_deploy against temp state with git/pip/restart stubbed out.
+
+    Returns the list of step names each call actually executed, so a
+    short-circuit ("no steps past remote-sha") is distinguishable from a full
+    redeploy ("reset", "init-db", "passenger-restart").
+    """
+    from backend.scripts import deploy as runner
+
+    monkeypatch.setattr(runner, "STATE_PATH", tmp_path / "last-deploy.json")
+    monkeypatch.setattr(runner, "LOCK_PATH", tmp_path / "deploy.lock")
+    monkeypatch.setattr(runner, "RESTART_PATH", tmp_path / "tmp" / "restart.txt")
+    monkeypatch.setattr(runner, "_INSTANCE_DIR", tmp_path)
+    # No DB env -> the schema step is recorded as skipped rather than run.
+    for var in ("DB_HOST", "DB_NAME", "DB_USER"):
+        monkeypatch.delenv(var, raising=False)
+
+    sha = "a" * 40
+
+    def _fake_run(argv, timeout=None):
+        if argv[:2] == ["git", "rev-parse"]:
+            return True, sha
+        if argv[:2] == ["git", "diff"]:
+            return True, ""
+        return True, ""
+
+    monkeypatch.setattr(runner, "_run", _fake_run)
+    return runner, sha
+
+
+def test_up_to_date_prior_does_not_trigger_a_redeploy(no_side_effects):
+    """Two consecutive polls of an unchanged SHA: deploy once, then stay quiet.
+
+    The third poll is the one that regressed — it saw status="up-to-date" and
+    redeployed.
+    """
+    runner, _sha = no_side_effects
+
+    first = runner.run_deploy("deploy")
+    assert first["status"] == "deployed"
+
+    for _ in range(3):
+        again = runner.run_deploy("deploy")
+        assert again["status"] == "up-to-date"
+        step_names = [s["name"] for s in again["steps"]]
+        assert "reset" not in step_names
+        assert "passenger-restart" not in step_names
+
+
+def test_failed_prior_is_still_retried(no_side_effects):
+    """A deploy interrupted after `git reset` must not be mistaken for done."""
+    runner, sha = no_side_effects
+    runner._write_state({"status": "failed", "toSha": sha, "fromSha": sha})
+
+    result = runner.run_deploy("deploy")
+    assert result["status"] == "deployed"
+    assert "passenger-restart" in [s["name"] for s in result["steps"]]

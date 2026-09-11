@@ -177,7 +177,8 @@ itself.
 
 ## Day-to-day
 
-- **Deploy** = merge/push to `main`. Nothing else.
+- **Deploy** = merge/push to `main`. Nothing else. It lands within ~5
+  minutes (webhook immediately, poller as the backstop).
 - **Check the last deploy** (from anywhere):
 
   ```
@@ -196,9 +197,12 @@ itself.
   pipeline deploys the revert. (Force-pushing `main` backwards works too;
   the server hard-resets to whatever `deploy` says.)
 
-## Cron fallback (if the webhook can't reach the server)
+## Cron poller (installed, and load-bearing on LiteSpeed)
 
-The same runner works as a poller — add a cPanel cron job:
+The same runner works as a poller. **On this host it is the primary trigger,
+not a fallback**, because the webhook's 202 does not guarantee a deploy — see
+[Why the webhook alone isn't enough](#why-the-webhook-alone-isnt-enough).
+It is installed:
 
 Use the app's **virtualenv** interpreter (not the system `python3`) so the
 deploy's `pip install` and schema step target the same environment the app
@@ -206,14 +210,24 @@ imports from — the exact path is shown at the top of cPanel → Setup Python A
 (`docs/deploy-cpanel.md` step 9 makes the same point for the cache cron):
 
 ```
-*/5 * * * * cd ~/deciduous && /home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.deploy --if-changed >> ~/deploy-cron.log 2>&1
+*/5 * * * * cd /home/cpaneluser/deciduous && /home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.deploy --if-changed >> /home/cpaneluser/deciduous-data/deploy-cron.log 2>&1
 ```
 
-`--if-changed` is silent when already up to date. The runner calls
-`load_env()` itself, so DB credentials in `~/deciduous/.env` are picked up
-even though cron doesn't inherit the Passenger app's environment. The lock file
-(`backend/instance/deploy.lock`) keeps cron and webhook deploys from
-overlapping; a lock older than 15 minutes is treated as stale and broken.
+`--if-changed` is silent when already up to date, so the log only ever grows
+on a real deploy. Absolute paths throughout, and the `cd` matters for the same
+reason as the cache cron — `python -m backend.scripts...` resolves `backend`
+from the working directory. The runner calls `load_env()` itself, so DB
+credentials in `~/deciduous/.env` are picked up even though cron doesn't inherit
+the Passenger app's environment.
+
+An unchanged poll must stay a true no-op. The short-circuit persists
+`status: "up-to-date"`, so that status has to count as a prior success — when
+only `"deployed"` did, every *other* tick failed the check and ran a full
+redeploy, restarting Passenger every 10 minutes forever
+(`backend/tests/test_deploy.py::test_up_to_date_prior_does_not_trigger_a_redeploy`).
+
+The lock file (`backend/instance/deploy.lock`) keeps cron and webhook deploys
+from overlapping; a lock older than 15 minutes is treated as stale and broken.
 
 ## Failure behaviour
 
@@ -226,6 +240,27 @@ overlapping; a lock older than 15 minutes is treated as stale and broken.
   files on disk with old code in memory; the status endpoint makes that
   visible, and `POST /api/deploy/run` retries the whole sequence.
 - Two triggers race → the second returns `locked` and does nothing.
+
+## Why the webhook alone isn't enough
+
+On this cPanel host the web app runs under LiteSpeed's `lswsgi`, which reaps the
+worker process as soon as the response is written. The webhook therefore cannot
+do the deploy "after replying" inside its own process: the original
+implementation started a `threading.Thread(daemon=True)`, returned 202, and the
+thread was killed with the interpreter *microseconds later* — it died inside
+`_acquire_lock` between `os.open` and `os.write`, leaving a **0-byte lock file**,
+no state, and `origin/deploy` never even fetched. GitHub showed a green 202
+delivery for a deploy that never happened, which is the worst possible failure
+mode: silent and confidently reported as success.
+
+`spawn_detached` (`backend/scripts/deploy.py`) fixes the mechanism — the deploy
+runs in a child process with `start_new_session=True`, so it outlives both the
+worker reap and the Passenger restart it triggers as its own last step.
+
+Keep the cron poller anyway. It is the only trigger that doesn't depend on the
+web app being up: if the app is down, a bad deploy is exactly when you most need
+the next deploy to land, and a webhook into a dead app delivers nothing. Belt
+and braces — the poller is a no-op when the webhook already did the work.
 
 ## What a deploy does NOT do
 

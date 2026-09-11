@@ -8,9 +8,10 @@ the feature is off-by-default):
   the exact scheme GitHub signs with when the webhook is configured with the
   same secret. Only a `push` to the configured `DEPLOY_BRANCH` triggers a
   deploy; everything else is acknowledged and ignored. The deploy itself
-  (`backend/scripts/deploy.py::run_deploy`) runs on a background thread and
-  this responds 202 immediately — GitHub times webhooks out at 10s, a
-  git+pip deploy can take longer.
+  (`backend/scripts/deploy.py`) runs in a *detached child process* and this
+  responds 202 immediately — GitHub times webhooks out at 10s, a git+pip
+  deploy can take longer. It must be a separate process, not a thread: see
+  `spawn_detached`'s docstring for why a thread silently never runs here.
 - `POST /api/deploy/run` — manual trigger for the same deploy, authenticated
   with `Authorization: Bearer <DEPLOY_WEBHOOK_SECRET>` (e.g. from `curl` or a
   phone, when you don't want to wait for a push).
@@ -28,12 +29,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets as _secrets
-import threading
 
 from flask import Blueprint, current_app, jsonify, request
 
 from backend.api import json_error
-from backend.scripts.deploy import read_state, run_deploy
+from backend.scripts.deploy import read_state, spawn_detached
 
 bp = Blueprint("deploy", __name__, url_prefix="/api/deploy")
 
@@ -62,13 +62,14 @@ def _bearer_authorized() -> bool:
 
 
 def _start_background_deploy(branch: str) -> None:
-    logger = current_app.logger
+    """Hand the deploy to a detached process; never blocks the request.
 
-    def _target() -> None:
-        result = run_deploy(branch)
-        logger.info("Deploy finished: %s (%s -> %s)", result.get("status"), result.get("fromSha", "?")[:9], result.get("toSha", "?")[:9])
-
-    threading.Thread(target=_target, daemon=True).start()
+    Indirection kept so the routes read the same either way (and so tests have
+    a single seam to patch). The result is not logged here — the child outlives
+    this process, and records its own outcome in `last-deploy.json`.
+    """
+    current_app.logger.info("Deploy requested for branch %s", branch)
+    spawn_detached(branch)
 
 
 @bp.route("/webhook", methods=["POST"])
