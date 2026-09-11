@@ -240,6 +240,9 @@ from overlapping; a lock older than 15 minutes is treated as stale and broken.
   files on disk with old code in memory; the status endpoint makes that
   visible, and `POST /api/deploy/run` retries the whole sequence.
 - Two triggers race → the second returns `locked` and does nothing.
+- A trigger dies *after* taking the lock → every later trigger reports `locked`
+  until the lock goes stale, which is longer than you'd guess: see
+  [When `locked` is a lie](#when-locked-is-a-lie).
 
 ## Why the webhook alone isn't enough
 
@@ -261,6 +264,39 @@ Keep the cron poller anyway. It is the only trigger that doesn't depend on the
 web app being up: if the app is down, a bad deploy is exactly when you most need
 the next deploy to land, and a webhook into a dead app delivers nothing. Belt
 and braces — the poller is a no-op when the webhook already did the work.
+
+## When `locked` is a lie
+
+`_LOCK_STALE_AFTER` is 15 minutes and the poller runs every 5, so a trigger that
+dies while holding the lock silently swallows **three consecutive polls**. The
+log says `"status": "locked", "detail": "Another deploy is in progress."` about a
+deploy that is not in progress and never will be.
+
+That asymmetry nearly stopped the `spawn_detached` fix from shipping at all. The
+old thread-based code on the server took a lock, died, and the lock blocked the
+poller — so the deploy carrying the fix *for that exact bug* couldn't land. It is
+a genuine bootstrap deadlock, and breaking it took one manual intervention:
+
+```
+cd ~/deciduous
+cat backend/instance/deploy.lock                      # the holder's PID
+ps -p "$(cat backend/instance/deploy.lock)"           # alive? then leave it alone
+unlink backend/instance/deploy.lock                   # only if it is dead
+/home/cpaneluser/virtualenv/deciduous/3.12/bin/python -m backend.scripts.deploy
+```
+
+**A 0-byte lock file is always a dead one.** The PID is written immediately after
+the file is created (`_acquire_lock`), so an empty lock means the holder was
+killed in the microseconds between the two — which is the signature of the
+`lswsgi` worker reap described above, not of a slow deploy.
+
+Check the holder before removing a lock. A real deploy can legitimately hold it
+for minutes (a `pip install` of the full requirements file is the slow step), and
+deleting it mid-flight lets a second deploy `git reset` the tree under the first.
+
+This should now be self-correcting — the detached child no longer dies and
+releases the lock in its `finally` — so a `locked` poll with nothing running is
+worth treating as a signal that something new is wrong, not as routine.
 
 ## What a deploy does NOT do
 
