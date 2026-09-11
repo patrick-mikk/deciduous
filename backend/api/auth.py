@@ -437,7 +437,12 @@ def resend_verification():
         return jsonify({"ok": True, "alreadyVerified": True})
     sent = _send_verification_email(user)
     if not sent:
-        return json_error("Email sending isn't configured on this server yet.", 503)
+        # send_email now reports real delivery, so False has two causes that
+        # need different messages: nothing configured (permanent until an admin
+        # acts) vs. the relay refusing this attempt (worth retrying).
+        if not current_app.config.get("SMTP_HOST"):
+            return json_error("Email sending isn't configured on this server yet.", 503)
+        return json_error("Couldn't send the verification email just now. Try again in a few minutes.", 502)
     return jsonify({"ok": True})
 
 

@@ -181,6 +181,20 @@ startup if either is unset while `FLASK_ENV=production` (`backend/config_app.py:
 | `GEMINI_API_KEY` | optional | see below |
 | `GEMINI_MODEL` | no | overrides the grouper's default Gemini model (`backend/data_sources/llm_grouper.py:260`); only meaningful with `GEMINI_API_KEY` set |
 
+**Checking SMTP without sending anything.** A login-only round trip proves the
+host, port, TLS certificate and credentials, and puts no message in anyone's
+inbox (`getpass` keeps the password out of shell history):
+
+```
+python -c "import smtplib,ssl,getpass; s=smtplib.SMTP_SSL('mail.mikkelsen.ca',465,context=ssl.create_default_context()); s.login('deciduous@mikkelsen.ca', getpass.getpass()); print('login ok'); s.quit()"
+```
+
+Delivery is synchronous, inside the request, over verified TLS
+(`backend/mailer.py`). It used to go out on a daemon thread, which LiteSpeed's
+`lswsgi` kills as soon as the response is written — the same failure as the
+deploy webhook ([auto-deploy.md](auto-deploy.md#why-the-webhook-alone-isnt-enough)).
+On this host the relay is local and a send costs about 0.2 s.
+
 > **Warning — `DATA_KEY_PEPPER` is one-way.** It's mixed into every user's
 > wrapped per-user data key (ADR-0005). Changing it after real users exist
 > makes their encrypted transcript/plan data **permanently unreadable** — there
